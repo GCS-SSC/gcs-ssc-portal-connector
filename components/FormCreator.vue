@@ -9,7 +9,7 @@ import FormCondition from './FormCondition.vue'
 import FormTest from './FormTest.vue'
 
 const props = defineProps<{ agencyId: string; disabled?: boolean }>()
-const { locale } = useExtensionI18n(messages)
+const { locale, t } = useExtensionI18n(messages)
 const language = computed<'en' | 'fr'>(() => locale.value === 'fr' ? 'fr' : 'en')
 const tr = (en: string, fr: string) => language.value === 'fr' ? fr : en
 const api = useExtensionApi('gcs-ssc-portal-connector')
@@ -29,6 +29,7 @@ const definition = ref<AdvancedSurvey>(newDefinition())
 const saved = ref(JSON.stringify(definition.value))
 const dirty = computed(() => JSON.stringify(definition.value) !== saved.value)
 const disabled = computed(() => props.disabled || busy.value)
+const invalidLimit = (value: number, max: number) => !Number.isInteger(value) || value < 1 || value > max
 const endpoint = computed(() => `/agencies/${props.agencyId}/forms`)
 const uid = (prefix: string) => `${prefix}_${crypto.randomUUID().replaceAll('-', '').slice(0, 12)}`
 type Container = AdvancedSurvey['pages'][number] | AdvancedGroup
@@ -356,13 +357,17 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; streams.val
                 <ExtensionButton :disabled="disabled" @click="moveQuestion(1)">{{ tr('Move down', 'Descendre') }}</ExtensionButton>
                 <ExtensionButton :disabled="disabled" @click="removeQuestion">{{ tr('Remove question', 'Retirer la question') }}</ExtensionButton>
               </div>
-              <ExtensionFormField v-if="selectedQuestion.type === 'text'" :label="tr('Maximum characters', 'Nombre maximal de caractères')" name="maxLength">
-                <ExtensionInput :model-value="String(selectedQuestion.maxLength)" name="maxLength" type="number" min="1" max="5000" :disabled="disabled"
+              <ExtensionFormField v-if="selectedQuestion.type === 'text'" :label="tr('Maximum characters', 'Nombre maximal de caractères')" name="maxLength" required>
+                <ExtensionInput :model-value="selectedQuestion.maxLength || ''" name="maxLength" type="number" min="1" max="5000" required :disabled="disabled"
+                  :aria-invalid="invalidLimit(selectedQuestion.maxLength, 5000)" :aria-describedby="invalidLimit(selectedQuestion.maxLength, 5000) ? 'maxLength-error' : undefined"
                   @update:model-value="selectedQuestion.maxLength = Number($event)" />
+                <p v-if="invalidLimit(selectedQuestion.maxLength, 5000)" id="maxLength-error" role="alert" class="text-sm text-error">{{ t('maxLengthInvalid') }}</p>
               </ExtensionFormField>
-              <ExtensionFormField v-if="selectedQuestion.type === 'list'" :label="tr('Maximum items', 'Nombre maximal d’éléments')" name="maxItems">
-                <ExtensionInput :model-value="String(selectedQuestion.maxItems)" name="maxItems" type="number" min="1" max="50" :disabled="disabled"
+              <ExtensionFormField v-if="selectedQuestion.type === 'list'" :label="tr('Maximum items', 'Nombre maximal d’éléments')" name="maxItems" required>
+                <ExtensionInput :model-value="selectedQuestion.maxItems || ''" name="maxItems" type="number" min="1" max="50" required :disabled="disabled"
+                  :aria-invalid="invalidLimit(selectedQuestion.maxItems, 50)" :aria-describedby="invalidLimit(selectedQuestion.maxItems, 50) ? 'maxItems-error' : undefined"
                   @update:model-value="selectedQuestion.maxItems = Number($event)" />
+                <p v-if="invalidLimit(selectedQuestion.maxItems, 50)" id="maxItems-error" role="alert" class="text-sm text-error">{{ t('maxItemsInvalid') }}</p>
               </ExtensionFormField>
               <template v-if="selectedQuestion.type === 'select'">
                 <h5 class="font-medium">{{ tr('Choices', 'Choix') }}</h5>
@@ -399,9 +404,11 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; streams.val
                 </div>
               </template>
               <template v-if="selectedQuestion.type === 'table'">
-                <ExtensionFormField :label="tr('Maximum rows', 'Nombre maximal de lignes')" name="maxRows">
-                  <ExtensionInput :model-value="String(selectedQuestion.maxRows)" name="maxRows" type="number" min="1" max="100" :disabled="disabled"
+                <ExtensionFormField :label="tr('Maximum rows', 'Nombre maximal de lignes')" name="maxRows" required>
+                  <ExtensionInput :model-value="selectedQuestion.maxRows || ''" name="maxRows" type="number" min="1" max="100" required :disabled="disabled"
+                    :aria-invalid="invalidLimit(selectedQuestion.maxRows, 100)" :aria-describedby="invalidLimit(selectedQuestion.maxRows, 100) ? 'maxRows-error' : undefined"
                     @update:model-value="selectedQuestion.maxRows = Number($event)" />
+                  <p v-if="invalidLimit(selectedQuestion.maxRows, 100)" id="maxRows-error" role="alert" class="text-sm text-error">{{ t('maxRowsInvalid') }}</p>
                 </ExtensionFormField>
                 <h5 class="font-medium">{{ tr('Table columns', 'Colonnes du tableau') }}</h5>
                 <div v-for="(column, index) in selectedQuestion.columns" :key="index" class="grid gap-2 border-b border-default pb-3 sm:grid-cols-2">
@@ -426,8 +433,9 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; streams.val
                 <ExtensionFormField :label="tr('Template — use {{field_id}} for values', 'Modèle — utilisez {{field_id}} pour les valeurs')" name="computedTemplate" required>
                   <ExtensionInput v-model="selectedQuestion.template" name="computedTemplate" required :disabled="disabled" />
                 </ExtensionFormField>
-                <p class="text-sm">{{ tr('Available source fields', 'Champs sources disponibles') }}</p>
-                <div class="grid gap-2 sm:grid-cols-2">
+                <p id="computed-sources-label" class="text-sm font-medium">{{ t('computedSourcesRequired') }}</p>
+                <p id="computed-sources-help" class="text-sm">{{ t('computedSourcesHelp') }}</p>
+                <div role="group" aria-labelledby="computed-sources-label" aria-describedby="computed-sources-help" class="grid gap-2 sm:grid-cols-2">
                   <ExtensionCheckbox v-for="item in questionOptions.filter((item) => item.value !== selectedQuestion!.id)" :key="item.value"
                     :label="item.label" :disabled="disabled" :model-value="selectedQuestion.sourceIds.includes(item.value)"
                     @update:model-value="selectedQuestion!.type === 'computed' && (selectedQuestion.sourceIds = $event

@@ -49,10 +49,14 @@ const selectedOrganizationId = ref('')
 const organizationCode = ref('')
 watch(selectedOrganizationId, (value) => { if (value) organizationCode.value = '' })
 watch(organizationCode, (value) => { if (value.trim()) selectedOrganizationId.value = '' })
+const organizationId = computed(() => organizationCode.value.trim() || selectedOrganizationId.value)
+const validOrganizationId = computed(() => /^N-[A-HJKMNP-Z2-9]{5,}$/.test(organizationId.value))
 const proponentSearch = ref('')
 const proponents = ref<Array<{ id: string; egcs_ar_legalname_en: string; egcs_ar_legalname_fr: string }>>([])
 const selectedProponentId = ref('')
 const pushCount = ref('10')
+const validPushCount = computed(() => Number.isInteger(Number(pushCount.value)) && pushCount.value.trim() !== ''
+  && Number(pushCount.value) >= 1 && Number(pushCount.value) <= 100)
 const form = ref({ portalUrl: '', portalAgencyId: '', portalKey: '' })
 const busy = ref(false)
 const loading = ref(true)
@@ -121,12 +125,11 @@ const searchProponents = async () => {
   } catch { error.value = t('proponentSearchFailed') }
 }
 const verifyOrganization = async () => {
-  const organizationId = organizationCode.value.trim() || selectedOrganizationId.value
-  if (locked.value || busy.value || !/^N-[A-HJKMNP-Z2-9]{5,}$/.test(organizationId) || !selectedProponentId.value) return
+  if (locked.value || busy.value || !validOrganizationId.value || !selectedProponentId.value) return
   busy.value = true; error.value = ''; message.value = ''
   try {
     const result = await api.post<{ queued: number }>(`${endpoint.value}/organizations`, {
-      organizationId, proponentId: selectedProponentId.value
+      organizationId: organizationId.value, proponentId: selectedProponentId.value
     })
     message.value = t('verifiedQueued', { count: result.queued })
     await loadManagement()
@@ -145,7 +148,7 @@ const initialSync = async () => {
 }
 const pushBacklog = async () => {
   const limit = Number(pushCount.value)
-  if (locked.value || busy.value || !Number.isInteger(limit) || limit < 1 || limit > 100) return
+  if (locked.value || busy.value || !validPushCount.value) return
   busy.value = true; error.value = ''; message.value = ''
   try {
     const result = await api.post<{ results: Array<{ delivered: boolean }> }>(`${endpoint.value}/backlog`, { limit })
@@ -269,13 +272,16 @@ watch(() => props.agencyId, searchProponents)
     <section class="space-y-4 border-t border-default pt-6">
       <div><h3 class="text-base font-semibold text-highlighted">{{ t('organizationLinks') }}</h3>
         <p class="mt-1 text-sm text-muted">{{ t('organizationLinksHelp') }}</p></div>
-      <div class="grid gap-4 sm:grid-cols-2">
+      <p id="portal-organization-rule" class="text-sm font-medium">{{ t('organizationChoiceRequired') }}</p>
+      <div role="group" :aria-label="t('portalOrganization')" aria-describedby="portal-organization-rule" class="grid gap-4 sm:grid-cols-2">
         <ExtensionFormField :label="t('portalOrganization')" name="portalOrganization">
-          <ExtensionSelect v-model="selectedOrganizationId" :items="organizationOptions" value-key="value" name="portalOrganization" :disabled="locked || busy || !connection" :placeholder="t('chooseOrganization')" />
+          <ExtensionSelect v-model="selectedOrganizationId" :items="organizationOptions" value-key="value" name="portalOrganization" aria-describedby="portal-organization-rule" :disabled="locked || busy || !connection" :placeholder="t('chooseOrganization')" />
         </ExtensionFormField>
         <ExtensionFormField :label="t('organizationCode')" name="organizationCode" :description="t('organizationCodeHelp')">
-          <ExtensionInput v-model="organizationCode" name="organizationCode" :disabled="locked || busy || !connection" placeholder="N-ABCDE" />
+          <ExtensionInput v-model="organizationCode" name="organizationCode" :aria-describedby="organizationCode.trim() && !validOrganizationId ? 'portal-organization-rule portal-organization-error' : 'portal-organization-rule'"
+            :aria-invalid="organizationCode.trim() && !validOrganizationId" :disabled="locked || busy || !connection" placeholder="N-ABCDE" />
         </ExtensionFormField>
+        <p v-if="organizationCode.trim() && !validOrganizationId" id="portal-organization-error" role="alert" class="text-sm text-error">{{ t('organizationCodeInvalid') }}</p>
         <div class="space-y-2">
           <ExtensionFormField :label="t('findProponent')" name="proponentSearch">
             <ExtensionInput v-model="proponentSearch" name="proponentSearch" :disabled="locked || busy" @keydown.enter.prevent="searchProponents" />
@@ -286,7 +292,7 @@ watch(() => props.agencyId, searchProponents)
       <ExtensionFormField :label="t('gcsProponent')" name="proponentId" required>
         <ExtensionSelect v-model="selectedProponentId" :items="proponentOptions" value-key="value" name="proponentId" :disabled="locked || busy || !connection" :placeholder="t('chooseProponent')" />
       </ExtensionFormField>
-      <ExtensionButton :disabled="locked || busy || !connection || !(organizationCode.trim() || selectedOrganizationId) || !selectedProponentId" :loading="busy" @click="verifyOrganization">{{ t('verifyOrganization') }}</ExtensionButton>
+      <ExtensionButton :disabled="locked || busy || !connection || !validOrganizationId || !selectedProponentId" :loading="busy" @click="verifyOrganization">{{ t('verifyOrganization') }}</ExtensionButton>
       <ul v-if="organizations.some(item => item.verified)" class="divide-y divide-default text-sm">
         <li v-for="item in organizations.filter(row => row.verified)" :key="item.id" class="py-2">{{ item.name }} ({{ item.id }}) → #{{ item.foreignApplicantRecipientId }}</li>
       </ul>
@@ -327,10 +333,12 @@ watch(() => props.agencyId, searchProponents)
         <p class="mt-1 text-sm text-muted">{{ t('outboundBacklogHelp') }}</p></div>
       <ExtensionButton :disabled="locked || busy || !connection" :loading="busy" @click="initialSync">{{ t('initialSync') }}</ExtensionButton>
       <div class="flex items-end gap-3">
-        <ExtensionFormField :label="t('pushCount')" name="pushCount">
-          <ExtensionInput v-model="pushCount" name="pushCount" type="number" min="1" max="100" :disabled="locked || busy || !connection" />
+        <ExtensionFormField :label="t('pushCount')" name="pushCount" required>
+          <ExtensionInput v-model="pushCount" name="pushCount" type="number" min="1" max="100" required :disabled="locked || busy || !connection"
+            :aria-invalid="!validPushCount" :aria-describedby="!validPushCount ? 'push-count-error' : undefined" />
+          <p v-if="!validPushCount" id="push-count-error" role="alert" class="text-sm text-error">{{ t('pushCountInvalid') }}</p>
         </ExtensionFormField>
-        <ExtensionButton :disabled="locked || busy || !connection" :loading="busy" @click="pushBacklog">{{ t('pushBacklog') }}</ExtensionButton>
+        <ExtensionButton :disabled="locked || busy || !connection || !validPushCount" :loading="busy" @click="pushBacklog">{{ t('pushBacklog') }}</ExtensionButton>
       </div>
       <p v-if="!backlog.length" class="text-sm text-muted">{{ t('emptyBacklog') }}</p>
       <ul v-else class="divide-y divide-default text-sm">

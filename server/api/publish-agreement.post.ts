@@ -1,1 +1,4 @@
-export { publicationRoute as default } from '../publish-agreement.ts'
+import { defineGcsExtensionRouteHandler } from '@gcs-ssc/extensions/server'
+import { publishAgreement } from '../publish-agreement.ts'
+
+export default defineGcsExtensionRouteHandler(publishAgreement)

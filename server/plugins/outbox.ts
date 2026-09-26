@@ -28,6 +28,8 @@ export default defineGcsExtensionNitroPlugin((nitroApp) => {
   })
   nitroApp.hooks.hook('close', () => clearInterval(timer))
   nitroApp.hooks.hook('gcs-extension:scheduled-minute', async (payload: GcsExtensionScheduledMinutePayload) => {
+    // Headless workers can run scheduled tasks before handling any HTTP response.
+    database ??= asConnectorDb(payload.db)
     const pulled = await pullDueAgencies(asConnectorDb(payload.db))
     for (const agency of pulled.results) {
       if (agency.error) continue
