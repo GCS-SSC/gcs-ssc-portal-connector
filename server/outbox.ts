@@ -2,6 +2,7 @@ import { sql } from 'kysely'
 import type { GcsExtensionRouteContext } from '@gcs-ssc/extensions/server'
 import { agencyIdFromContext, authorizedWrite } from './authorization.ts'
 import { asConnectorDb, type ConnectorDb } from './db.ts'
+import { enabledPortalAgency } from './enablement.ts'
 import { publishAgreementCore } from './publish-agreement.ts'
 import { drainOutcomeOutbox } from './outcomes.ts'
 import { retryDelaySeconds } from './retry.ts'
@@ -35,6 +36,7 @@ export const drainOutbox = async (db: ConnectorDb, limit: number, agencyId?: str
       WHERE id = (
         SELECT id FROM extensions.gcs_portal_outbox
         WHERE state <> 'delivered' AND next_attempt_at <= now()
+          AND ${enabledPortalAgency('extensions.gcs_portal_outbox.agency_id')}
           AND (${agencyId ?? null}::bigint IS NULL OR agency_id = ${agencyId ?? null}::bigint)
         ORDER BY next_attempt_at, id FOR UPDATE SKIP LOCKED LIMIT 1
       ) RETURNING id::text, agency_id::text, agreement_id::text,

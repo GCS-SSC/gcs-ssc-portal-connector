@@ -1,6 +1,7 @@
 import { sql } from 'kysely'
 import { readPortalCredentialFromDb } from './connection.ts'
 import { asConnectorDb, type ConnectorDb } from './db.ts'
+import { enabledPortalAgency } from './enablement.ts'
 import { retryDelaySeconds } from './retry.ts'
 import { createPortalClient } from './portal-client.ts'
 
@@ -27,6 +28,7 @@ export const drainOutcomeOutbox = async (db: ConnectorDb, limit: number, agencyI
         next_attempt_at=now()+interval '2 minutes', updated_at=now()
       WHERE id=(SELECT id FROM extensions.gcs_portal_outcome_outbox
         WHERE state <> 'delivered' AND next_attempt_at <= now()
+          AND ${enabledPortalAgency('extensions.gcs_portal_outcome_outbox.agency_id')}
           AND (${agencyId ?? null}::bigint IS NULL OR agency_id=${agencyId ?? null}::bigint)
         ORDER BY next_attempt_at,id FOR UPDATE SKIP LOCKED LIMIT 1)
       RETURNING id::text,agency_id::text,receipt_id::text,attempts

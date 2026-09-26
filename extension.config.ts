@@ -2,7 +2,7 @@ import { defineGcsAuditOwnership, defineGcsExtension } from '@gcs-ssc/extensions
 
 export default defineGcsExtension({
   key: 'gcs-ssc-portal-connector',
-  sdkVersion: '^0.3.2',
+  sdkVersion: '^0.3.3',
   name: { en: 'Organization portal', fr: 'Portail des organismes' },
   description: {
     en: 'Publishes funding data and receives organization submissions.',

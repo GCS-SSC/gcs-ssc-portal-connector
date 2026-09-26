@@ -1,6 +1,7 @@
 import { sql } from 'kysely'
 import { readPortalCredentialFromDb } from './connection.ts'
 import { asConnectorDb, type ConnectorDb } from './db.ts'
+import { enabledPortalAgency } from './enablement.ts'
 import { createPortalClient } from './portal-client.ts'
 
 interface DueConnection { agency_id: string; portal_agency_id: string; portal_url: string }
@@ -15,6 +16,7 @@ export const pullDueAgencies = async (db: ConnectorDb) => {
       WHERE agency_id=(
         SELECT agency_id FROM extensions.gcs_portal_connection
         WHERE pull_interval_minutes IS NOT NULL AND
+          ${enabledPortalAgency('extensions.gcs_portal_connection.agency_id')} AND
           (pull_lease_until IS NULL OR pull_lease_until <= now()) AND (
           last_pull_at IS NULL OR last_pull_at <= now() - (pull_interval_minutes || ' minutes')::interval
         ) ORDER BY last_pull_at NULLS FIRST, agency_id FOR UPDATE SKIP LOCKED LIMIT 1
