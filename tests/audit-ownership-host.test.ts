@@ -17,6 +17,8 @@ const concreteRows = [
   { table: 'extensions.gcs_portal_receipt', row: { id: '1002', agency_id: '22' }, agencies: ['22'] },
   { table: 'extensions.gcs_portal_publication', row: { id: '1003', agency_id: '11' }, agencies: ['11'] },
   { table: 'extensions.gcs_portal_identity', row: { id: '1004', agency_id: '22' }, agencies: ['22'] },
+  { table: 'extensions.gcs_portal_organization', row: { id: '1008', agency_id: '11', portal_organization_id: 'N-ABCDE' }, agencies: ['11'] },
+  { table: 'extensions.gcs_portal_verification', row: { id: '1009', portal_organization_id: 'N-ABCDE', proponent_id: '44' }, agencies: [] },
   { table: 'extensions.gcs_portal_outbox', row: { id: '1005', agency_id: '11' }, agencies: ['11'] },
   { table: 'extensions.gcs_portal_inbox', row: { id: '1006', agency_id: '22' }, agencies: ['22'] },
   { table: 'extensions.gcs_portal_outcome_outbox', row: { id: '1007', agency_id: '11' }, agencies: ['11'] }

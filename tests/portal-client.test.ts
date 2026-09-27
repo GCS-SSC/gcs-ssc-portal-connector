@@ -57,4 +57,17 @@ describe('portal transport', () => {
     await expect(client.publishItemStatus('C-ABCDE', 'C-ABCDE-Y-ABCDE', '92', null))
       .rejects.toThrow('another GCS record')
   })
+
+  it('loads a paginated Portal organization choice with description, owner and counts', async () => {
+    const transport = vi.fn(async () => Response.json({ organizations: [{
+      id: 'N-ABCDE', name: 'Example', description: 'Community group', active: true,
+      verified: false, ownerName: 'Alex', ownerEmail: 'alex@example.ca',
+      memberCount: 4, agreementCount: 2, foreignApplicantRecipientId: null
+    }], nextAfter: 'N-ABCDE' })) as unknown as typeof fetch
+    const result = await createPortalClient(connection, transport).organizations('N-AAAAA')
+    expect(result.organizations[0]).toMatchObject({ description: 'Community group', ownerName: 'Alex',
+      ownerEmail: 'alex@example.ca', memberCount: 4, agreementCount: 2 })
+    expect(String(vi.mocked(transport).mock.calls[0]?.[0])).toBe(
+      'https://portal.example.test/api/government/agencies/G-ABCDE/organizations?after=N-AAAAA')
+  })
 })

@@ -14,15 +14,39 @@ export default defineGcsExtension({
     'agency-only-configuration', 'configuration-access', 'server-handlers',
     'server-handler-rbac', 'migrations', 'extension-secrets', 'audit-ownership',
     'agency-config', 'extension-ui', 'extension-api-client', 'host-api-client',
-    'scheduled-agreement-import', 'extension-lifecycle-hooks'
+    'scheduled-agreement-import', 'extension-lifecycle-hooks', 'agency-workspace', 'entity-tabs'
   ],
-  admin: { agency: { path: './components/PortalConnection.vue' } },
+  admin: {
+    agency: { path: './components/PortalConnection.vue' },
+    agencyWorkspace: {
+      label: { en: 'Portal', fr: 'Portail' }, icon: 'i-lucide-panel-left',
+      tabs: [
+        { id: 'connection', label: { en: 'Connection', fr: 'Connexion' }, icon: 'i-lucide-plug' },
+        { id: 'verification', label: { en: 'Organization verification', fr: 'Vérification des organismes' }, icon: 'i-lucide-badge-check' },
+        { id: 'statuses', label: { en: 'Statuses', fr: 'Statuts' }, icon: 'i-lucide-list-checks' },
+        { id: 'queue', label: { en: 'Portal sync queue', fr: 'File de synchronisation' }, icon: 'i-lucide-list-ordered' },
+        { id: 'delivery', label: { en: 'Portal delivery', fr: 'Livraison au portail' }, icon: 'i-lucide-truck' },
+        { id: 'forms', label: { en: 'Forms', fr: 'Formulaires' }, icon: 'i-lucide-list' }
+      ]
+    }
+  },
+  client: {
+    tabs: [{
+      id: 'verification', target: 'proponent',
+      label: { en: 'Verification', fr: 'Vérification' }, icon: 'i-lucide-badge-check',
+      rbac: { subject: 'applicant_recipient', action: 'read' },
+      agencyConfigVisibility: { key: 'portalProponentVerificationAccess', values: ['manager', 'contributor'] },
+      path: './components/ProponentVerification.vue'
+    }]
+  },
   nitroPlugin: './server/plugins/outbox.ts',
   auditOwnership: defineGcsAuditOwnership([
     { table: 'extensions.gcs_portal_connection', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
     { table: 'extensions.gcs_portal_receipt', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
     { table: 'extensions.gcs_portal_publication', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
     { table: 'extensions.gcs_portal_identity', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
+    { table: 'extensions.gcs_portal_organization', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
+    { table: 'extensions.gcs_portal_verification', owner: { kind: 'global', reason: 'A verified Portal organization maps to one GCS Proponent across all agencies.' } },
     { table: 'extensions.gcs_portal_outbox', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
     { table: 'extensions.gcs_portal_inbox', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
     { table: 'extensions.gcs_portal_outcome_outbox', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } }
@@ -33,7 +57,9 @@ export default defineGcsExtension({
     { path: './server/migrations/0003_sync_queue.ts' },
     { path: './server/migrations/0004_status_and_pull_settings.ts' },
     { path: './server/migrations/0005_inbound_queue.ts' },
-    { path: './server/migrations/0006_outcome_queue.ts' }
+    { path: './server/migrations/0006_outcome_queue.ts' },
+    { path: './server/migrations/0007_organization_verification.ts' },
+    { path: './server/migrations/0008_entity_status_settings.ts' }
   ],
   serverHandlers: [
     {
@@ -48,7 +74,7 @@ export default defineGcsExtension({
     },
     {
       route: '/agencies/[agencyId]/forms', method: 'post',
-      rbac: { subject: 'agency', action: 'update', agency: { param: 'agencyId' } },
+      rbac: { subject: 'agency', action: 'delete', agency: { param: 'agencyId' } },
       path: './server/api/forms.post.ts'
     },
     {
@@ -62,8 +88,13 @@ export default defineGcsExtension({
       path: './server/api/connection.put.ts'
     },
     {
+      route: '/agencies/[agencyId]/connection-test', method: 'post',
+      rbac: { subject: 'agency', action: 'delete', agency: { param: 'agencyId' } },
+      path: './server/api/connection-test.post.ts'
+    },
+    {
       route: '/agencies/[agencyId]/sync', method: 'post',
-      rbac: { subject: 'agency', action: 'update', agency: { param: 'agencyId' } },
+      rbac: { subject: 'agency', action: 'delete', agency: { param: 'agencyId' } },
       path: './server/api/sync.post.ts'
     },
     {
@@ -78,8 +109,18 @@ export default defineGcsExtension({
     },
     {
       route: '/agencies/[agencyId]/organizations', method: 'post',
-      rbac: { subject: 'agency', action: 'update', agency: { param: 'agencyId' } },
+      rbac: { subject: 'agency', action: 'delete', agency: { param: 'agencyId' } },
       path: './server/api/organizations.post.ts'
+    },
+    {
+      route: '/agencies/[agencyId]/proponents/[proponentId]/verification', method: 'post',
+      rbac: { subject: 'applicant_recipient', action: 'update', entity: { target: 'proponent', param: 'proponentId' } },
+      path: './server/api/proponent-verification.post.ts'
+    },
+    {
+      route: '/agencies/[agencyId]/organization-sync', method: 'post',
+      rbac: { subject: 'agency', action: 'delete', agency: { param: 'agencyId' } },
+      path: './server/api/organization-sync.post.ts'
     },
     {
       route: '/agencies/[agencyId]/settings', method: 'get',
@@ -88,22 +129,22 @@ export default defineGcsExtension({
     },
     {
       route: '/agencies/[agencyId]/settings', method: 'put',
-      rbac: { subject: 'agency', action: 'update', agency: { param: 'agencyId' } },
+      rbac: { subject: 'agency', action: 'delete', agency: { param: 'agencyId' } },
       path: './server/api/settings.put.ts'
     },
     {
       route: '/agencies/[agencyId]/initial-sync', method: 'post',
-      rbac: { subject: 'agency', action: 'update', agency: { param: 'agencyId' } },
+      rbac: { subject: 'agency', action: 'delete', agency: { param: 'agencyId' } },
       path: './server/api/initial-sync.post.ts'
     },
     {
       route: '/agencies/[agencyId]/backlog', method: 'post',
-      rbac: { subject: 'agency', action: 'update', agency: { param: 'agencyId' } },
+      rbac: { subject: 'agency', action: 'delete', agency: { param: 'agencyId' } },
       path: './server/api/backlog.post.ts'
     },
     {
       route: '/agencies/[agencyId]/publish-agreement', method: 'post',
-      rbac: { subject: 'agency', action: 'update', agency: { param: 'agencyId' } },
+      rbac: { subject: 'agency', action: 'delete', agency: { param: 'agencyId' } },
       path: './server/api/publish-agreement.post.ts'
     },
     {

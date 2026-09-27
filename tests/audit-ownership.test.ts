@@ -8,13 +8,15 @@ const expectedOwnedTables = [
   'gcs_portal_receipt',
   'gcs_portal_publication',
   'gcs_portal_identity',
+  'gcs_portal_organization',
+  'gcs_portal_verification',
   'gcs_portal_outbox',
   'gcs_portal_inbox',
   'gcs_portal_outcome_outbox'
 ].map(table => `extensions.${table}`).sort()
 
 describe('portal connector audit ownership', () => {
-  it('declares each extension-created table as owned by its concrete Agency column', () => {
+  it('declares agency-owned tables and the app-wide verification table', () => {
     const migrationsDirectory = fileURLToPath(new URL('../server/migrations/', import.meta.url))
     const created = readdirSync(migrationsDirectory).flatMap(file => {
       const source = readFileSync(new URL(`../server/migrations/${file}`, import.meta.url), 'utf8')
@@ -24,9 +26,11 @@ describe('portal connector audit ownership', () => {
 
     expect(created).toEqual(expectedOwnedTables)
     expect(extension.auditOwnership?.map(declaration => declaration.table).sort()).toEqual(expectedOwnedTables)
-    for (const declaration of extension.auditOwnership ?? []) {
-      expect(declaration.owner).toEqual({ kind: 'owner', owner: 'agency', column: 'agency_id' })
-    }
+    for (const declaration of extension.auditOwnership ?? []) expect(declaration.owner).toEqual(
+      declaration.table === 'extensions.gcs_portal_verification'
+        ? { kind: 'global', reason: 'A verified Portal organization maps to one GCS Proponent across all agencies.' }
+        : { kind: 'owner', owner: 'agency', column: 'agency_id' }
+    )
   })
 
   it('leaves host infrastructure outside the connector declaration for global fallback', () => {

@@ -15,13 +15,18 @@ const tr = (en: string, fr: string) => language.value === 'fr' ? fr : en
 const api = useExtensionApi('gcs-ssc-portal-connector')
 type Summary = { id: string; revision: number; title: { en: string; fr: string }; updatedAt: string }
 type Stream = { id: string; nameEn: string; nameFr: string }
-type Agreement = { id: string; organizationId: string; nameEn: string; nameFr: string; agreementNumber: string }
+type Program = { id: string; nameEn: string; nameFr: string }
+type Agreement = { id: string; organizationId: string; streamId: string; nameEn: string; nameFr: string; agreementNumber: string }
+type Organization = { id: string; proponentId: string; name: string }
 type Call = { id: string; surveyId: string | null; surveyRevision: number | null; published: boolean }
-const surveys = ref<Summary[]>([]), streams = ref<Stream[]>([]), agreements = ref<Agreement[]>([]), calls = ref<Call[]>([])
+const surveys = ref<Summary[]>([]), programs = ref<Program[]>([]), streams = ref<Stream[]>([])
+const agreements = ref<Agreement[]>([]), organizations = ref<Organization[]>([]), calls = ref<Call[]>([])
 const formId = ref(''), revision = ref(0), selectedContainerId = ref('page_1'), selectedQuestionId = ref('')
 const tab = ref<'edit' | 'test' | 'publish'>('edit')
 const busy = ref(false), loading = ref(false), error = ref(''), message = ref('')
 const streamId = ref(''), agreementId = ref(''), startDate = ref(''), endDate = ref('')
+const publicationScope = ref<'agreement' | 'program' | 'stream' | 'organization'>('agreement')
+const programId = ref(''), batchStreamId = ref(''), organizationId = ref('')
 const newDefinition = (): AdvancedSurvey => ({ schemaVersion: 3,
   title: { en: '', fr: '' }, questions: [], pages: [{ id: 'page_1', title: { en: 'Page 1', fr: 'Page 1' },
     questionIds: [], groups: [], branches: [] }] })
@@ -75,9 +80,10 @@ const destinationOptions = computed(() => [
 const load = async () => {
   loading.value = true; error.value = ''
   try {
-    const result = await api.get<{ surveys: Summary[]; streams: Stream[]; agreements: Agreement[]; calls: Call[] }>(endpoint.value)
-    surveys.value = result.surveys; streams.value = result.streams
-    agreements.value = result.agreements; calls.value = result.calls
+    const result = await api.get<{ surveys: Summary[]; programs: Program[]; streams: Stream[];
+      agreements: Agreement[]; organizations: Organization[]; calls: Call[] }>(endpoint.value)
+    surveys.value = result.surveys; programs.value = result.programs; streams.value = result.streams
+    agreements.value = result.agreements; organizations.value = result.organizations; calls.value = result.calls
   } catch { error.value = tr('Forms could not be loaded. Check the portal connection.', 'Impossible de charger les formulaires. Vérifiez la connexion au portail.') }
   finally { loading.value = false }
 }
@@ -123,18 +129,23 @@ const save = async () => {
   } catch { error.value = tr('Save failed. Reload if another editor saved a newer revision.', 'Échec de l’enregistrement. Rechargez si une autre version a été enregistrée.') }
   finally { busy.value = false }
 }
-const publish = async (action: 'publishCall' | 'publishAgreement') => {
+const publish = async (action: 'publishCall' | 'publishAgreement' | 'publishScope' | 'publishOrganization') => {
   if (disabled.value || !formId.value || dirty.value) return
   busy.value = true; error.value = ''; message.value = ''
   try {
+    const common = { surveyId: formId.value, revision: revision.value }
     const body = action === 'publishCall'
-      ? { action, surveyId: formId.value, revision: revision.value, streamId: streamId.value, startDate: startDate.value, endDate: endDate.value }
-      : { action, surveyId: formId.value, revision: revision.value, agreementId: agreementId.value,
-          organizationId: agreements.value.find((item) => item.id === agreementId.value)?.organizationId }
+      ? { action, ...common, streamId: streamId.value, startDate: startDate.value, endDate: endDate.value }
+      : action === 'publishAgreement'
+        ? { action, ...common, agreementId: agreementId.value,
+            organizationId: agreements.value.find((item) => item.id === agreementId.value)?.organizationId }
+        : action === 'publishOrganization'
+          ? { action, ...common, organizationId: organizationId.value }
+          : { action, ...common, scope: publicationScope.value, scopeId: publicationScope.value === 'program' ? programId.value : batchStreamId.value }
     await api.post(endpoint.value, body)
     message.value = action === 'publishCall'
       ? tr('The funding opportunity and form are published in the portal.', 'L’occasion de financement et le formulaire sont publiés dans le portail.')
-      : tr('The form is published for the Agreement organization.', 'Le formulaire est publié pour l’organisme de l’accord.')
+      : t('formPublished')
     await load()
   } catch { error.value = tr('Publication failed. Check the selected target, dates, and saved revision.', 'Échec de la publication. Vérifiez la cible, les dates et la version enregistrée.') }
   finally { busy.value = false }
@@ -240,14 +251,15 @@ const setDestination = (page: AdvancedSurvey['pages'][number], index: number, va
 const destinationValue = (destination: AdvancedSurvey['pages'][number]['next']) =>
   destination?.kind === 'page' ? destination.pageId : destination?.kind === 'end' ? 'end' : 'next'
 onMounted(load)
-watch(() => props.agencyId, () => { resetForm(); surveys.value = []; streams.value = []; agreements.value = []; calls.value = []; load() })
+watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.value = []; streams.value = [];
+  agreements.value = []; organizations.value = []; calls.value = []; load() })
 </script>
 
 <template>
   <section class="space-y-5 border-t border-default pt-6" aria-label="Form creator">
     <div>
       <h3 class="text-base font-semibold text-highlighted">{{ tr('Form creator', 'Créateur de formulaires') }}</h3>
-      <p class="mt-1 text-sm text-muted">{{ tr('Design, test, and publish revisioned forms for opportunities or verified Agreements.', 'Concevez, testez et publiez des versions de formulaires pour les occasions ou les accords vérifiés.') }}</p>
+      <p class="mt-1 text-sm text-muted">{{ t('formCreatorDescription') }}</p>
     </div>
     <p v-if="loading" role="status">{{ tr('Loading forms…', 'Chargement des formulaires…') }}</p>
     <div class="flex flex-wrap gap-2" role="tablist" :aria-label="tr('Form workflow', 'Étapes du formulaire')">
@@ -497,14 +509,38 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; streams.val
             </ExtensionButton>
           </section>
           <section class="space-y-3 border-t border-default pt-4">
-            <h4 class="font-semibold">{{ tr('Existing Agreement', 'Accord existant') }}</h4>
-            <p class="text-sm text-muted">{{ tr('Only verified, synced Agreement organizations appear here.', 'Seuls les organismes vérifiés et les accords synchronisés figurent ici.') }}</p>
-            <ExtensionFormField :label="tr('Agreement and organization', 'Accord et organisme')" name="formAgreement" required>
-              <ExtensionSelect v-model="agreementId" name="formAgreement" value-key="value" :disabled="disabled"
+            <h4 class="font-semibold">{{ t('formDestinations') }}</h4>
+            <p class="text-sm text-muted">{{ t('formDestinationsHelp') }}</p>
+            <ExtensionFormField :label="t('formPublicationScope')" name="formPublicationScope" required>
+              <ExtensionSelect v-model="publicationScope" name="formPublicationScope" value-key="value" :disabled="disabled" required
+                :items="[
+                  { value: 'agreement', label: t('formScopeAgreement') },
+                  { value: 'program', label: t('formScopeProgram') },
+                  { value: 'stream', label: t('formScopeStream') },
+                  { value: 'organization', label: t('formScopeOrganization') }
+                ]" />
+            </ExtensionFormField>
+            <ExtensionFormField v-if="publicationScope === 'agreement'" :label="tr('Agreement and organization', 'Accord et organisme')" name="formAgreement" required>
+              <ExtensionSelect v-model="agreementId" name="formAgreement" value-key="value" :disabled="disabled" required
                 :items="agreements.map((item) => ({ value: item.id, label: `${item.agreementNumber} · ${item[locale === 'fr' ? 'nameFr' : 'nameEn']} · ${item.organizationId}` }))" />
             </ExtensionFormField>
-            <ExtensionButton :disabled="disabled || dirty || !formId || !agreementId" :loading="busy" @click="publish('publishAgreement')">
-              {{ tr('Publish form to Agreement', 'Publier le formulaire pour l’accord') }}
+            <ExtensionFormField v-else-if="publicationScope === 'program'" :label="t('formProgram')" name="formProgram" required>
+              <ExtensionSelect v-model="programId" name="formProgram" value-key="value" :disabled="disabled" required
+                :items="programs.map((item) => ({ value: item.id, label: item[locale === 'fr' ? 'nameFr' : 'nameEn'] }))" />
+            </ExtensionFormField>
+            <ExtensionFormField v-else-if="publicationScope === 'stream'" :label="t('formStream')" name="formBatchStream" required>
+              <ExtensionSelect v-model="batchStreamId" name="formBatchStream" value-key="value" :disabled="disabled" required
+                :items="streams.map((item) => ({ value: item.id, label: item[locale === 'fr' ? 'nameFr' : 'nameEn'] }))" />
+            </ExtensionFormField>
+            <ExtensionFormField v-else :label="t('formVerifiedOrganization')" name="formOrganization" required>
+              <ExtensionSelect v-model="organizationId" name="formOrganization" value-key="value" :disabled="disabled" required
+                :items="organizations.map((item) => ({ value: item.id, label: `${item.name} · ${item.id}` }))" />
+            </ExtensionFormField>
+            <ExtensionButton :disabled="disabled || dirty || !formId || (publicationScope === 'agreement' && !agreementId)
+              || (publicationScope === 'program' && !programId) || (publicationScope === 'stream' && !batchStreamId)
+              || (publicationScope === 'organization' && !organizationId)" :loading="busy"
+              @click="publish(publicationScope === 'agreement' ? 'publishAgreement' : publicationScope === 'organization' ? 'publishOrganization' : 'publishScope')">
+              {{ t('formPublish') }}
             </ExtensionButton>
           </section>
           <p v-if="calls.some((call) => call.surveyId === formId && call.published)" class="text-sm text-success">

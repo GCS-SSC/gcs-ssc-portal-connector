@@ -83,6 +83,15 @@ export const saveConnection = async (context: GcsExtensionRouteContext) => {
   return getConnection(context)
 }
 
+/** Checks proposed connection details without persisting the URL or credential. */
+export const testConnection = async (context: GcsExtensionRouteContext) => {
+  const input = connectionInput.parse(await context.readBody())
+  const agencyId = agencyIdFromContext(context)
+  const key = input.portalKey ?? await readPortalCredential(context, agencyId)
+  await createPortalClient({ portalUrl: input.portalUrl, portalAgencyId: input.portalAgencyId, key }).structure()
+  return { connected: true }
+}
+
 export const readPortalCredential = async (context: GcsExtensionRouteContext, agencyId: string): Promise<string> => {
   return readPortalCredentialFromDb(asConnectorDb(context.db), agencyId)
 }

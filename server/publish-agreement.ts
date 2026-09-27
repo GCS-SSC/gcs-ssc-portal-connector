@@ -30,6 +30,10 @@ export const publishAgreement = async (context: GcsExtensionRouteContext) => {
       .executeTakeFirst()
     if (!identity || identity.proponent_id !== input.proponentId)
       throw new Error('Verify the portal organization and recipient before publishing.')
+    const activeLink = await transaction.selectFrom('extensions.gcs_portal_verification')
+      .select('portal_organization_id').where('portal_organization_id', '=', input.portalOrganizationId)
+      .where('proponent_id', '=', input.proponentId).where('portal_active', '=', true).executeTakeFirst()
+    if (!activeLink) throw new Error('The linked Portal organization is inactive.')
     const agreement = await projectAgreement(transaction, agencyId, input.agreementId, input.proponentId)
     const authorizeAgreement = context.writeAuthorization?.lockAndAuthorizeAgreement
     if (!authorizeAgreement || !(await authorizeAgreement(transaction, {
@@ -42,6 +46,10 @@ export const publishAgreement = async (context: GcsExtensionRouteContext) => {
 export const publishAgreementCore = async (
   db: ConnectorDb, agencyId: string, input: z.infer<typeof publicationInput>
 ) => {
+  const activeLink = await db.selectFrom('extensions.gcs_portal_verification')
+    .select('portal_organization_id').where('portal_organization_id', '=', input.portalOrganizationId)
+    .where('proponent_id', '=', input.proponentId).where('portal_active', '=', true).executeTakeFirst()
+  if (!activeLink) throw new Error('The linked Portal organization is inactive.')
   const connection = await db.selectFrom('extensions.gcs_portal_connection').selectAll()
     .where('agency_id', '=', agencyId).executeTakeFirst()
   if (!connection) throw new Error('Connect an organization portal before publishing.')

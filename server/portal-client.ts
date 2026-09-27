@@ -90,10 +90,16 @@ export const createPortalClient = (connection: PortalConnection, transport: type
       `calls/${encodeURIComponent(id)}/survey`, 'PUT', { surveyId, revision }),
     publishCall: async (id: string) => await request(`calls/${encodeURIComponent(id)}/publication`,
       'PATCH', { published: true }),
-    organizations: async (search?: string) => z.object({ organizations: z.array(z.object({
-      id: z.string(), name: z.string(), active: z.boolean(), verified: z.boolean(),
-      foreignApplicantRecipientId: z.string().nullable()
-    })) }).parse(await request(`agencies/${encodeURIComponent(connection.portalAgencyId)}/organizations${search ? `?search=${encodeURIComponent(search)}` : ''}`)),
+    organizations: async (after?: string) => z.object({
+      organizations: z.array(z.object({
+        id: z.string(), name: z.string(), description: z.string(), active: z.boolean(), verified: z.boolean(),
+        ownerName: z.string(), ownerEmail: z.email(),
+        memberCount: z.coerce.number().int().nonnegative(),
+        agreementCount: z.coerce.number().int().nonnegative(),
+        foreignApplicantRecipientId: z.string().nullable()
+      })),
+      nextAfter: z.string().nullable()
+    }).parse(await request(`agencies/${encodeURIComponent(connection.portalAgencyId)}/organizations${after ? `?after=${encodeURIComponent(after)}` : ''}`)),
     verifyOrganization: async (organizationId: string, proponentId: string) => await request(
       `agencies/${encodeURIComponent(connection.portalAgencyId)}/organizations/${encodeURIComponent(organizationId)}/verify`,
       'POST', { foreignApplicantRecipientId: proponentId }

@@ -13,7 +13,7 @@ interface OutcomeSource {
   gcs_entity_type: string
   portal_url: string
   portal_agency_id: string
-  portal_status_ids: string[]
+  entity_status_ids: { claim: string[]; forecast: string[]; funding_application: string[]; other_form: string[] }
   status_id: string | null
   status_en: string | null
   status_fr: string | null
@@ -38,7 +38,7 @@ export const drainOutcomeOutbox = async (db: ConnectorDb, limit: number, agencyI
       const source = (await sql<OutcomeSource>`
         SELECT receipt.submission_id,receipt.item_submission_id,
           receipt.gcs_entity_id::text,receipt.gcs_entity_type,
-          connection.portal_url,connection.portal_agency_id,connection.portal_status_ids,
+          connection.portal_url,connection.portal_agency_id,connection.entity_status_ids,
           status.id::text AS status_id,status.egcs_cn_name_en AS status_en,
           status.egcs_cn_name_fr AS status_fr,status.egcs_cn_color AS status_colour
         FROM extensions.gcs_portal_receipt receipt
@@ -52,7 +52,9 @@ export const drainOutcomeOutbox = async (db: ConnectorDb, limit: number, agencyI
         WHERE receipt.id=${row.receipt_id}::bigint AND receipt.state='imported'
       `.execute(db)).rows[0]
       if (!source?.gcs_entity_id) throw new Error('The imported GCS item is unavailable.')
-      const visible = source.status_id && source.portal_status_ids.includes(source.status_id)
+      const selectedIds = source.gcs_entity_type === 'fundingcaseagreementclaim'
+        ? source.entity_status_ids.claim : source.entity_status_ids.forecast
+      const visible = source.status_id && selectedIds.includes(source.status_id)
         && source.status_en && source.status_fr && source.status_colour
         && /^#[0-9a-fA-F]{6}$/.test(source.status_colour)
       const status = visible ? { en: source.status_en!, fr: source.status_fr!, colour: source.status_colour! } : null

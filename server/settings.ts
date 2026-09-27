@@ -5,15 +5,21 @@ import { agencyIdFromContext, authorizedWrite } from './authorization.ts'
 import { asConnectorDb } from './db.ts'
 import { enqueueAllVerifiedAgreements } from './organizations.ts'
 
+const statusIds = z.array(z.string().regex(/^[1-9]\d{0,18}$/)).max(100)
+const entityStatusIds = z.object({
+  claim: statusIds, forecast: statusIds,
+  funding_application: statusIds, other_form: statusIds
+}).strict()
 const inputSchema = z.object({
-  portalStatusIds: z.array(z.string().regex(/^[1-9]\d{0,18}$/)).max(100),
+  portalStatusIds: statusIds,
+  entityStatusIds,
   pullIntervalMinutes: z.union([z.literal(1), z.literal(5), z.literal(15), z.literal(30), z.literal(60), z.null()])
 }).strict()
 
 export const getSettings = async (context: GcsExtensionRouteContext) => {
   const agencyId = agencyIdFromContext(context)
   const connection = await asConnectorDb(context.db).selectFrom('extensions.gcs_portal_connection')
-    .select(['portal_status_ids', 'pull_interval_minutes', 'last_pull_at', 'last_pull_error'])
+    .select(['portal_status_ids', 'entity_status_ids', 'pull_interval_minutes', 'last_pull_at', 'last_pull_error'])
     .where('agency_id', '=', agencyId).executeTakeFirst()
   const statuses = (await sql<{ id: string; name_en: string; name_fr: string }>`
     SELECT id::text, egcs_cn_name_en AS name_en, egcs_cn_name_fr AS name_fr
@@ -22,6 +28,7 @@ export const getSettings = async (context: GcsExtensionRouteContext) => {
   `.execute(asConnectorDb(context.db))).rows
   return { statuses, settings: connection ? {
     portalStatusIds: connection.portal_status_ids,
+    entityStatusIds: connection.entity_status_ids,
     pullIntervalMinutes: connection.pull_interval_minutes,
     lastPullAt: connection.last_pull_at ? new Date(connection.last_pull_at).toISOString() : null,
     lastPullError: connection.last_pull_error
@@ -33,20 +40,29 @@ export const saveSettings = async (context: GcsExtensionRouteContext) => {
   const agencyId = agencyIdFromContext(context)
   await authorizedWrite(context, async (transaction) => {
     const connection = await transaction.selectFrom('extensions.gcs_portal_connection')
-      .select(['agency_id', 'portal_status_ids']).where('agency_id', '=', agencyId).forUpdate().executeTakeFirst()
+      .select(['agency_id', 'portal_status_ids', 'entity_status_ids']).where('agency_id', '=', agencyId).forUpdate().executeTakeFirst()
     if (!connection) throw new Error('Connect the portal first.')
-    const ids = [...new Set(input.portalStatusIds)]
+    const ids = [...new Set([
+      ...input.portalStatusIds,
+      ...Object.values(input.entityStatusIds).flat()
+    ])]
     const available = (await sql<{ id: string }>`SELECT id::text FROM "Common_Status"
       WHERE egcs_cn_agency=${agencyId}::bigint AND id IN (${sql.join(ids.length ? ids.map(id => sql`${id}::bigint`) : [sql`0::bigint`])})
         AND _deleted=false`.execute(transaction)).rows
     if (available.length !== ids.length) throw new Error('One or more statuses are unavailable in this agency.')
+    const agreementIds = [...new Set(input.portalStatusIds)]
+    const nextEntityIds = Object.fromEntries(Object.entries(input.entityStatusIds)
+      .map(([key, values]) => [key, [...new Set(values)]])) as z.infer<typeof entityStatusIds>
     await transaction.updateTable('extensions.gcs_portal_connection').set({
-      portal_status_ids: sql`${JSON.stringify(ids)}::jsonb`,
+      portal_status_ids: sql`${JSON.stringify(agreementIds)}::jsonb`,
+      entity_status_ids: sql`${JSON.stringify(nextEntityIds)}::jsonb`,
       pull_interval_minutes: input.pullIntervalMinutes,
       updated_at: new Date()
     }).where('agency_id', '=', agencyId).execute()
-    if (JSON.stringify([...connection.portal_status_ids].sort()) !== JSON.stringify([...ids].sort())) {
+    if (JSON.stringify([...connection.portal_status_ids].sort()) !== JSON.stringify([...agreementIds].sort())) {
       await enqueueAllVerifiedAgreements(transaction, agencyId)
+    }
+    if (JSON.stringify(connection.entity_status_ids) !== JSON.stringify(nextEntityIds)) {
       await sql`
       INSERT INTO extensions.gcs_portal_outcome_outbox (agency_id,receipt_id,status_id)
       SELECT receipt.agency_id,receipt.id,COALESCE(claim.egcs_fc_status,forecast.egcs_fc_status)

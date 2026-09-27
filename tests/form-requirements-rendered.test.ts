@@ -43,6 +43,17 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
         onChange: (event: Event) => emit('update:modelValue', (event.target as HTMLInputElement).checked) }), props.label])
     }
   })
+  const textarea = defineComponent({
+    props: ['modelValue', 'name', 'required', 'disabled'], emits: ['update:modelValue'],
+    setup(props, { attrs, emit }) {
+      return () => h('textarea', { ...attrs, name: props.name, required: props.required, disabled: props.disabled,
+        value: props.modelValue, onInput: (event: Event) => emit('update:modelValue', (event.target as HTMLTextAreaElement).value) })
+    }
+  })
+  const modal = defineComponent({
+    props: ['open', 'title', 'description'],
+    setup(props, { slots }) { return () => props.open ? h('div', { role: 'dialog' }, [h('h2', props.title), h('p', props.description), slots.body?.()]) : null }
+  })
   const button = defineComponent({
     props: ['label', 'disabled'], emits: ['click'],
     setup(props, { emit, slots }) {
@@ -54,14 +65,16 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
       locale: { get value() { return state.locale } },
       t: (key: string) => translateGcsExtensionMessage(messages, state.locale, key)
     }),
-    useExtensionApi: () => ({ get, post, put: vi.fn() }), useHostApi: () => ({ get: hostGet }),
+    useExtensionApi: () => ({ get, post, put: vi.fn() }), useHostApi: () => ({ get: hostGet, patch: vi.fn() }),
     ExtensionFormField: field, ExtensionInput: input, ExtensionSelect: select,
-    ExtensionCheckbox: checkbox, ExtensionButton: button, ExtensionSaveButton: button
+    ExtensionCheckbox: checkbox, ExtensionButton: button, ExtensionSaveButton: button,
+    ExtensionTextarea: textarea, ExtensionModal: modal
   }
 })
 
 import FormCreator from '../components/FormCreator.vue'
 import PortalConnection from '../components/PortalConnection.vue'
+import ProponentVerification from '../components/ProponentVerification.vue'
 
 const button = (wrapper: ReturnType<typeof mount>, label: string) => wrapper.findAll('button').find(item => item.text() === label)!
 
@@ -71,7 +84,9 @@ beforeEach(() => {
     if (path.endsWith('/forms')) return { surveys: [], streams: [], agreements: [], calls: [] }
     if (path.endsWith('/connection')) return { connection: { portalUrl: 'https://portal.example/', portalAgencyId: 'G-ABCDE', hasCredential: true } }
     if (path.endsWith('/receipts')) return { receipts: [] }
-    if (path.endsWith('/organizations')) return { organizations: [{ id: 'N-ABCDE', name: 'Test organization', active: true, verified: false, foreignApplicantRecipientId: null }] }
+    if (path.endsWith('/organizations')) return { organizations: [{ id: 'N-ABCDE', name: 'Test organization', description: 'Agency description',
+      ownerName: 'Portal owner', ownerEmail: 'owner@example.ca', memberCount: 3, agreementCount: 1,
+      active: true, verified: false, proponentId: null, note: null, verifiedAt: null, syncedAt: new Date().toISOString() }] }
     if (path.endsWith('/backlog')) return { backlog: [], outcomes: [], inbound: [] }
     if (path.endsWith('/settings')) return { statuses: [], settings: null }
     return {}
@@ -120,18 +135,27 @@ describe('connector form requirements', () => {
     }))
   })
 
-  it('associates organization choice guidance and disables invalid organization and backlog actions', async () => {
-    const wrapper = mount(PortalConnection, { props: { agencyId: '1', enabled: true } })
+  it('requires a selected synchronized organization, Proponent and note before irreversible verification', async () => {
+    const wrapper = mount(PortalConnection, { props: { agencyId: '1', section: 'verification', enabled: true } })
     await flushPromises()
-    const group = wrapper.get('[role="group"][aria-describedby="portal-organization-rule"]')
-    expect(wrapper.get('#portal-organization-rule').text()).toContain('(required)')
-    expect(group.get('input[name="organizationCode"]').attributes('aria-describedby')).toBe('portal-organization-rule')
+    expect(wrapper.find('input[name="organizationCode"]').exists()).toBe(false)
+    await button(wrapper, 'Verify and link organization').trigger('click')
+    expect(wrapper.get('[role="dialog"]').text()).toContain('cannot be undone')
+    expect(wrapper.get('select[name="proponentId"]').attributes('required')).toBeDefined()
+    expect(wrapper.get('textarea[name="note"]').attributes('required')).toBeDefined()
+    expect(button(wrapper, 'Confirm permanent link').attributes('disabled')).toBeDefined()
     await wrapper.get('select[name="proponentId"]').setValue('7')
-    await group.get('input[name="organizationCode"]').setValue('bad')
-    expect(wrapper.get('#portal-organization-error').text()).toBe('Enter a valid N- organization code.')
-    expect(button(wrapper, 'Verify and link organization').attributes('disabled')).toBeDefined()
-    await group.get('input[name="organizationCode"]').setValue('N-ABCDE')
-    expect(button(wrapper, 'Verify and link organization').attributes('disabled')).toBeUndefined()
+    await wrapper.get('textarea[name="note"]').setValue('Confirmed against signed correspondence.')
+    expect(button(wrapper, 'Confirm permanent link').attributes('disabled')).toBeUndefined()
+    await button(wrapper, 'Confirm permanent link').trigger('click')
+    expect(post).toHaveBeenCalledWith('/agencies/1/organizations', {
+      organizationId: 'N-ABCDE', proponentId: '7', note: 'Confirmed against signed correspondence.'
+    })
+  })
+
+  it('validates the manually chosen queue push count', async () => {
+    const wrapper = mount(PortalConnection, { props: { agencyId: '1', section: 'queue', enabled: true } })
+    await flushPromises()
     await wrapper.get('input[name="pushCount"]').setValue('')
     expect(wrapper.get('input[name="pushCount"]').attributes('required')).toBeDefined()
     expect(wrapper.get('#push-count-error').text()).toBe('Enter a whole number from 1 to 100.')
@@ -141,14 +165,45 @@ describe('connector form requirements', () => {
     expect(post).toHaveBeenCalledWith('/agencies/1/backlog', { limit: 11 })
   })
 
-  it('renders the new group instruction and validation errors in French', async () => {
+  it('renders verification requirements and queue validation in French', async () => {
     state.locale = 'fr'
-    const wrapper = mount(PortalConnection, { props: { agencyId: '1', enabled: true } })
+    const wrapper = mount(PortalConnection, { props: { agencyId: '1', section: 'verification', enabled: true } })
     await flushPromises()
-    expect(wrapper.get('#portal-organization-rule').text()).toContain('(obligatoire)')
-    await wrapper.get('input[name="organizationCode"]').setValue('bad')
-    expect(wrapper.get('#portal-organization-error').text()).toBe('Saisissez un code d’organisme N- valide.')
+    await button(wrapper, 'Vérifier et lier l’organisme').trigger('click')
+    expect(wrapper.get('[data-field="note"] label').text()).toContain('vérifié')
+    expect(wrapper.get('textarea[name="note"]').attributes('required')).toBeDefined()
+    await wrapper.setProps({ section: 'queue' })
     await wrapper.get('input[name="pushCount"]').setValue('')
     expect(wrapper.get('#push-count-error').text()).toBe('Saisissez un nombre entier de 1 à 100.')
+  })
+})
+
+describe('Proponent verification entry', () => {
+  it('requires a note and confirmation for an assigned Contributor when enabled', async () => {
+    hostGet.mockImplementation(async (path: string) => path.startsWith('/api/extensions/agency/')
+      ? { items: [{ extension: { key: 'gcs-ssc-portal-connector' },
+        config: { portalProponentVerificationAccess: 'contributor' }, canConfigure: false }] }
+      : { can_update: true })
+    const wrapper = mount(ProponentVerification, { props: { agencyId: '1', applicantRecipientId: '7' } })
+    await flushPromises()
+    await button(wrapper, 'Verify and link organization').trigger('click')
+    expect(wrapper.get('[role="dialog"]').text()).toContain('cannot be undone')
+    expect(wrapper.get('textarea[name="note"]').attributes('required')).toBeDefined()
+    expect(button(wrapper, 'Confirm permanent link').attributes('disabled')).toBeDefined()
+    await wrapper.get('textarea[name="note"]').setValue('Verified with agency records.')
+    await button(wrapper, 'Confirm permanent link').trigger('click')
+    expect(post).toHaveBeenCalledWith('/agencies/1/proponents/7/verification', {
+      organizationId: 'N-ABCDE', proponentId: '7', note: 'Verified with agency records.'
+    })
+  })
+
+  it('hides linking from a Contributor when the setting allows Managers only', async () => {
+    hostGet.mockImplementation(async (path: string) => path.startsWith('/api/extensions/agency/')
+      ? { items: [{ extension: { key: 'gcs-ssc-portal-connector' },
+        config: { portalProponentVerificationAccess: 'manager' }, canConfigure: false }] }
+      : { can_update: true })
+    const wrapper = mount(ProponentVerification, { props: { agencyId: '1', applicantRecipientId: '7' } })
+    await flushPromises()
+    expect(button(wrapper, 'Verify and link organization')).toBeUndefined()
   })
 })

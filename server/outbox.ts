@@ -35,7 +35,10 @@ export const drainOutbox = async (db: ConnectorDb, limit: number, agencyId?: str
         next_attempt_at = now() + interval '2 minutes', updated_at = now()
       WHERE id = (
         SELECT id FROM extensions.gcs_portal_outbox
-        WHERE state <> 'delivered' AND next_attempt_at <= now()
+        WHERE state IN ('pending','leased') AND next_attempt_at <= now()
+          AND EXISTS (SELECT 1 FROM extensions.gcs_portal_verification verification
+            WHERE verification.portal_organization_id=extensions.gcs_portal_outbox.portal_organization_id
+              AND verification.portal_active=true)
           AND ${enabledPortalAgency('extensions.gcs_portal_outbox.agency_id')}
           AND (${agencyId ?? null}::bigint IS NULL OR agency_id = ${agencyId ?? null}::bigint)
         ORDER BY next_attempt_at, id FOR UPDATE SKIP LOCKED LIMIT 1
@@ -70,14 +73,15 @@ export const listOutbox = async (context: GcsExtensionRouteContext) => {
   const agencyId = agencyIdFromContext(context)
   const rows = await asConnectorDb(context.db).selectFrom('extensions.gcs_portal_outbox')
     .selectAll().where('agency_id', '=', agencyId)
-    .orderBy(sql<number>`CASE WHEN state='delivered' THEN 1 ELSE 0 END`)
+    .orderBy(sql<number>`CASE state WHEN 'pending' THEN 0 WHEN 'leased' THEN 1
+      WHEN 'cancelled' THEN 2 ELSE 3 END`)
     .orderBy('id', 'desc').limit(100).execute()
   const outcomes = await asConnectorDb(context.db).selectFrom('extensions.gcs_portal_outcome_outbox as outbox')
     .innerJoin('extensions.gcs_portal_receipt as receipt', 'receipt.id', 'outbox.receipt_id')
     .select(['outbox.id', 'outbox.state', 'outbox.attempts', 'outbox.next_attempt_at',
       'outbox.last_error', 'receipt.submission_id', 'receipt.kind'])
     .where('outbox.agency_id', '=', agencyId)
-    .orderBy(sql<number>`CASE WHEN outbox.state='delivered' THEN 1 ELSE 0 END`)
+    .orderBy(sql<number>`CASE outbox.state WHEN 'pending' THEN 0 WHEN 'leased' THEN 1 ELSE 2 END`)
     .orderBy('outbox.id', 'desc').limit(100).execute()
   const inbound = await asConnectorDb(context.db).selectFrom('extensions.gcs_portal_inbox as inbox')
     .leftJoin('extensions.gcs_portal_receipt as receipt', (join) => join
@@ -104,22 +108,35 @@ export const listOutbox = async (context: GcsExtensionRouteContext) => {
 export const pushOutbox = async (context: GcsExtensionRouteContext) => {
   const agencyId = agencyIdFromContext(context)
   const { z } = await import('zod')
-  const input = z.object({ limit: z.number().int().min(1).max(100) }).strict().parse(await context.readBody())
-  await authorizedWrite(context, async () => undefined)
-  await sql`
-    UPDATE extensions.gcs_portal_outbox SET next_attempt_at=now()
-    WHERE id IN (SELECT id FROM extensions.gcs_portal_outbox
-      WHERE agency_id=${agencyId}::bigint AND state='pending'
-      ORDER BY next_attempt_at, id LIMIT ${input.limit})
-  `.execute(asConnectorDb(context.db))
-  await sql`
-    UPDATE extensions.gcs_portal_outcome_outbox SET next_attempt_at=now()
-    WHERE id IN (SELECT id FROM extensions.gcs_portal_outcome_outbox
-      WHERE agency_id=${agencyId}::bigint AND state='pending'
-      ORDER BY next_attempt_at,id LIMIT ${input.limit})
-  `.execute(asConnectorDb(context.db))
-  const agreements = await drainOutbox(asConnectorDb(context.db), input.limit, agencyId)
+  const input = z.union([
+    z.object({ limit: z.number().int().min(1).max(100) }).strict(),
+    z.object({ all: z.literal(true) }).strict()
+  ]).parse(await context.readBody())
+  const all = 'all' in input
+  const limit = all ? 100 : input.limit
+  const pendingCount = await authorizedWrite(context, async transaction => {
+    const count = all ? (await sql<{ count: string }>`
+      SELECT (
+        (SELECT count(*) FROM extensions.gcs_portal_outbox WHERE agency_id=${agencyId}::bigint AND state='pending')
+        + (SELECT count(*) FROM extensions.gcs_portal_outcome_outbox WHERE agency_id=${agencyId}::bigint AND state='pending')
+      )::text AS count
+    `.execute(transaction)).rows[0]?.count : undefined
+    await sql`
+      UPDATE extensions.gcs_portal_outbox SET next_attempt_at=now()
+      WHERE id IN (SELECT id FROM extensions.gcs_portal_outbox
+        WHERE agency_id=${agencyId}::bigint AND state='pending'
+        ORDER BY next_attempt_at, id LIMIT ${all ? 2147483647 : limit})
+    `.execute(transaction)
+    await sql`
+      UPDATE extensions.gcs_portal_outcome_outbox SET next_attempt_at=now()
+      WHERE id IN (SELECT id FROM extensions.gcs_portal_outcome_outbox
+        WHERE agency_id=${agencyId}::bigint AND state='pending'
+        ORDER BY next_attempt_at,id LIMIT ${all ? 2147483647 : limit})
+    `.execute(transaction)
+    return count
+  })
+  const agreements = await drainOutbox(asConnectorDb(context.db), limit, agencyId)
   const outcomes = await drainOutcomeOutbox(asConnectorDb(context.db),
-    Math.max(0, input.limit - agreements.results.length), agencyId)
-  return { results: [...agreements.results, ...outcomes.results] }
+    Math.max(0, limit - agreements.results.length), agencyId)
+  return { results: [...agreements.results, ...outcomes.results], queued: Number(pendingCount ?? 0) }
 }
