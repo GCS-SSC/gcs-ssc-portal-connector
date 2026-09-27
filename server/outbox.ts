@@ -47,12 +47,13 @@ export const drainOutbox = async (db: ConnectorDb, limit: number, agencyId?: str
     `.execute(db)).rows[0]
     if (!row) break
     try {
-      await publishAgreementCore(db, row.agency_id, {
+      const publication = await publishAgreementCore(db, row.agency_id, {
         agreementId: row.agreement_id, proponentId: row.proponent_id,
         portalOrganizationId: row.portal_organization_id
       })
       await sql`UPDATE extensions.gcs_portal_outbox SET state='delivered', delivered_at=now(),
-        updated_at=now(), last_error=NULL WHERE id=${row.id}::bigint
+        updated_at=now(), last_error=NULL,
+        delivery_payload=${JSON.stringify(publication.deliveryPayload)}::jsonb WHERE id=${row.id}::bigint
         AND state='leased' AND attempts=${row.attempts}`.execute(db)
       results.push({ id: row.id, delivered: true })
     } catch (error) {
@@ -103,6 +104,25 @@ export const listOutbox = async (context: GcsExtensionRouteContext) => {
     attempts: row.attempts, nextAttemptAt: new Date(row.next_attempt_at).toISOString(),
     lastError: row.last_error
   })) }
+}
+
+/** Reads one agency-scoped delivery and its recorded payload. */
+export const getOutboxItem = async (context: GcsExtensionRouteContext) => {
+  const agencyId = agencyIdFromContext(context)
+  const itemId = context.params.itemId
+  if (!itemId || !/^[1-9]\d{0,18}$/.test(itemId)) throw new Error('A valid delivery is required.')
+  const db = asConnectorDb(context.db)
+  const row = await db.selectFrom('extensions.gcs_portal_outbox').selectAll()
+    .where('agency_id', '=', agencyId).where('id', '=', itemId).executeTakeFirst()
+  if (!row) throw new Error('Delivery not found for this agency.')
+
+  return {
+    id: String(row.id), agreementId: String(row.agreement_id),
+    organizationId: row.portal_organization_id, state: row.state,
+    attempts: row.attempts, createdAt: new Date(row.created_at).toISOString(),
+    deliveredAt: row.delivered_at ? new Date(row.delivered_at).toISOString() : null,
+    lastError: row.last_error, payload: row.delivery_payload
+  }
 }
 
 export const pushOutbox = async (context: GcsExtensionRouteContext) => {

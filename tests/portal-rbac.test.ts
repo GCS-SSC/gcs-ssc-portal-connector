@@ -11,8 +11,12 @@ describe('Portal workspace authorization contract', () => {
   })
 
   it('allows exact Proponent assignees to link only through the scoped verification handler', () => {
-    const handler = extension.serverHandlers?.find(item => item.route.endsWith('/proponents/[proponentId]/verification'))
-    expect(handler).toMatchObject({ method: 'post',
+    const path = '/proponents/[proponentId]/verification'
+    const read = extension.serverHandlers?.find(item => item.route.endsWith(path) && item.method === 'get')
+    expect(read).toMatchObject({ method: 'get',
+      rbac: { subject: 'applicant_recipient', action: 'read', entity: { target: 'proponent', param: 'proponentId' } } })
+    const write = extension.serverHandlers?.find(item => item.route.endsWith(path) && item.method === 'post')
+    expect(write).toMatchObject({ method: 'post',
       rbac: { subject: 'applicant_recipient', action: 'update', entity: { target: 'proponent', param: 'proponentId' } } })
     expect(extension.client?.tabs?.[0]).toMatchObject({
       target: 'proponent', rbac: { subject: 'applicant_recipient', action: 'read' },

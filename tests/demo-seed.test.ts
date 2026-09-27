@@ -62,10 +62,11 @@ describe('Health Canada Portal demo seed', () => {
     expect((await sql<{ count: string }>`SELECT count(*)::text AS count FROM extensions.gcs_portal_identity`.execute(db)).rows[0]?.count).toBe('0')
   })
 
-  it('refuses a showcase Proponent that the verification route cannot use', async () => {
+  it('accepts a showcase Proponent led by another agency', async () => {
     const db = await fixture()
     await sql`UPDATE "Applicant_Recipient_Profile" SET egcs_ar_leadagency=12`.execute(db)
-    await expect(seedHealthCanadaPortalConnector(db, options)).rejects.toThrow('not Health Canada-owned')
-    expect((await sql<{ count: string }>`SELECT count(*)::text AS count FROM extensions.agency_enablement`.execute(db)).rows[0]?.count).toBe('0')
+    await expect(seedHealthCanadaPortalConnector(db, options)).resolves.toMatchObject({
+      phase: 'restart-required', agencyId: '11', proponentId: '21'
+    })
   })
 })

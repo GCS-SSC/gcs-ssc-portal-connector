@@ -33,10 +33,9 @@ export const seedHealthCanadaPortalConnector = async (
     `.execute(transaction)).rows[0]
     if (!agency) throw new Error('The GCS demo seed must be loaded before the Health Canada Portal fixture.')
 
-    const recipient = (await sql<{ agreement_id: string; proponent_id: string; proponent_name: string; lead_agency_id: string }>`
+    const recipient = (await sql<{ agreement_id: string; proponent_id: string; proponent_name: string }>`
       SELECT agreement.id::text AS agreement_id, proponent.id::text AS proponent_id,
-        proponent.egcs_ar_legalname_en AS proponent_name,
-        proponent.egcs_ar_leadagency::text AS lead_agency_id
+        proponent.egcs_ar_legalname_en AS proponent_name
       FROM "Funding_Case_Agreement_Profile" agreement
       JOIN "Funding_Case_Agreement_Applicant_Recipient" relationship
         ON relationship.egcs_fc_fundingagreement=agreement.id AND relationship._deleted=false
@@ -47,10 +46,6 @@ export const seedHealthCanadaPortalConnector = async (
       LIMIT 1
     `.execute(transaction)).rows[0]
     if (!recipient) throw new Error('The seeded Health Canada showcase Agreement has no Shopify Inc. Proponent.')
-    if (recipient.lead_agency_id !== agency.id) {
-      throw new Error('The showcase Agreement Proponent is not Health Canada-owned; verification would be rejected.')
-    }
-
     const enablement = (await sql<{ id: string; enabled: boolean }>`
       SELECT id::text, enabled FROM extensions.agency_enablement
       WHERE extension_key='gcs-ssc-portal-connector' AND agency_id=${agency.id}::bigint AND _deleted=false

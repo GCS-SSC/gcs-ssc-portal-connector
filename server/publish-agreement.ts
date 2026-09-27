@@ -117,6 +117,7 @@ export const publishAgreementCore = async (
   }
   let portalAgreementId: string
   let revision: number
+  let agreementAction: 'created' | 'updated' | 'unchanged'
   if (previous) {
     if (previous.streamId !== streamId) throw new Error('The published Agreement has a different Stream.')
     portalAgreementId = previous.id
@@ -130,10 +131,15 @@ export const publishAgreementCore = async (
       const updated = z.object({ agreement: z.object({ revision: z.number().int() }) })
         .parse(await client.updateAgreement(previous.id, { expectedRevision: previous.revision, value }))
       revision = updated.agreement.revision
-    } else revision = previous.revision
+      agreementAction = 'updated'
+    } else {
+      revision = previous.revision
+      agreementAction = 'unchanged'
+    }
   } else {
     portalAgreementId = await client.createAgreement(value)
     revision = 1
+    agreementAction = 'created'
   }
   await client.linkOrganization(portalAgreementId, {
     organizationId: input.portalOrganizationId,
@@ -179,7 +185,15 @@ export const publishAgreementCore = async (
       'agency_id', 'gcs_agreement_id', 'portal_organization_id', 'source_digest'
     ]).doNothing()).execute()
   })
-  return { agreementId: portalAgreementId, revision, organizationId: input.portalOrganizationId, setIds: publishedSetIds }
+  return {
+    agreementId: portalAgreementId, revision, organizationId: input.portalOrganizationId, setIds: publishedSetIds,
+    deliveryPayload: {
+      agreementAction,
+      agreement: value,
+      organizationLink: { organizationId: input.portalOrganizationId, foreignApplicantRecipientId: input.proponentId },
+      publishedSetIds
+    }
+  }
 }
 
 export const publicationRoute = defineGcsExtensionRouteHandler(publishAgreement)

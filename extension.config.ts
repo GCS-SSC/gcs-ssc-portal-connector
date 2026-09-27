@@ -33,6 +33,7 @@ export default defineGcsExtension({
   client: {
     tabs: [{
       id: 'verification', target: 'proponent',
+      agencyReadRequired: true,
       label: { en: 'Verification', fr: 'Vérification' }, icon: 'i-lucide-badge-check',
       rbac: { subject: 'applicant_recipient', action: 'read' },
       agencyConfigVisibility: { key: 'portalProponentVerificationAccess', values: ['manager', 'contributor'] },
@@ -59,7 +60,8 @@ export default defineGcsExtension({
     { path: './server/migrations/0005_inbound_queue.ts' },
     { path: './server/migrations/0006_outcome_queue.ts' },
     { path: './server/migrations/0007_organization_verification.ts' },
-    { path: './server/migrations/0008_entity_status_settings.ts' }
+    { path: './server/migrations/0008_entity_status_settings.ts' },
+    { path: './server/migrations/0009_delivery_payload.ts' }
   ],
   serverHandlers: [
     {
@@ -103,6 +105,11 @@ export default defineGcsExtension({
       path: './server/api/backlog.get.ts'
     },
     {
+      route: '/agencies/[agencyId]/backlog/[itemId]', method: 'get',
+      rbac: { subject: 'agency', action: 'read', agency: { param: 'agencyId' } },
+      path: './server/api/backlog-item.get.ts'
+    },
+    {
       route: '/agencies/[agencyId]/organizations', method: 'get',
       rbac: { subject: 'agency', action: 'read', agency: { param: 'agencyId' } },
       path: './server/api/organizations.get.ts'
@@ -111,6 +118,11 @@ export default defineGcsExtension({
       route: '/agencies/[agencyId]/organizations', method: 'post',
       rbac: { subject: 'agency', action: 'delete', agency: { param: 'agencyId' } },
       path: './server/api/organizations.post.ts'
+    },
+    {
+      route: '/agencies/[agencyId]/proponents/[proponentId]/verification', method: 'get',
+      rbac: { subject: 'applicant_recipient', action: 'read', entity: { target: 'proponent', param: 'proponentId' } },
+      path: './server/api/proponent-verification.get.ts'
     },
     {
       route: '/agencies/[agencyId]/proponents/[proponentId]/verification', method: 'post',

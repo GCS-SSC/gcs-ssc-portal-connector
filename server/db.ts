@@ -81,6 +81,7 @@ export interface ConnectorDatabase extends ExtensionSecretDatabase {
     created_at: Generated<Date>
     updated_at: Generated<Date>
     delivered_at: Date | null
+    delivery_payload: unknown | null
   }
   'extensions.gcs_portal_inbox': {
     agency_id: string

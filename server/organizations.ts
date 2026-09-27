@@ -46,6 +46,39 @@ export const listOrganizations = async (context: GcsExtensionRouteContext) => {
   })) }
 }
 
+/** Reads the Proponent's global verification record independently of agency catalog caches. */
+export const listProponentVerifications = async (context: GcsExtensionRouteContext) => {
+  const proponentId = context.params.proponentId
+  if (!proponentId || !/^[1-9]\d{0,18}$/.test(proponentId)) throw new Error('A valid Proponent is required.')
+  const result = await sql<{
+    organizationId: string; organizationName: string; originAgencyId: string
+    note: string | null; verifiedAt: Date; active: boolean
+    verifierName: string | null; verifierEmail: string | null
+  }>`
+    SELECT verification.portal_organization_id AS "organizationId",
+      COALESCE(organization.name, verification.portal_organization_id) AS "organizationName",
+      verification.origin_agency_id::text AS "originAgencyId",
+      verification.verification_note AS note,
+      verification.verified_at AS "verifiedAt",
+      verification.portal_active AS active,
+      verifier.name AS "verifierName",
+      verifier.email AS "verifierEmail"
+    FROM extensions.gcs_portal_verification verification
+    LEFT JOIN LATERAL (
+      SELECT name FROM extensions.gcs_portal_organization
+      WHERE portal_organization_id = verification.portal_organization_id
+      ORDER BY (agency_id = verification.origin_agency_id) DESC, synced_at DESC
+      LIMIT 1
+    ) organization ON true
+    LEFT JOIN "user" verifier ON verifier.id::text = verification.verified_by_user_id
+    WHERE verification.proponent_id = ${proponentId}::bigint
+    ORDER BY verification.portal_active DESC, verification.verified_at DESC
+  `.execute(asConnectorDb(context.db))
+  return { verifications: result.rows.map(row => ({ ...row,
+    verifiedAt: new Date(row.verifiedAt).toISOString()
+  })) }
+}
+
 /** Copies the complete paginated Portal organization catalog into extension-owned storage. */
 export const refreshOrganizations = async (context: GcsExtensionRouteContext) => {
   const agencyId = agencyIdFromContext(context)
@@ -143,9 +176,8 @@ export const verifyOrganization = async (context: GcsExtensionRouteContext, opti
   const proponent = (await sql<{ id: string }>`
     SELECT id::text FROM "Applicant_Recipient_Profile"
     WHERE id=${input.proponentId}::bigint AND _deleted=false
-      AND egcs_ar_leadagency=${agencyId}::bigint
   `.execute(db)).rows[0]
-  if (!proponent) throw new Error('The selected recipient does not belong to this agency.')
+  if (!proponent) throw new Error('The selected recipient does not exist.')
   const selectedOrganization = await db.selectFrom('extensions.gcs_portal_organization')
     .select(['portal_organization_id', 'active'])
     .where('agency_id', '=', agencyId)
