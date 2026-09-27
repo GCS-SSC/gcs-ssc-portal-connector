@@ -1,5 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createPortalClient } from '../server/portal-client.ts'
+import { testConnection } from '../server/connection.ts'
+import type { GcsExtensionRouteContext } from '@gcs-ssc/extensions/server'
+
+afterEach(() => vi.unstubAllGlobals())
 
 const connection = {
   portalUrl: 'https://portal.example.test/',
@@ -8,6 +12,18 @@ const connection = {
 }
 
 describe('portal transport', () => {
+  it('reports a rejected integration key as a user-facing connection error', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: { code: 'INVALID_INTEGRATION_TOKEN' } }, { status: 401 })))
+    const context = {
+      params: { agencyId: '1' },
+      readBody: async () => ({ portalUrl: connection.portalUrl, portalAgencyId: connection.portalAgencyId,
+        portalKey: connection.key })
+    } as unknown as GcsExtensionRouteContext
+    await expect(testConnection(context)).rejects.toMatchObject({
+      name: 'GcsExtensionUserError', code: 'GCS_PORTAL_INVALID_CREDENTIAL', statusCode: 400
+    })
+  })
+
   it('rejects redirects without forwarding its bearer key', async () => {
     const transport = vi.fn(async () => new Response(null, {
       status: 302, headers: { Location: 'https://other.example.test/' }

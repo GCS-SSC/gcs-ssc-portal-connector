@@ -1,8 +1,8 @@
 import { z } from 'zod'
-import { getEncryptedExtensionSecret, setEncryptedExtensionSecret, type GcsExtensionRouteContext } from '@gcs-ssc/extensions/server'
+import { createGcsExtensionUserError, getEncryptedExtensionSecret, setEncryptedExtensionSecret, type GcsExtensionRouteContext } from '@gcs-ssc/extensions/server'
 import { asConnectorDb } from './db.ts'
 import { agencyIdFromContext, authorizedWrite, EXTENSION_KEY } from './authorization.ts'
-import { createPortalClient } from './portal-client.ts'
+import { createPortalClient, PortalRequestError } from './portal-client.ts'
 
 const portalUrl = z.url().refine((value) => {
   const url = new URL(value)
@@ -29,6 +29,32 @@ export const secretOptions = (agencyId: string) => ({
   secretKey: 'portal-key'
 })
 
+const checkPortalStructure = async (portalUrl: string, portalAgencyId: string, key: string) => {
+  try {
+    await createPortalClient({ portalUrl, portalAgencyId, key }).structure()
+  } catch (error) {
+    if (error instanceof PortalRequestError && error.status === 401) {
+      throw createGcsExtensionUserError({
+        code: 'GCS_PORTAL_INVALID_CREDENTIAL', statusCode: 400,
+        message: {
+          en: 'The Portal rejected this API credential. Issue a new integration key for this agency in the Portal, then try again.',
+          fr: 'Le portail a refusé cette clé API. Créez une nouvelle clé d’intégration pour cet organisme gouvernemental dans le portail, puis réessayez.'
+        }
+      })
+    }
+    if (error instanceof PortalRequestError && error.status === 404) {
+      throw createGcsExtensionUserError({
+        code: 'GCS_PORTAL_AGENCY_NOT_FOUND', statusCode: 400,
+        message: {
+          en: 'The Portal could not find this agency for the supplied code and credential. Check both values in the Portal.',
+          fr: 'Le portail ne trouve pas cet organisme gouvernemental avec le code et la clé fournis. Vérifiez les deux valeurs dans le portail.'
+        }
+      })
+    }
+    throw error
+  }
+}
+
 export const getConnection = async (context: GcsExtensionRouteContext) => {
   const agencyId = agencyIdFromContext(context)
   const db = asConnectorDb(context.db)
@@ -54,7 +80,7 @@ export const saveConnection = async (context: GcsExtensionRouteContext) => {
     .select('agency_id').where('agency_id', '=', agencyId).executeTakeFirst()
   if (!existingConnection && !input.portalKey) throw new Error('A portal key is required for a new connection.')
   const key = input.portalKey ?? await readPortalCredential(context, agencyId)
-  await createPortalClient({ portalUrl: input.portalUrl, portalAgencyId: input.portalAgencyId, key }).structure()
+  await checkPortalStructure(input.portalUrl, input.portalAgencyId, key)
   await authorizedWrite(context, async (transaction) => {
     const existing = await transaction.selectFrom('extensions.gcs_portal_connection')
       .select(['agency_id', 'portal_url', 'portal_agency_id'])
@@ -88,7 +114,7 @@ export const testConnection = async (context: GcsExtensionRouteContext) => {
   const input = connectionInput.parse(await context.readBody())
   const agencyId = agencyIdFromContext(context)
   const key = input.portalKey ?? await readPortalCredential(context, agencyId)
-  await createPortalClient({ portalUrl: input.portalUrl, portalAgencyId: input.portalAgencyId, key }).structure()
+  await checkPortalStructure(input.portalUrl, input.portalAgencyId, key)
   return { connected: true }
 }
 

@@ -8,6 +8,16 @@ export interface PortalConnection {
   key: string
 }
 
+export class PortalRequestError extends Error {
+  readonly status: number
+
+  constructor(status: number, path: string) {
+    super(`Portal request failed (${status}) at ${path}.`)
+    this.name = 'PortalRequestError'
+    this.status = status
+  }
+}
+
 /** Server-only transport. Redirects cannot carry the agency bearer credential elsewhere. */
 export const createPortalClient = (connection: PortalConnection, transport: typeof fetch = fetch) => {
   const request = async (path: string, method: 'GET' | 'POST' | 'PUT' | 'PATCH' = 'GET', body?: object): Promise<unknown> => {
@@ -21,7 +31,7 @@ export const createPortalClient = (connection: PortalConnection, transport: type
       },
       ...(body ? { body: JSON.stringify(body) } : {})
     })
-    if (!response.ok) throw new Error(`Portal request failed (${response.status}) at ${path}.`)
+    if (!response.ok) throw new PortalRequestError(response.status, path)
     const bytes = await response.arrayBuffer()
     if (bytes.byteLength > 4 * 1024 * 1024) throw new Error('Portal response exceeds 4 MiB.')
     return JSON.parse(new TextDecoder().decode(bytes)) as unknown
