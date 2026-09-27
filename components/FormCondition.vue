@@ -2,7 +2,8 @@
 import { computed } from 'vue'
 import type { SurveyCondition } from '@gcs-ssc/survey'
 import { ExtensionButton, ExtensionFormField, ExtensionInput, ExtensionSelect } from '@gcs-ssc/extensions/ui'
-const props = defineProps<{ questions: { id: string; label: string }[]; disabled?: boolean; locale: 'en' | 'fr' }>()
+type Question = { id: string; label: string; type?: string; options?: { value: string; label: string }[] }
+const props = defineProps<{ questions: Question[]; disabled?: boolean; locale: 'en' | 'fr' }>()
 const condition = defineModel<SurveyCondition | undefined>({ required: true })
 const label = (en: string, fr: string) => props.locale === 'fr' ? fr : en
 const operators = computed(() => [
@@ -14,6 +15,13 @@ const operators = computed(() => [
   { value: 'answered', label: label('Answered', 'Avec réponse') },
   { value: 'notAnswered', label: label('Unanswered', 'Sans réponse') }
 ])
+const source = (id: string) => props.questions.find((question) => question.id === id)
+const operatorItems = (id: string) => operators.value.filter((item) => {
+  const type = source(id)?.type
+  if (item.value === 'contains') return type === 'text' || type === 'list' || !type
+  if (item.value === 'greaterThan' || item.value === 'lessThan') return type === 'number' || !type
+  return true
+})
 const add = () => {
   if (!props.questions.length) return
   condition.value = {
@@ -26,9 +34,12 @@ const update = (index: number, key: 'questionId' | 'operator' | 'value', value: 
   const rows = [...condition.value.conditions]
   const current = rows[index]!
   const next: { questionId: string; operator: string; value?: string } = { ...current, [key]: value }
+  if (key === 'questionId') { next.operator = 'answered'; delete next.value }
   if (key === 'operator') {
     if (value === 'answered' || value === 'notAnswered') delete next.value
-    else next.value = 'value' in current ? current.value : ''
+    else next.value = source(current.questionId)?.type === 'select'
+      ? source(current.questionId)?.options?.[0]?.value ?? ''
+      : 'value' in current ? current.value : ''
   }
   rows[index] = next as SurveyCondition['conditions'][number]
   condition.value = { ...condition.value, conditions: rows }
@@ -47,23 +58,26 @@ const remove = (index: number) => {
         :items="[{ value: 'all', label: label('All rules', 'Toutes les règles') }, { value: 'any', label: label('Any rule', 'Une règle') }]"
         @update:model-value="condition = { ...condition!, match: $event as 'all' | 'any' }" />
     </ExtensionFormField>
-    <div v-for="(row, index) in condition?.conditions ?? []" :key="index" class="grid gap-2 sm:grid-cols-3">
-      <ExtensionFormField :label="label('Question', 'Question')" :name="`conditionQuestion${index}`">
+    <div v-for="(row, index) in condition?.conditions ?? []" :key="index" class="space-y-2 border-l-2 border-default pl-3">
+      <ExtensionFormField :label="label('If the answer to', 'Si la réponse à')" :name="`conditionQuestion${index}`">
         <ExtensionSelect :model-value="row.questionId" :name="`conditionQuestion${index}`" value-key="value"
           :items="questions.map((item) => ({ value: item.id, label: item.label }))" :disabled="disabled"
           @update:model-value="update(index, 'questionId', String($event))" />
       </ExtensionFormField>
-      <ExtensionFormField :label="label('Rule', 'Règle')" :name="`conditionOperator${index}`">
+      <ExtensionFormField :label="label('Is', 'Est')" :name="`conditionOperator${index}`">
         <ExtensionSelect :model-value="row.operator" :name="`conditionOperator${index}`" value-key="value"
-          :items="operators" :disabled="disabled" @update:model-value="update(index, 'operator', String($event))" />
+          :items="operatorItems(row.questionId)" :disabled="disabled" @update:model-value="update(index, 'operator', String($event))" />
       </ExtensionFormField>
-      <ExtensionFormField v-if="'value' in row" :label="label('Value', 'Valeur')" :name="`conditionValue${index}`" required>
-        <ExtensionInput :model-value="row.value" :name="`conditionValue${index}`" required :disabled="disabled"
+      <ExtensionFormField v-if="'value' in row" :label="label('This answer', 'Cette réponse')" :name="`conditionValue${index}`" required>
+        <ExtensionSelect v-if="source(row.questionId)?.type === 'select'" :model-value="row.value" :name="`conditionValue${index}`"
+          value-key="value" :items="source(row.questionId)?.options ?? []" :disabled="disabled" required
+          @update:model-value="update(index, 'value', String($event))" />
+        <ExtensionInput v-else :model-value="row.value" :name="`conditionValue${index}`" :type="source(row.questionId)?.type === 'number' ? 'number' : 'text'" required :disabled="disabled"
           @update:model-value="update(index, 'value', String($event))" />
       </ExtensionFormField>
-      <ExtensionButton :disabled="disabled" @click="remove(index)">{{ label('Remove rule', 'Retirer la règle') }}</ExtensionButton>
+      <ExtensionButton color="neutral" variant="ghost" size="sm" :disabled="disabled" @click="remove(index)">{{ label('Remove rule', 'Retirer la règle') }}</ExtensionButton>
     </div>
-    <ExtensionButton :disabled="disabled || !questions.length || (condition?.conditions.length ?? 0) >= 20" @click="add">
+    <ExtensionButton color="neutral" variant="outline" size="sm" :disabled="disabled || !questions.length || (condition?.conditions.length ?? 0) >= 20" @click="add">
       {{ label('Add rule', 'Ajouter une règle') }}
     </ExtensionButton>
   </div>

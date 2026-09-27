@@ -4,6 +4,8 @@ import type { SurveyField } from '@gcs-ssc/survey/vue'
 import { ExtensionButton, ExtensionFormField, ExtensionInput, ExtensionSelect } from '@gcs-ssc/extensions/ui'
 const props = defineProps<{ field: SurveyField; locale: 'en' | 'fr' }>()
 const tr = (en: string, fr: string) => props.locale === 'fr' ? fr : en
+const previewLabel = (label: string, required: boolean) => required
+  ? `${label} ${tr('(required)', '(obligatoire)')}` : label
 const rows = () => parseList(props.field.value)
 const table = () => parseTable(props.field.value)
 const id = () => `r_${crypto.randomUUID().replaceAll('-', '_')}`
@@ -12,11 +14,12 @@ const updateTable = (items: TableRow[]) => props.field.setValue(JSON.stringify(i
 </script>
 <template>
   <div class="space-y-2">
-    <p v-if="field.question.type === 'computed'" class="text-sm"><strong>{{ field.label }}</strong>: {{ field.value || '—' }}</p>
+    <div v-if="field.question.type === 'computed'" class="text-sm"><p><strong>{{ field.label }}</strong>: {{ field.value || '—' }}</p><p v-if="field.hint" class="text-muted">{{ field.hint }}</p></div>
     <template v-else-if="field.question.type === 'list'">
       <p class="font-medium">{{ field.label }}{{ field.required ? ' *' : '' }}</p>
+      <p v-if="field.hint" class="text-sm text-muted">{{ field.hint }}</p>
       <div v-for="(row, index) in rows()" :key="row.id" class="flex items-end gap-2">
-        <ExtensionFormField :label="`${field.label} ${index + 1}`" :name="`${field.id}-${row.id}`" required>
+        <ExtensionFormField :label="previewLabel(`${field.label} ${index + 1}`, true)" :name="`${field.id}-${row.id}`">
           <ExtensionInput :model-value="row.value" :name="`${field.id}-${row.id}`" required
             @update:model-value="updateList(rows().map((item) => item.id === row.id ? { ...item, value: String($event) } : item))" />
         </ExtensionFormField>
@@ -28,9 +31,10 @@ const updateTable = (items: TableRow[]) => props.field.setValue(JSON.stringify(i
     </template>
     <template v-else-if="field.question.type === 'table'">
       <p class="font-medium">{{ field.label }}{{ field.required ? ' *' : '' }}</p>
+      <p v-if="field.hint" class="text-sm text-muted">{{ field.hint }}</p>
       <div v-for="row in table()" :key="row.id" class="grid gap-2 border-b border-default pb-3 sm:grid-cols-2">
         <ExtensionFormField v-for="column in field.question.columns" :key="column.id"
-          :label="column.label[locale]" :name="`${field.id}-${row.id}-${column.id}`" :required="column.required">
+          :label="previewLabel(column.label[locale], column.required)" :name="`${field.id}-${row.id}-${column.id}`">
           <ExtensionInput :model-value="row.cells[column.id] ?? ''" :name="`${field.id}-${row.id}-${column.id}`"
             :required="column.required" @update:model-value="updateTable(table().map((item) => item.id === row.id
               ? { ...item, cells: { ...item.cells, [column.id]: String($event) } } : item))" />
@@ -41,13 +45,13 @@ const updateTable = (items: TableRow[]) => props.field.setValue(JSON.stringify(i
         {{ tr('Add row', 'Ajouter une ligne') }}
       </ExtensionButton>
     </template>
-    <ExtensionFormField v-else-if="field.question.type === 'select'" :label="field.label" :name="field.id" :required="field.required"
+    <ExtensionFormField v-else-if="field.question.type === 'select'" :label="previewLabel(field.label, field.required)" :name="field.id"
       :description="field.hint">
       <ExtensionSelect :model-value="field.value" :name="field.id" value-key="value" :required="field.required"
         :items="field.options" :placeholder="tr('Choose', 'Choisir')"
         @update:model-value="field.setValue(String($event))" />
     </ExtensionFormField>
-    <ExtensionFormField v-else :label="field.label" :name="field.id" :required="field.required" :description="field.hint">
+    <ExtensionFormField v-else :label="previewLabel(field.label, field.required)" :name="field.id" :description="field.hint">
       <ExtensionInput :model-value="field.value" :name="field.id" :required="field.required"
         :type="['email', 'number', 'date'].includes(field.question.type) ? field.question.type : 'text'"
         @update:model-value="field.setValue(String($event))" />

@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
-import { surveyV3Schema } from '@gcs-ssc/survey'
+import { surveyV3Schema, upgradeToAdvancedSurvey } from '@gcs-ssc/survey'
 import type { GcsExtensionRouteContext } from '@gcs-ssc/extensions/server'
 import { agencyIdFromContext, authorizedWrite } from './authorization.ts'
 import { readPortalCredentialFromDb } from './connection.ts'
 import { asConnectorDb } from './db.ts'
 import { createPortalClient } from './portal-client.ts'
+import { formPublicationIssues } from './form-readiness.ts'
 
 const formCode = z.string().regex(/^V-[A-HJKMNP-Z2-9]{5,}$/)
 const portalCode = z.string().regex(/^[A-Z]-[A-HJKMNP-Z2-9]{5,}$/)
@@ -50,6 +51,52 @@ export const agreementTargetsForScope = (
     .map((agreement) => ({ agreementId: agreement.id, organizationId: agreement.organizationId }))
 }
 
+type SurveyPlacement = { kind: string; surveyId?: unknown; surveyRevision?: unknown }
+type FormSet = {
+  organizationId: string; agreementId?: string | null; published: boolean
+  items: SurveyPlacement[]
+}
+type FormCall = {
+  id: string; nameEn: string; nameFr: string; published: boolean
+  surveyId?: string | null; surveyRevision?: number | null
+}
+type FormPlacement = {
+  surveyId: string; revision: number; targetType: 'agreement' | 'organization' | 'opportunity'
+  targetId: string; targetNameEn: string; targetNameFr: string
+  organizationName?: string; published: boolean
+}
+
+/** Reports each portal placement, including drafts and older survey revisions. */
+export const formPublications = (
+  sets: FormSet[], calls: FormCall[], agreements: Array<{ id: string; nameEn: string; nameFr: string }>,
+  organizations: Array<{ id: string; name: string }>
+): FormPlacement[] => {
+  const agreementNames = new Map(agreements.map((agreement) => [agreement.id, agreement]))
+  const organizationNames = new Map(organizations.map((organization) => [organization.id, organization.name]))
+  const placements: FormPlacement[] = []
+  for (const set of sets) {
+    const organizationName = organizationNames.get(set.organizationId) ?? set.organizationId
+    const agreement = set.agreementId ? agreementNames.get(set.agreementId) : undefined
+    for (const item of set.items) {
+      if (item.kind !== 'survey' || typeof item.surveyId !== 'string'
+        || !Number.isInteger(item.surveyRevision) || Number(item.surveyRevision) < 1) continue
+      placements.push({ surveyId: item.surveyId, revision: Number(item.surveyRevision),
+        targetType: set.agreementId ? 'agreement' : 'organization',
+        targetId: set.agreementId ?? set.organizationId,
+        targetNameEn: agreement?.nameEn ?? (set.agreementId || organizationName),
+        targetNameFr: agreement?.nameFr ?? (set.agreementId || organizationName),
+        organizationName, published: set.published })
+    }
+  }
+  for (const call of calls) {
+    if (!call.surveyId || !call.surveyRevision) continue
+    placements.push({ surveyId: call.surveyId, revision: call.surveyRevision,
+      targetType: 'opportunity', targetId: call.id,
+      targetNameEn: call.nameEn, targetNameFr: call.nameFr, published: call.published })
+  }
+  return placements
+}
+
 const clientForAgency = async (context: GcsExtensionRouteContext) => {
   const agencyId = agencyIdFromContext(context)
   const db = asConnectorDb(context.db)
@@ -65,8 +112,8 @@ const clientForAgency = async (context: GcsExtensionRouteContext) => {
 export const listForms = async (context: GcsExtensionRouteContext) => {
   const { agencyId, client } = await clientForAgency(context)
   const db = asConnectorDb(context.db)
-  const [surveys, structure, agreements, publications, identities] = await Promise.all([
-    client.surveys(), client.structure(), client.agreements(),
+  const [surveys, structure, agreements, sets, publications, identities] = await Promise.all([
+    client.surveys(), client.structure(), client.agreements(), client.sets(),
     db.selectFrom('extensions.gcs_portal_publication').select([
       'gcs_agreement_id', 'portal_agreement_id', 'portal_organization_id'
     ]).where('agency_id', '=', agencyId).execute(),
@@ -82,16 +129,18 @@ export const listForms = async (context: GcsExtensionRouteContext) => {
   ])
   const verified = new Set(identities.map(item => item.portal_organization_id))
   const publishedAgreements = publishedAgreementTargets(agreements.agreements, publications, verified)
+  const organizations = identities.map((item) => ({ id: item.portal_organization_id, proponentId: item.proponent_id,
+    name: item.name }))
   return {
     surveys: surveys.surveys,
+    publications: formPublications(sets.sets, structure.calls, agreements.agreements, organizations),
     programs: structure.programs.filter((item) => item.sourceSystem === 'gcs-ssc')
       .map((item) => ({ id: item.id, nameEn: String(item.nameEn ?? ''), nameFr: String(item.nameFr ?? '') })),
     streams: structure.streams.filter((item) => item.sourceSystem === 'gcs-ssc')
       .map((item) => ({ id: item.id, programId: String(item.programId ?? ''),
         nameEn: item.nameEn, nameFr: item.nameFr })),
     calls: structure.calls,
-    organizations: identities.map((item) => ({ id: item.portal_organization_id, proponentId: item.proponent_id,
-      name: item.name })),
+    organizations,
     agreements: publishedAgreements
       .map((item) => ({ id: item.id, organizationId: item.organizationId, nameEn: item.nameEn,
         nameFr: item.nameFr, agreementNumber: item.agreementNumber, streamId: item.streamId }))
@@ -118,6 +167,8 @@ export const manageForm = async (context: GcsExtensionRouteContext) => {
   }
   const survey = await client.survey(command.surveyId)
   if (survey.revision !== command.revision) throw new Error('Save or reload the latest form revision before publishing.')
+  const translationIssues = formPublicationIssues(upgradeToAdvancedSurvey(survey.definition))
+  if (translationIssues.length) throw new Error(`Complete both English and French content before publishing: ${translationIssues.join(', ')}.`)
   if (command.action === 'publishCall') {
     if (command.endDate < command.startDate) throw new Error('The closing date cannot precede the opening date.')
     const structure = await client.structure()

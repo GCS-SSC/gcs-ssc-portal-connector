@@ -8,6 +8,8 @@ import {
 } from '@gcs-ssc/extensions/ui'
 import { messages } from '../i18n/messages'
 import FormCreator from './FormCreator.vue'
+import FormLibrary from './FormLibrary.vue'
+import { readFormSelection, writeFormSelection } from './form-draft-session'
 
 interface Connection {
   portalUrl: string
@@ -43,6 +45,21 @@ const props = defineProps<{
   readOnly?: boolean
 }>()
 const section = computed(() => props.section ?? 'connection')
+const selectedFormId = ref<string | null>(readFormSelection(props.agencyId))
+const formsVisited = ref(section.value === 'forms')
+watch(section, (value) => { if (value === 'forms') formsVisited.value = true })
+watch(() => props.agencyId, () => {
+  selectedFormId.value = readFormSelection(props.agencyId)
+  formsVisited.value = section.value === 'forms'
+})
+const openFormDesigner = (id: string) => {
+  writeFormSelection(props.agencyId, id)
+  selectedFormId.value = id
+}
+const closeFormDesigner = () => {
+  writeFormSelection(props.agencyId, null)
+  selectedFormId.value = null
+}
 const { t, locale } = useExtensionI18n(messages)
 const toast = useExtensionToast()
 const showSuccess = (description: string) => toast.add({ title: t('successNotice'), description, color: 'success' })
@@ -524,10 +541,12 @@ watch(() => props.agencyId, searchProponents)
         <p v-if="lastPullError" class="text-sm text-error">{{ lastPullError }}</p>
       </template>
     </section>
-    <section v-if="section === 'forms'" class="space-y-4">
-      <h3 class="text-base font-semibold text-highlighted">{{ t('formCreator') }}</h3>
+    <section v-if="formsVisited" v-show="section === 'forms'" class="space-y-4">
       <p v-if="!connection" class="text-sm text-muted">{{ t('connectionRequired') }}</p>
-      <FormCreator v-else :agency-id="agencyId" :disabled="locked" />
+      <FormLibrary v-else-if="selectedFormId === null" :agency-id="agencyId" :disabled="locked"
+        @open="openFormDesigner($event)" @create="openFormDesigner('')" />
+      <FormCreator v-else :key="`${agencyId}:${selectedFormId}`" :agency-id="agencyId" :disabled="locked"
+        :selected-form-id="selectedFormId" @close="closeFormDesigner" />
     </section>
     <section v-if="section === 'verification'" class="space-y-4">
       <div><h3 class="text-base font-semibold text-highlighted">{{ t('organizationLinks') }}</h3>

@@ -92,12 +92,15 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
 })
 
 import FormCreator from '../components/FormCreator.vue'
+import FormTest from '../components/FormTest.vue'
+import { readFormDraft } from '../components/form-draft-session'
 import PortalConnection from '../components/PortalConnection.vue'
 import ProponentVerification from '../components/ProponentVerification.vue'
 
 const button = (wrapper: ReturnType<typeof mount>, label: string) => wrapper.findAll('button').find(item => item.text() === label)!
 
 beforeEach(() => {
+  window.sessionStorage.clear()
   state.locale = 'en'
   state.toastAdd.mockReset()
   get.mockReset().mockImplementation(async (path: string) => {
@@ -332,14 +335,15 @@ describe('connector form requirements', () => {
     await flushPromises()
     await wrapper.get('input[name="formTitleEn"]').setValue('Title')
     await wrapper.get('input[name="formTitleFr"]').setValue('Titre')
-    await wrapper.get('select[name="newQuestionType"]').setValue(type)
+    await button(wrapper, 'Edit').trigger('click')
+    await wrapper.findAll('.designer-type').find(item => item.text().includes(({ text: 'Short answer', list: 'Repeating list', table: 'Table' } as Record<string, string>)[type]!))!.trigger('click')
     const limit = wrapper.get(`input[name="${name}"]`)
     expect(limit.attributes('required')).toBeDefined()
     await limit.setValue('')
     expect(wrapper.get(`input[name="${name}"]`).element).toHaveProperty('value', '')
     expect(wrapper.get(`input[name="${name}"]`).attributes('aria-describedby')).toBe(errorId)
     expect(wrapper.get(`#${errorId}`).text()).toBe(errorText)
-    await button(wrapper, 'Save form revision').trigger('click')
+    await button(wrapper, 'Save revision').trigger('click')
     expect(post).not.toHaveBeenCalled()
   })
 
@@ -348,18 +352,251 @@ describe('connector form requirements', () => {
     await flushPromises()
     await wrapper.get('input[name="formTitleEn"]').setValue('Title')
     await wrapper.get('input[name="formTitleFr"]').setValue('Titre')
-    await wrapper.get('select[name="newQuestionType"]').setValue('text')
-    await wrapper.get('select[name="newQuestionType"]').setValue('computed')
+    await button(wrapper, 'Edit').trigger('click')
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('Short answer'))!.trigger('click')
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('Calculated value'))!.trigger('click')
     const group = wrapper.get('[role="group"][aria-labelledby="computed-sources-label"]')
     expect(group.attributes('aria-describedby')).toBe('computed-sources-help')
     expect(wrapper.get('#computed-sources-label').text()).toContain('(required)')
-    await button(wrapper, 'Save form revision').trigger('click')
+    await button(wrapper, 'Save revision').trigger('click')
     expect(post).not.toHaveBeenCalled()
     await group.get('input[type="checkbox"]').setValue(true)
-    await button(wrapper, 'Save form revision').trigger('click')
-    expect(post).toHaveBeenCalledWith('/agencies/1/forms', expect.objectContaining({
-      definition: expect.objectContaining({ questions: expect.arrayContaining([expect.objectContaining({ type: 'computed', sourceIds: [expect.any(String)] })]) })
+    await button(wrapper, 'Save revision').trigger('click')
+    expect(post, wrapper.text()).toHaveBeenCalledWith('/agencies/1/forms', expect.objectContaining({
+      definition: expect.objectContaining({ questions: expect.arrayContaining([expect.objectContaining({
+        type: 'computed', sourceIds: [expect.any(String)], template: expect.stringMatching(/^\{\{field_[a-z0-9]+\}\}$/)
+      })]) })
     }))
+  })
+
+  it('asks before leaving a new form with unsaved changes', async () => {
+    const confirm = vi.fn().mockReturnValue(false)
+    vi.stubGlobal('confirm', confirm)
+    try {
+      const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
+      await flushPromises()
+      await wrapper.get('input[name="formTitleEn"]').setValue('Draft title')
+      await button(wrapper, '← All forms').trigger('click')
+      expect(confirm).toHaveBeenCalled()
+      expect(wrapper.emitted('close')).toBeUndefined()
+      confirm.mockReturnValue(true)
+      await button(wrapper, '← All forms').trigger('click')
+      expect(wrapper.emitted('close')).toHaveLength(1)
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('puts portal destinations before the optional funding opportunity flow', async () => {
+    const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
+    await flushPromises()
+    await button(wrapper, 'Publish').trigger('click')
+    const headings = wrapper.findAll('h4').map((heading) => heading.text())
+    expect(headings.indexOf('Publish to portal')).toBeGreaterThan(-1)
+    expect(headings.indexOf('Publish to portal')).toBeLessThan(headings.indexOf('Publish a funding opportunity'))
+  })
+
+  it('returns to Settings when a form introduction translation fails validation', async () => {
+    const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
+    await flushPromises()
+    await wrapper.get('input[name="formTitleEn"]').setValue('Project report')
+    await wrapper.get('input[name="formTitleFr"]').setValue('Rapport de projet')
+    await wrapper.get('textarea[name="formDescriptionEn"]').setValue('Describe the project.')
+    await button(wrapper, 'Edit').trigger('click')
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('Short answer'))!.trigger('click')
+    await button(wrapper, 'Save revision').trigger('click')
+    expect(post).not.toHaveBeenCalled()
+    expect(button(wrapper, 'Settings').attributes('aria-selected')).toBe('true')
+    expect(wrapper.find('textarea[name="formDescriptionFr"]').exists()).toBe(true)
+  })
+
+  it('restores an unsaved draft after the host remounts the extension', async () => {
+    const connection = mount(PortalConnection, { props: { agencyId: '1', section: 'connection', enabled: true } })
+    await flushPromises()
+    expect(get).not.toHaveBeenCalledWith('/agencies/1/forms')
+    connection.unmount()
+
+    const firstForms = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', enabled: true } })
+    await flushPromises()
+    await button(firstForms, 'Create form').trigger('click')
+    await firstForms.get('input[name="formTitleEn"]').setValue('Unsaved draft')
+    await flushPromises()
+    firstForms.unmount()
+
+    const restored = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', enabled: true } })
+    await flushPromises()
+    expect((restored.get('input[name="formTitleEn"]').element as HTMLInputElement).value).toBe('Unsaved draft')
+    const confirm = vi.fn().mockReturnValue(true)
+    vi.stubGlobal('confirm', confirm)
+    try {
+      await button(restored, '← All forms').trigger('click')
+      expect(confirm).toHaveBeenCalled()
+      expect(restored.find('input[name="formTitleEn"]').exists()).toBe(false)
+      expect(window.sessionStorage.getItem('gcs-ssc-portal-connector:forms:1:selection')).toBeNull()
+      restored.unmount()
+      const library = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', enabled: true } })
+      await flushPromises()
+      expect(library.text()).toContain('No forms yet')
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('loads a newer server revision instead of restoring a stale saved-form draft', async () => {
+    const latest = {
+      schemaVersion: 3 as const, title: { en: 'Current version', fr: 'Version actuelle' },
+      questions: [{ id: 'field_1', type: 'text' as const, label: { en: 'Question', fr: 'Question' },
+        required: false, maxLength: 500 }],
+      pages: [{ id: 'page_1', title: { en: 'Page 1', fr: 'Page 1' },
+        questionIds: ['field_1'], groups: [], branches: [] }]
+    }
+    const oldDraft = structuredClone(latest)
+    oldDraft.title.en = 'Unsaved older revision'
+    window.sessionStorage.setItem('gcs-ssc-portal-connector:forms:1:selection', 'form_1')
+    window.sessionStorage.setItem('gcs-ssc-portal-connector:forms:1:draft', JSON.stringify({
+      formId: 'form_1', revision: 1, definition: oldDraft, saved: JSON.stringify(latest),
+      selectedContainerId: 'page_1', selectedQuestionId: '', tab: 'settings', publicationScope: 'agreement',
+      agreementId: '', organizationId: '', programId: '', batchStreamId: '', streamId: '', startDate: '', endDate: ''
+    }))
+    const defaultGet = get.getMockImplementation()!
+    get.mockImplementation(async (path: string) => path === '/agencies/1/forms'
+      ? { surveys: [{ id: 'form_1', revision: 2, title: latest.title, updatedAt: new Date().toISOString() }],
+        programs: [], streams: [], agreements: [], organizations: [], calls: [] }
+      : path === '/agencies/1/forms/form_1'
+        ? { survey: { id: 'form_1', revision: 2, definition: latest } }
+        : defaultGet(path))
+    const wrapper = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', enabled: true } })
+    await flushPromises()
+    expect(get).toHaveBeenCalledWith('/agencies/1/forms/form_1')
+    expect(wrapper.text()).toContain('Current version')
+    expect(wrapper.text()).not.toContain('Unsaved older revision')
+    expect(window.sessionStorage.getItem('gcs-ssc-portal-connector:forms:1:draft')).toBeNull()
+  })
+
+  it('ignores a corrupt stored draft instead of rendering malformed form data', async () => {
+    window.sessionStorage.setItem('gcs-ssc-portal-connector:forms:1:selection', '')
+    window.sessionStorage.setItem('gcs-ssc-portal-connector:forms:1:draft', JSON.stringify({
+      formId: '', revision: 0, saved: '{}', definition: { schemaVersion: 3, pages: [], questions: [] }
+    }))
+    const wrapper = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', enabled: true } })
+    await flushPromises()
+    expect((wrapper.get('input[name="formTitleEn"]').element as HTMLInputElement).value).toBe('')
+    expect(wrapper.text()).toContain('New form')
+  })
+
+  it('rejects invalid stored editor tab and publication scope values', () => {
+    const draft = {
+      formId: '', revision: 0, saved: '{}', selectedContainerId: 'page_1', selectedQuestionId: '',
+      tab: 'edit', publicationScope: 'agreement', agreementId: '', organizationId: '', programId: '',
+      batchStreamId: '', streamId: '', startDate: '', endDate: '',
+      definition: { schemaVersion: 3, title: { en: '', fr: '' }, questions: [], pages: [{
+        id: 'page_1', title: { en: 'Page 1', fr: 'Page 1' }, questionIds: [], groups: [], branches: []
+      }] }
+    }
+    const key = 'gcs-ssc-portal-connector:forms:1:draft'
+    window.sessionStorage.setItem(key, JSON.stringify({ ...draft, tab: 'unexpected' }))
+    expect(readFormDraft('1')).toBeNull()
+    window.sessionStorage.setItem(key, JSON.stringify({ ...draft, publicationScope: 'unexpected' }))
+    expect(readFormDraft('1')).toBeNull()
+    window.sessionStorage.setItem(key, JSON.stringify(draft))
+    expect(readFormDraft('1')).not.toBeNull()
+  })
+
+  it('offers only earlier answers and later pages when building a branch', async () => {
+    const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
+    await flushPromises()
+    await button(wrapper, 'Edit').trigger('click')
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('Choice'))!.trigger('click')
+    await wrapper.get('input[name="choiceEn0"]').setValue('Yes')
+    await wrapper.get('.designer-outline-add').trigger('click')
+    await button(wrapper, 'Add an if rule').trigger('click')
+    expect(wrapper.get('.designer-flow-toggle').text()).toContain('2 pages · 1 rule')
+    const questionChoices = wrapper.get('select[name="conditionQuestion0"]').findAll('option').map(item => item.text())
+    expect(questionChoices).toContain('New question')
+    const destinations = wrapper.get('select[name="branchDestination0"]').findAll('option').map(item => item.text())
+    expect(destinations).toEqual(['End form'])
+    await wrapper.get('select[name="conditionOperator0"]').setValue('equals')
+    expect(wrapper.get('select[name="conditionValue0"]').findAll('option').map(item => item.text())).toEqual(['Yes'])
+    await wrapper.findAll('.designer-outline-item')[0]!.trigger('click')
+    expect(wrapper.get('select[name="pageNext"]').findAll('option').map(item => item.text()))
+      .toEqual(['Next page in order', 'Page 2', 'End form'])
+  })
+
+  it('returns to the previous page with one click after a completed preview', async () => {
+    const wrapper = mount(FormTest, { props: { locale: 'en', definition: {
+      schemaVersion: 3, title: { en: 'Report', fr: 'Rapport' },
+      questions: [
+        { id: 'first', type: 'text', label: { en: 'First', fr: 'Premier' }, required: false, maxLength: 500 },
+        { id: 'second', type: 'text', label: { en: 'Second', fr: 'Deuxième' }, required: false, maxLength: 500 }
+      ],
+      pages: [
+        { id: 'page_1', title: { en: 'First page', fr: 'Première page' }, questionIds: ['first'], groups: [], branches: [] },
+        { id: 'page_2', title: { en: 'Second page', fr: 'Deuxième page' }, questionIds: ['second'], groups: [], branches: [] }
+      ]
+    } } })
+    await button(wrapper, 'Next').trigger('click')
+    await button(wrapper, 'Check').trigger('click')
+    expect(wrapper.text()).toContain('Responses are valid.')
+    await button(wrapper, 'Previous').trigger('click')
+    expect(wrapper.text()).toContain('Page 1 · First page')
+    expect(wrapper.text()).not.toContain('Responses are valid.')
+  })
+
+  it('prevents reordering a dependent question before its source and cleans up deletion', async () => {
+    const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
+    await flushPromises()
+    await button(wrapper, 'Edit').trigger('click')
+    const choice = () => wrapper.findAll('.designer-type').find(item => item.text().includes('Choice'))!
+    await choice().trigger('click')
+    await choice().trigger('click')
+    const sourceId = wrapper.get('select[name="choiceDependency"]').findAll('option')[1]!.attributes('value')!
+    await wrapper.get('select[name="choiceDependency"]').setValue(sourceId)
+    expect(button(wrapper, 'Move up').attributes('disabled')).toBeDefined()
+    await wrapper.findAll('.designer-question')[0]!.trigger('click')
+    await button(wrapper, 'Remove question').trigger('click')
+    await wrapper.get('.designer-question').trigger('click')
+    expect((wrapper.get('select[name="choiceDependency"]').element as HTMLSelectElement).value).toBe('none')
+    expect(wrapper.text()).toContain('Rules and dependencies using it were updated')
+  })
+
+  it('retargets a calculated template when its referenced source is deleted', async () => {
+    const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
+    await flushPromises()
+    await button(wrapper, 'Edit').trigger('click')
+    const addType = (label: string) => wrapper.findAll('.designer-type').find(item => item.text().includes(label))!
+    await addType('Short answer').trigger('click')
+    await addType('Short answer').trigger('click')
+    await addType('Calculated value').trigger('click')
+    const sources = wrapper.get('[role="group"][aria-labelledby="computed-sources-label"]')
+    const secondId = sources.findAll('label')[1]!.text().match(/\((field_[a-z0-9]+)\)/)?.[1]
+    expect(secondId).toBeTruthy()
+    await sources.findAll('input[type="checkbox"]')[0]!.setValue(true)
+    await sources.findAll('input[type="checkbox"]')[1]!.setValue(true)
+    await wrapper.findAll('.designer-question')[0]!.trigger('click')
+    await button(wrapper, 'Remove question').trigger('click')
+    await wrapper.findAll('.designer-question')[1]!.trigger('click')
+    expect((wrapper.get('input[name="computedTemplate"]').element as HTMLInputElement).value).toBe(`{{${secondId}}}`)
+  })
+
+  it('clears page routes when an empty destination page is removed', async () => {
+    const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
+    await flushPromises()
+    await button(wrapper, 'Edit').trigger('click')
+    await wrapper.get('.designer-outline-add').trigger('click')
+    await wrapper.findAll('.designer-outline-item')[0]!.trigger('click')
+    await wrapper.get('select[name="pageNext"]').setValue(wrapper.get('select[name="pageNext"]').findAll('option')
+      .find((item) => item.text() === 'Page 2')!.attributes('value')!)
+    await wrapper.findAll('.designer-outline-item')[1]!.trigger('click')
+    await button(wrapper, 'Remove empty group or page').trigger('click')
+    expect((wrapper.get('select[name="pageNext"]').element as HTMLSelectElement).value).toBe('next')
+    expect(wrapper.text()).toContain('Navigation to that page was updated')
+  })
+
+  it('opens the page flow map and selects a page for editing', async () => {
+    const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
+    await flushPromises()
+    await button(wrapper, 'Edit').trigger('click')
+    await wrapper.get('.designer-outline-add').trigger('click')
+    await wrapper.get('.designer-flow-toggle').trigger('click')
+    expect(wrapper.findAll('.flow-page-node')).toHaveLength(2)
+    await wrapper.findAll('.flow-page-node')[0]!.trigger('click')
+    expect(wrapper.findAll('.designer-outline-item')[0]!.attributes('aria-current')).toBe('location')
   })
 
   it('requires a selected synchronized organization, Proponent and note before irreversible verification', async () => {

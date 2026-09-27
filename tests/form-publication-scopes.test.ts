@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { agreementTargetsForScope, foreignId, publishedAgreementTargets } from '../server/forms.ts'
+import { agreementTargetsForScope, foreignId, formPublications, publishedAgreementTargets } from '../server/forms.ts'
 
 const agreements = [
   { id: 'A-1', organizationId: 'N-1', streamId: 'S-1' },
@@ -41,5 +41,31 @@ describe('form publication scopes', () => {
     ], new Set(['N-NEW']))
     expect(targets.map(item => ({ id: item.id, organizationId: item.organizationId })))
       .toEqual([{ id: 'A-1', organizationId: 'N-NEW' }])
+  })
+
+  it('reports portal publication status and location for every survey placement', () => {
+    const placements = formPublications([
+      { organizationId: 'N-1', agreementId: 'A-1', published: true,
+        items: [{ kind: 'survey', surveyId: 'V-ABCDE', surveyRevision: 1 },
+          { kind: 'survey', surveyId: 'V-ABCDE', surveyRevision: 2 }] },
+      { organizationId: 'N-1', agreementId: null, published: false,
+        items: [{ kind: 'survey', surveyId: 'V-ABCDE', surveyRevision: 3 }] },
+      { organizationId: 'N-1', agreementId: null, published: true,
+        items: [{ kind: 'claim', surveyId: 'V-OTHER', surveyRevision: 1 }] }
+    ], [
+      { id: 'C-1', nameEn: 'Apply', nameFr: 'Présenter une demande', published: true,
+        surveyId: 'V-ABCDE', surveyRevision: 2 }
+    ], [{ id: 'A-1', nameEn: 'Agreement', nameFr: 'Accord' }], [{ id: 'N-1', name: 'Organization' }])
+
+    expect(placements).toEqual([
+      { surveyId: 'V-ABCDE', revision: 1, targetType: 'agreement', targetId: 'A-1',
+        targetNameEn: 'Agreement', targetNameFr: 'Accord', organizationName: 'Organization', published: true },
+      { surveyId: 'V-ABCDE', revision: 2, targetType: 'agreement', targetId: 'A-1',
+        targetNameEn: 'Agreement', targetNameFr: 'Accord', organizationName: 'Organization', published: true },
+      { surveyId: 'V-ABCDE', revision: 3, targetType: 'organization', targetId: 'N-1',
+        targetNameEn: 'Organization', targetNameFr: 'Organization', organizationName: 'Organization', published: false },
+      { surveyId: 'V-ABCDE', revision: 2, targetType: 'opportunity', targetId: 'C-1',
+        targetNameEn: 'Apply', targetNameFr: 'Présenter une demande', published: true }
+    ])
   })
 })
