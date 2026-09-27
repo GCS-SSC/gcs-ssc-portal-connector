@@ -2,6 +2,28 @@
 
 This extension connects an agency in GCS–SSC to the companion organization portal through its agency-scoped integration API. The portal keeps organization accounts and original submissions; GCS owns published funding data and imported drafts.
 
+## Health Canada manual-test fixture
+
+Start the companion Portal with its demo seed on `http://localhost:3000/`. Stop the GCS development server before writing its PGlite database, then run from this extension directory:
+
+```bash
+bun run seed:demo
+```
+
+The first run enables the connector for the existing Health Canada Agency. Start GCS once to apply the enabled extension migrations, stop it, and run `bun run seed:demo` again. The second run caches the three Portal organizations for Health Canada, resolves the existing showcase Agreement and its Proponent by name, and leaves **every organization unverified**. It does not change a GCS core record or create a Portal link. The script is rerunnable and preserves an existing connection.
+
+Set `DATABASE_URL` for a PostgreSQL-backed GCS demo, or `PGLITE_DATA_DIR` if its database is not the root default `.data/pglite`. The Portal URL defaults to `http://localhost:3000/`; override it with `PORTAL_DEMO_URL`. Override the demo Agency code with `PORTAL_DEMO_HEALTH_CANADA_AGENCY_ID` if the companion Portal uses a nonfresh database. The script reads the live Portal organization catalog by name, so its organization IDs may change without breaking the fixture.
+
+Start GCS on a different port (for example `bun run dev --port 3001`). Sign in with the seeded `root@example.com` / `password123` account, which has Agency Manager authority for Health Canada, open **Portal → Health Canada → Connection**, and use these local demo values to exercise **Test connection** and **Save**:
+
+```text
+Portal URL: http://localhost:3000/
+Portal agency: G-NFAFV
+Portal key: gcs_PgdzCAcAAc5UJO42TvnGK8QgSQSv-fWhM-vTd0sfyPo
+```
+
+If the Portal Agency ID or token was overridden, enter those same override values. Set `GCS_EXTENSION_SECRETS_KEY` to a stable base64-encoded 32-byte key on the GCS server before saving. On **Organization verification**, Shopify Inc. is an active, unlinked Portal choice for the existing showcase Agreement's Proponent; Northern Community Health Initiative is a second active choice, and Former Health Partnership is inactive. Confirm the link with a note, then inspect and push the queued Agreement from **Portal sync queue**. Select statuses and a pull interval from their respective pages to test those settings. To skip manual connection entry, run the second seed with `GCS_PORTAL_DEMO_PRECONFIGURE=1` and `GCS_EXTENSION_SECRETS_KEY` set; this preconfigures only the connection, not any verification.
+
 ## Setup and verification
 
 Install and enable the extension, run its migrations, and set `GCS_EXTENSION_SECRETS_KEY` on the GCS server to a base64-encoded 32-byte value (for example, generate one with `openssl rand -base64 32`). Keep that value stable across restarts: changing it makes stored credentials unreadable. Create an agency integration credential in the portal. In **Agency → Extensions → Organization portal**, save the HTTPS portal URL, `G-` agency code, and one-time key. Loopback HTTP is accepted for local development. The key is encrypted by the host secret store and is never returned to the browser.
