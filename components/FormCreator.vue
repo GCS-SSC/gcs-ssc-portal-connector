@@ -2,8 +2,8 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { surveyV3Schema, upgradeToAdvancedSurvey, type AdvancedGroup, type AdvancedQuestion,
   type AdvancedSurvey, type SurveyCondition } from '@gcs-ssc/survey'
-import { ExtensionButton, ExtensionCheckbox, ExtensionFormField, ExtensionInput,
-  ExtensionSaveButton, ExtensionSelect, useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
+import { ExtensionButton, ExtensionCheckbox, ExtensionEntityEditorWorkspace, ExtensionFormField, ExtensionInput,
+  ExtensionRouteTabs, ExtensionSaveButton, ExtensionSelect, useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
 import { messages } from '../i18n/messages'
 import { computedTemplateReady } from '../shared/form-localization'
 import FormCondition from './FormCondition.vue'
@@ -12,7 +12,7 @@ import FormTest from './FormTest.vue'
 import { clearFormDraft, readFormDraft, writeFormDraft, writeFormSelection } from './form-draft-session'
 
 const props = defineProps<{ agencyId: string; disabled?: boolean; selectedFormId?: string; intakeId?: string;
-  opportunityId?: string; streamId?: string }>()
+  opportunityId?: string; streamId?: string; standalone?: boolean }>()
 const emit = defineEmits<{ close: []; saved: [id: string] }>()
 const { locale, t } = useExtensionI18n(messages)
 const language = computed<'en' | 'fr'>(() => locale.value === 'fr' ? 'fr' : 'en')
@@ -30,7 +30,13 @@ const surveys = ref<Summary[]>([]), programs = ref<Program[]>([]), streams = ref
 const formsLoaded = ref(false)
 const agreements = ref<Agreement[]>([]), organizations = ref<Organization[]>([])
 const formId = ref(''), revision = ref(0), selectedContainerId = ref('page_1'), selectedQuestionId = ref('')
-const tab = ref<'edit' | 'test' | 'settings' | 'publish'>('settings')
+const tab = ref<'edit' | 'test' | 'settings' | 'publish'>('edit')
+const workflowTabs = computed(() => [
+  { key: 'edit', value: 'edit', label: t('formEditTab'), icon: 'i-lucide-pencil' },
+  { key: 'test', value: 'test', label: t('formTestTab'), icon: 'i-lucide-flask-conical' },
+  { key: 'settings', value: 'settings', label: t('formSettingsTab'), icon: 'i-lucide-settings' },
+  ...(!props.intakeId && !props.opportunityId ? [{ key: 'publish', value: 'publish', label: t('formPublishTab'), icon: 'i-lucide-send' }] : [])
+])
 const showFlowMap = ref(false)
 const busy = ref(false), loading = ref(false), error = ref(''), message = ref('')
 const attachmentPending = ref(false)
@@ -218,7 +224,7 @@ const load = async () => {
 }
 const resetForm = () => {
   formId.value = ''; revision.value = 0; definition.value = newDefinition()
-  selectedContainerId.value = 'page_1'; selectedQuestionId.value = ''; tab.value = 'settings'
+  selectedContainerId.value = 'page_1'; selectedQuestionId.value = ''; tab.value = 'edit'
   saved.value = JSON.stringify(definition.value)
 }
 const selectForm = async (id: string) => {
@@ -536,20 +542,25 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
 </script>
 
 <template>
-  <section class="designer space-y-5" :aria-label="tr('Form designer', 'Concepteur de formulaires')">
+  <section class="designer space-y-5" :class="{ 'designer--standalone': standalone }" :aria-label="tr('Form designer', 'Concepteur de formulaires')">
     <div class="designer-header">
       <div>
-        <button type="button" class="designer-back" @click="closeDesigner">← {{ props.opportunityId ? tr('Back to opportunity', 'Retour à l’occasion') : props.intakeId ? tr('Back to intake', 'Retour à l’appel') : tr('All forms', 'Tous les formulaires') }}</button>
+        <button v-if="!standalone" type="button" class="designer-back" @click="closeDesigner">← {{ props.opportunityId ? tr('Back to opportunity', 'Retour à l’occasion') : props.intakeId ? tr('Back to intake', 'Retour à l’appel') : tr('All forms', 'Tous les formulaires') }}</button>
         <h3 class="designer-heading">{{ definition.title[language] || tr('Untitled form', 'Formulaire sans titre') }}</h3>
         <p class="designer-subtitle">{{ formId ? `${tr('Revision', 'Version')} ${revision}` : tr('New form', 'Nouveau formulaire') }}<span v-if="dirty"> · {{ tr('Unsaved changes', 'Modifications non enregistrées') }}</span></p>
       </div>
       <ExtensionSaveButton :label="tr('Save revision', 'Enregistrer la version')" :disabled="disabled" :loading="busy" @click="save" />
     </div>
     <p v-if="loading" role="status">{{ tr('Loading forms…', 'Chargement des formulaires…') }}</p>
-    <div class="designer-tabs" role="tablist" :aria-label="tr('Form workflow', 'Étapes du formulaire')">
+    <component :is="standalone ? ExtensionEntityEditorWorkspace : 'div'" content-test-id="form-detail-content">
+      <template v-if="standalone" #sidebar>
+        <ExtensionRouteTabs v-model="tab" :items="workflowTabs" :sort="false" orientation="vertical"
+          :ui="{ root: 'w-full', list: 'w-full flex-col items-stretch p-0', trigger: 'w-full justify-start' }" />
+      </template>
+    <div v-if="!standalone" class="designer-tabs" role="tablist" :aria-label="tr('Form workflow', 'Étapes du formulaire')">
       <button v-for="item in (props.intakeId || props.opportunityId ? ['edit', 'test', 'settings'] : ['edit', 'test', 'settings', 'publish']) as Array<'edit' | 'test' | 'settings' | 'publish'>" :key="item" type="button" role="tab" class="designer-tab"
         :aria-selected="tab === item" :disabled="item === 'test' && !definition.questions.length"
-        @click="tab = item">{{ item === 'edit' ? tr('Edit', 'Modifier') : item === 'test' ? tr('Test', 'Tester') : item === 'settings' ? tr('Settings', 'Paramètres') : tr('Publish', 'Publier') }}</button>
+        @click="tab = item">{{ item === 'edit' ? t('formEditTab') : item === 'test' ? t('formTestTab') : item === 'settings' ? t('formSettingsTab') : t('formPublishTab') }}</button>
     </div>
     <section v-if="tab === 'edit'" class="designer-flow-overview">
       <button type="button" class="designer-flow-toggle" :aria-expanded="showFlowMap" @click="showFlowMap = !showFlowMap">
@@ -790,8 +801,9 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
           <div class="flex items-center justify-end gap-2 text-sm"><span class="text-muted">{{ tr('Preview language', 'Langue de l’aperçu') }}</span><button type="button" class="designer-language" :aria-pressed="previewLocale === 'en'" @click="previewLocale = 'en'">English</button><button type="button" class="designer-language" :aria-pressed="previewLocale === 'fr'" @click="previewLocale = 'fr'">Français</button></div>
           <FormTest :definition="definition" :locale="previewLocale" />
         </div>
-        <div v-else-if="tab === 'settings'" class="designer-form-details grid gap-4 sm:grid-cols-2">
-          <div class="sm:col-span-2"><h4 class="text-lg font-semibold">{{ tr('Form settings', 'Paramètres du formulaire') }}</h4><p class="text-sm text-muted">{{ tr('Set the title and introduction applicants will see in each language.', 'Définissez le titre et l’introduction que les demandeurs verront dans chaque langue.') }}</p></div>
+        <div v-else-if="tab === 'settings'" class="designer-form-details">
+          <div><h4 class="text-lg font-semibold">{{ tr('Form settings', 'Paramètres du formulaire') }}</h4><p class="text-sm text-muted">{{ tr('Set the title and introduction applicants will see in each language.', 'Définissez le titre et l’introduction que les demandeurs verront dans chaque langue.') }}</p></div>
+          <div class="mt-4 grid gap-4 sm:grid-cols-2">
           <ExtensionFormField :label="tr('Form title · English', 'Titre du formulaire · anglais')" name="formTitleEn" required>
             <ExtensionInput v-model="definition.title.en" name="formTitleEn" required :disabled="disabled" />
           </ExtensionFormField>
@@ -804,7 +816,8 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
           <ExtensionFormField :label="tr('Introduction · French', 'Introduction · français')" name="formDescriptionFr">
             <textarea v-model="definition.description!.fr" name="formDescriptionFr" class="designer-textarea" :disabled="disabled" />
           </ExtensionFormField>
-          <p class="text-sm text-muted sm:col-span-2">{{ tr('Pages, sections, questions, and their translations are edited in Edit.', 'Les pages, les sections, les questions et leurs traductions se modifient dans Modifier.') }}</p>
+          </div>
+          <p class="mt-4 text-sm text-muted">{{ tr('Pages, sections, questions, and their translations are edited in Edit.', 'Les pages, les sections, les questions et leurs traductions se modifient dans Modifier.') }}</p>
         </div>
         <div v-else class="space-y-5">
           <section class="designer-form-details space-y-3">
@@ -861,12 +874,14 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
     <ExtensionButton v-if="attachmentPending" :disabled="disabled || busy" :loading="busy" @click="retryAttachment">
       {{ t('intakeAttachRetry') }}
     </ExtensionButton>
+    </component>
   </section>
 </template>
 
 <style scoped>
 .designer { color: var(--ui-text, #e8e8ec); container-type: inline-size; }
 .designer-header { display: flex; align-items: end; justify-content: space-between; gap: 1.25rem; padding-bottom: 1rem; border-bottom: 1px solid var(--ui-border, #33343a); }
+.designer--standalone .designer-header { margin: 1.5rem 1.5rem 0; }
 .designer-back { display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .7rem; color: var(--ui-text-muted, #a2a3ab); font-size: .875rem; }
 .designer-back:hover { color: var(--ui-text, #fff); text-decoration: underline; }
 .designer-heading { font-size: clamp(1.5rem, 2vw, 2rem); font-weight: 700; line-height: 1.2; letter-spacing: -.025em; }

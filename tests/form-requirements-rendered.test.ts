@@ -62,6 +62,17 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
       return () => h('button', { disabled: props.disabled, onClick: () => emit('click') }, props.label ?? slots.default?.())
     }
   })
+  const workspace = defineComponent({
+    setup(_, { slots }) { return () => h('div', { 'data-form-workspace': '' }, [slots.sidebar?.(), slots.default?.()]) }
+  })
+  const routeTabs = defineComponent({
+    props: ['modelValue', 'items'], emits: ['update:modelValue'],
+    setup(props, { emit }) { return () => h('nav', { 'aria-label': 'Form workflow' },
+      (props.items as Array<{ value: string; label: string }>).map(item => h('button', {
+        role: 'tab', 'aria-selected': props.modelValue === item.value,
+        onClick: () => emit('update:modelValue', item.value)
+      }, item.label))) }
+  })
   const resourceTable = defineComponent({
     props: ['data', 'columns', 'search', 'pagination', 'searchPlaceholder', 'showToolbar'], emits: ['update:search', 'update:pagination'],
     setup(props, { slots, emit }) {
@@ -85,6 +96,7 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
     ExtensionFormField: field, ExtensionInput: input, ExtensionSelect: select,
     ExtensionCheckbox: checkbox, ExtensionButton: button, ExtensionSaveButton: button,
     ExtensionTextarea: textarea, ExtensionModal: modal, ExtensionResourceLayoutCard: resourceTable,
+    ExtensionEntityEditorWorkspace: workspace, ExtensionRouteTabs: routeTabs,
     ExtensionBadge: defineComponent({ setup(_, { slots }) { return () => h('span', slots.default?.()) } }),
     ExtensionAlert: defineComponent({ props: ['title'], setup(props, { slots }) {
       return () => h('div', { role: 'alert' }, [h('strong', props.title), slots.description?.()])
@@ -335,6 +347,8 @@ describe('connector form requirements', () => {
   ])('renders required %s limits and blocks a cleared limit at the survey validation boundary', async (type, name, errorId, errorText) => {
     const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
     await flushPromises()
+    expect(button(wrapper, 'Edit').attributes('aria-selected')).toBe('true')
+    await button(wrapper, 'Settings').trigger('click')
     await wrapper.get('input[name="formTitleEn"]').setValue('Title')
     await wrapper.get('input[name="formTitleFr"]').setValue('Titre')
     await button(wrapper, 'Edit').trigger('click')
@@ -352,6 +366,7 @@ describe('connector form requirements', () => {
   it('identifies computed sources as a required group and requires one before save', async () => {
     const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
     await flushPromises()
+    await button(wrapper, 'Settings').trigger('click')
     await wrapper.get('input[name="formTitleEn"]').setValue('Title')
     await wrapper.get('input[name="formTitleFr"]').setValue('Titre')
     await button(wrapper, 'Edit').trigger('click')
@@ -377,6 +392,7 @@ describe('connector form requirements', () => {
     try {
       const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
       await flushPromises()
+      await button(wrapper, 'Settings').trigger('click')
       await wrapper.get('input[name="formTitleEn"]').setValue('Draft title')
       await button(wrapper, '← All forms').trigger('click')
       expect(confirm).toHaveBeenCalled()
@@ -438,6 +454,7 @@ describe('connector form requirements', () => {
       nameEn: 'Community intake', nameFr: 'Appel communautaire' })
     await button(wrapper, 'Create application form').trigger('click')
     await flushPromises()
+    await button(wrapper, 'Settings').trigger('click')
     await wrapper.get('input[name="formTitleEn"]').setValue('Application')
     await wrapper.get('input[name="formTitleFr"]').setValue('Demande')
     await button(wrapper, 'Edit').trigger('click')
@@ -500,6 +517,7 @@ describe('connector form requirements', () => {
       : { attached: true })
     const wrapper = mount(FormCreator, { props: { agencyId: '1', intakeId: 'D-ABCDE' } })
     await flushPromises()
+    await button(wrapper, 'Settings').trigger('click')
     await wrapper.get('input[name="formTitleEn"]').setValue('Application')
     await wrapper.get('input[name="formTitleFr"]').setValue('Demande')
     await button(wrapper, 'Edit').trigger('click')
@@ -522,6 +540,7 @@ describe('connector form requirements', () => {
   it('returns to Settings when a form introduction translation fails validation', async () => {
     const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
     await flushPromises()
+    await button(wrapper, 'Settings').trigger('click')
     await wrapper.get('input[name="formTitleEn"]').setValue('Project report')
     await wrapper.get('input[name="formTitleFr"]').setValue('Rapport de projet')
     await wrapper.get('textarea[name="formDescriptionEn"]').setValue('Describe the project.')
@@ -533,7 +552,7 @@ describe('connector form requirements', () => {
     expect(wrapper.find('textarea[name="formDescriptionFr"]').exists()).toBe(true)
   })
 
-  it('restores an unsaved draft after the host remounts the extension', async () => {
+  it('opens a new form on a detail page and restores its unsaved draft there', async () => {
     const connection = mount(PortalConnection, { props: { agencyId: '1', section: 'connection', enabled: true } })
     await flushPromises()
     expect(get).not.toHaveBeenCalledWith('/agencies/1/forms')
@@ -541,26 +560,31 @@ describe('connector form requirements', () => {
 
     const firstForms = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', enabled: true } })
     await flushPromises()
+    expect(firstForms.get('table tbody tr td').attributes('colspan')).toBe('5')
+    expect(button(firstForms, 'Create form')).toBeDefined()
     await button(firstForms, 'Create form').trigger('click')
-    await firstForms.get('input[name="formTitleEn"]').setValue('Unsaved draft')
-    await flushPromises()
+    expect(firstForms.emitted('openForm')?.[0]).toEqual([''])
+    expect(firstForms.find('input[name="formTitleEn"]').exists()).toBe(false)
     firstForms.unmount()
 
-    const restored = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', enabled: true } })
+    const firstDetail = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', detailFormId: '', enabled: true } })
+    await flushPromises()
+    expect(firstDetail.emitted('formCollectionLabel')?.[0]).toEqual(['All forms'])
+    expect(button(firstDetail, 'Edit').attributes('aria-selected')).toBe('true')
+    expect(firstDetail.get('[data-form-workspace] nav').text()).toContain('Publish')
+    expect(firstDetail.find('.designer-back').exists()).toBe(false)
+    await button(firstDetail, 'Settings').trigger('click')
+    await firstDetail.get('input[name="formTitleEn"]').setValue('Unsaved draft')
+    await flushPromises()
+    firstDetail.unmount()
+
+    const restored = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', detailFormId: '', enabled: true } })
     await flushPromises()
     expect((restored.get('input[name="formTitleEn"]').element as HTMLInputElement).value).toBe('Unsaved draft')
-    const confirm = vi.fn().mockReturnValue(true)
-    vi.stubGlobal('confirm', confirm)
-    try {
-      await button(restored, '← All forms').trigger('click')
-      expect(confirm).toHaveBeenCalled()
-      expect(restored.find('input[name="formTitleEn"]').exists()).toBe(false)
-      expect(window.sessionStorage.getItem('gcs-ssc-portal-connector:forms:1:selection')).toBeNull()
-      restored.unmount()
-      const library = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', enabled: true } })
-      await flushPromises()
-      expect(library.text()).toContain('No forms yet')
-    } finally { vi.unstubAllGlobals() }
+    restored.unmount()
+    const library = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', enabled: true } })
+    await flushPromises()
+    expect(library.text()).toContain('No forms yet')
   })
 
   it('loads a newer server revision instead of restoring a stale saved-form draft', async () => {
@@ -573,7 +597,6 @@ describe('connector form requirements', () => {
     }
     const oldDraft = structuredClone(latest)
     oldDraft.title.en = 'Unsaved older revision'
-    window.sessionStorage.setItem('gcs-ssc-portal-connector:forms:1:selection', 'form_1')
     window.sessionStorage.setItem('gcs-ssc-portal-connector:forms:1:draft', JSON.stringify({
       formId: 'form_1', revision: 1, definition: oldDraft, saved: JSON.stringify(latest),
       selectedContainerId: 'page_1', selectedQuestionId: '', tab: 'settings', publicationScope: 'agreement',
@@ -586,7 +609,7 @@ describe('connector form requirements', () => {
       : path === '/agencies/1/forms/form_1'
         ? { survey: { id: 'form_1', revision: 2, definition: latest } }
         : defaultGet(path))
-    const wrapper = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', enabled: true } })
+    const wrapper = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', detailFormId: 'form_1', enabled: true } })
     await flushPromises()
     expect(get).toHaveBeenCalledWith('/agencies/1/forms/form_1')
     expect(wrapper.text()).toContain('Current version')
@@ -595,12 +618,12 @@ describe('connector form requirements', () => {
   })
 
   it('ignores a corrupt stored draft instead of rendering malformed form data', async () => {
-    window.sessionStorage.setItem('gcs-ssc-portal-connector:forms:1:selection', '')
     window.sessionStorage.setItem('gcs-ssc-portal-connector:forms:1:draft', JSON.stringify({
       formId: '', revision: 0, saved: '{}', definition: { schemaVersion: 3, pages: [], questions: [] }
     }))
-    const wrapper = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', enabled: true } })
+    const wrapper = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', detailFormId: '', enabled: true } })
     await flushPromises()
+    await button(wrapper, 'Settings').trigger('click')
     expect((wrapper.get('input[name="formTitleEn"]').element as HTMLInputElement).value).toBe('')
     expect(wrapper.text()).toContain('New form')
   })

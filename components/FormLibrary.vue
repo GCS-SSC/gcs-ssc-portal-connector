@@ -133,13 +133,7 @@ watch(() => props.agencyId, () => {
         </label>
       </div>
 
-      <div v-if="!forms.length" class="border-t border-default py-12 text-center">
-        <p class="font-medium text-highlighted">{{ tr('No forms yet', 'Aucun formulaire pour le moment') }}</p>
-        <p class="mt-1 text-sm text-muted">{{ tr('Create a form to start designing questions and publish it on the portal.',
-          'Créez un formulaire pour concevoir les questions et le publier dans le portail.') }}</p>
-        <ExtensionButton class="mt-4" :disabled="disabled" @click="emit('create')">{{ tr('Create form', 'Créer un formulaire') }}</ExtensionButton>
-      </div>
-      <p v-else-if="!filteredForms.length" class="border-t border-default py-8 text-sm text-muted">
+      <p v-if="forms.length && !filteredForms.length" class="border-t border-default py-8 text-sm text-muted">
         {{ tr('No forms match your search or status filter.', 'Aucun formulaire ne correspond à la recherche ou au filtre de statut.') }}
       </p>
       <div v-else class="overflow-x-auto border-y border-default">
@@ -154,6 +148,13 @@ watch(() => props.agencyId, () => {
             </tr>
           </thead>
           <tbody>
+            <tr v-if="!forms.length">
+              <td colspan="5" class="py-12 text-center">
+                <p class="font-medium text-highlighted">{{ tr('No forms yet', 'Aucun formulaire pour le moment') }}</p>
+                <p class="mt-1 text-sm text-muted">{{ tr('Create a form to start designing questions and publish it on the portal.',
+                  'Créez un formulaire pour concevoir les questions et le publier dans le portail.') }}</p>
+              </td>
+            </tr>
             <tr v-for="form in filteredForms" :key="form.id" class="border-t border-default hover:bg-elevated">
               <td class="py-4 pr-5 align-top">
                 <button type="button" class="text-left font-semibold text-highlighted underline-offset-2 hover:underline focus-visible:underline"
