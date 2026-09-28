@@ -26,7 +26,8 @@ export default defineGcsExtension({
         { id: 'statuses', label: { en: 'Statuses', fr: 'Statuts' }, icon: 'i-lucide-list-checks' },
         { id: 'queue', label: { en: 'Portal sync queue', fr: 'File de synchronisation' }, icon: 'i-lucide-list-ordered' },
         { id: 'delivery', label: { en: 'Portal delivery', fr: 'Livraison au portail' }, icon: 'i-lucide-truck' },
-        { id: 'forms', label: { en: 'Forms', fr: 'Formulaires' }, icon: 'i-lucide-list' }
+        { id: 'forms', label: { en: 'Forms', fr: 'Formulaires' }, icon: 'i-lucide-list' },
+        { id: 'intakes', label: { en: 'Intakes', fr: 'Appels de demandes' }, icon: 'i-lucide-inbox' }
       ]
     }
   },
@@ -64,6 +65,16 @@ export default defineGcsExtension({
     { path: './server/migrations/0009_delivery_payload.ts' }
   ],
   serverHandlers: [
+    {
+      route: '/agencies/[agencyId]/intakes', method: 'get',
+      rbac: { subject: 'agency', action: 'read', agency: { param: 'agencyId' } },
+      path: './server/api/intakes.get.ts'
+    },
+    {
+      route: '/agencies/[agencyId]/intakes', method: 'post',
+      rbac: { subject: 'agency', action: 'delete', agency: { param: 'agencyId' } },
+      path: './server/api/intakes.post.ts'
+    },
     {
       route: '/agencies/[agencyId]/forms', method: 'get',
       rbac: { subject: 'agency', action: 'read', agency: { param: 'agencyId' } },

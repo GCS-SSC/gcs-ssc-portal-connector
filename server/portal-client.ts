@@ -20,7 +20,7 @@ export class PortalRequestError extends Error {
 
 /** Server-only transport. Redirects cannot carry the agency bearer credential elsewhere. */
 export const createPortalClient = (connection: PortalConnection, transport: typeof fetch = fetch) => {
-  const request = async (path: string, method: 'GET' | 'POST' | 'PUT' | 'PATCH' = 'GET', body?: object): Promise<unknown> => {
+  const request = async (path: string, method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' = 'GET', body?: object): Promise<unknown> => {
     const url = new URL(`api/government/${path}`, connection.portalUrl)
     const response = await transport(url, {
       method, redirect: 'manual', signal: AbortSignal.timeout(30000),
@@ -81,7 +81,8 @@ export const createPortalClient = (connection: PortalConnection, transport: type
       streams: z.array(z.object({ id: z.string(), nameEn: z.string(), nameFr: z.string(), foreignSystemId: z.string().nullable(), sourceSystem: z.string() }).passthrough()),
       calls: z.array(z.object({ id: z.string(), streamId: z.string(), nameEn: z.string(), nameFr: z.string(),
         published: z.boolean(), surveyId: z.string().nullable(), surveyRevision: z.number().int().nullable(),
-        sourceSystem: z.string(), foreignSystemId: z.string().nullable() }).passthrough())
+        startDate: z.string(), endDate: z.string(), sourceSystem: z.string(), foreignSystemId: z.string().nullable()
+      }).passthrough())
     }).parse(await request(`agencies/${encodeURIComponent(connection.portalAgencyId)}`)),
     surveys: async () => z.object({ surveys: z.array(z.object({
       id: z.string(), revision: z.number().int(), title: z.object({ en: z.string(), fr: z.string() }), updatedAt: z.string()
@@ -96,10 +97,15 @@ export const createPortalClient = (connection: PortalConnection, transport: type
       z.object({ survey: z.object({ id: z.string(), revision: z.number().int() }) }).parse(await request(
         `surveys/${encodeURIComponent(id)}`, 'PUT', { expectedRevision, definition })).survey,
     createCall: async (input: object) => z.object({ id: z.string() }).parse(await request('calls', 'POST', input)).id,
+    updateCall: async (id: string, input: object) => z.object({ id: z.string() }).parse(await request(
+      `calls/${encodeURIComponent(id)}`, 'PUT', input)).id,
     attachCallSurvey: async (id: string, surveyId: string, revision: number) => await request(
       `calls/${encodeURIComponent(id)}/survey`, 'PUT', { surveyId, revision }),
     publishCall: async (id: string) => await request(`calls/${encodeURIComponent(id)}/publication`,
       'PATCH', { published: true }),
+    withdrawCall: async (id: string) => await request(`calls/${encodeURIComponent(id)}/publication`,
+      'PATCH', { published: false }),
+    deleteCall: async (id: string) => await request(`calls/${encodeURIComponent(id)}`, 'DELETE'),
     organizations: async (after?: string) => z.object({
       organizations: z.array(z.object({
         id: z.string(), name: z.string(), description: z.string(), active: z.boolean(), verified: z.boolean(),

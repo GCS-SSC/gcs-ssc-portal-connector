@@ -1,20 +1,25 @@
-import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { surveyV3Schema, upgradeToAdvancedSurvey } from '@gcs-ssc/survey'
 import type { GcsExtensionRouteContext } from '@gcs-ssc/extensions/server'
-import { agencyIdFromContext, authorizedWrite } from './authorization.ts'
-import { readPortalCredentialFromDb } from './connection.ts'
+import { authorizedWrite } from './authorization.ts'
 import { asConnectorDb } from './db.ts'
 import { createPortalClient } from './portal-client.ts'
+import { clientForAgency } from './portal-context.ts'
 import { formPublicationIssues } from './form-readiness.ts'
+import { foreignId } from './form-identity.ts'
+import { requireIntakeCall } from './intakes.ts'
+import { intakeError } from './intake-errors.ts'
+
+export { foreignId } from './form-identity.ts'
 
 const formCode = z.string().regex(/^V-[A-HJKMNP-Z2-9]{5,}$/)
 const portalCode = z.string().regex(/^[A-Z]-[A-HJKMNP-Z2-9]{5,}$/)
 const input = z.discriminatedUnion('action', [
   z.object({ action: z.literal('save'), surveyId: formCode.optional(), expectedRevision: z.number().int().positive().optional(),
+    intakeId: portalCode.optional(),
     definition: surveyV3Schema }).strict(),
-  z.object({ action: z.literal('publishCall'), surveyId: formCode, revision: z.number().int().positive(),
-    streamId: portalCode, startDate: z.iso.date(), endDate: z.iso.date() }).strict(),
+  z.object({ action: z.literal('attachIntakeForm'), intakeId: portalCode, surveyId: formCode,
+    revision: z.number().int().positive() }).strict(),
   z.object({ action: z.literal('publishAgreement'), surveyId: formCode, revision: z.number().int().positive(),
     agreementId: portalCode, organizationId: portalCode }).strict(),
   z.object({ action: z.literal('publishScope'), surveyId: formCode, revision: z.number().int().positive(),
@@ -22,9 +27,6 @@ const input = z.discriminatedUnion('action', [
   z.object({ action: z.literal('publishOrganization'), surveyId: formCode, revision: z.number().int().positive(),
     organizationId: portalCode }).strict()
 ])
-export const foreignId = (value: string) =>
-  (BigInt(`0x${createHash('sha256').update(value).digest('hex').slice(0, 15)}`) + BigInt(1)).toString()
-
 type FormAgreement = { id: string; organizationId: string; streamId: string }
 type FormStream = { id: string; programId?: unknown; sourceSystem: string }
 type PortalAgreement = Awaited<ReturnType<ReturnType<typeof createPortalClient>['agreements']>>['agreements'][number]
@@ -97,18 +99,6 @@ export const formPublications = (
   return placements
 }
 
-const clientForAgency = async (context: GcsExtensionRouteContext) => {
-  const agencyId = agencyIdFromContext(context)
-  const db = asConnectorDb(context.db)
-  const connection = await db.selectFrom('extensions.gcs_portal_connection').selectAll()
-    .where('agency_id', '=', agencyId).executeTakeFirst()
-  if (!connection) throw new Error('Connect the portal before managing forms.')
-  return { agencyId, connection, client: createPortalClient({
-    portalUrl: connection.portal_url, portalAgencyId: connection.portal_agency_id,
-    key: await readPortalCredentialFromDb(db, agencyId)
-  }) }
-}
-
 export const listForms = async (context: GcsExtensionRouteContext) => {
   const { agencyId, client } = await clientForAgency(context)
   const db = asConnectorDb(context.db)
@@ -157,38 +147,42 @@ export const manageForm = async (context: GcsExtensionRouteContext) => {
   const command = input.parse(await context.readBody())
   const { agencyId, connection, client } = await clientForAgency(context)
   await authorizedWrite(context, async () => undefined)
+  if (command.action === 'attachIntakeForm') {
+    const call = requireIntakeCall(await client.structure(), command.intakeId)
+    if (call.published) throw intakeError('intakeWithdrawToEditForm')
+    if (call.surveyId === command.surveyId && call.surveyRevision === command.revision)
+      return { attached: true }
+    if (call.surveyId && call.surveyId !== command.surveyId)
+      throw intakeError('intakeDifferentForm')
+    const latest = await client.survey(command.surveyId)
+    if (latest.revision !== command.revision) throw intakeError('intakeLatestAttachment', 422)
+    await client.attachCallSurvey(command.intakeId, command.surveyId, command.revision)
+    return { attached: true }
+  }
   if (command.action === 'save') {
     if (Boolean(command.surveyId) !== Boolean(command.expectedRevision))
-      throw new Error('An existing form needs its current revision.')
+      throw intakeError('intakeFormRevisionRequired', 400)
+    if (command.intakeId) {
+      const call = requireIntakeCall(await client.structure(), command.intakeId)
+      if (call.published) throw intakeError('intakeWithdrawToEditForm')
+      if (call.surveyId && call.surveyId !== command.surveyId)
+        throw intakeError('intakeDifferentForm')
+    }
     const survey = command.surveyId
       ? await client.updateSurvey(command.surveyId, command.expectedRevision!, command.definition)
       : await client.createSurvey(command.definition)
-    return { survey }
+    if (!command.intakeId) return { survey }
+    try {
+      await client.attachCallSurvey(command.intakeId, survey.id, survey.revision)
+      return { survey, attached: true }
+    } catch {
+      return { survey, attached: false }
+    }
   }
   const survey = await client.survey(command.surveyId)
   if (survey.revision !== command.revision) throw new Error('Save or reload the latest form revision before publishing.')
   const translationIssues = formPublicationIssues(upgradeToAdvancedSurvey(survey.definition))
   if (translationIssues.length) throw new Error(`Complete both English and French content before publishing: ${translationIssues.join(', ')}.`)
-  if (command.action === 'publishCall') {
-    if (command.endDate < command.startDate) throw new Error('The closing date cannot precede the opening date.')
-    const structure = await client.structure()
-    if (!structure.streams.some((stream) => stream.id === command.streamId && stream.sourceSystem === 'gcs-ssc'))
-      throw new Error('Choose a GCS stream in this agency.')
-    const sourceId = foreignId(`form-call:${command.surveyId}:${command.revision}`)
-    const prior = structure.calls.find((call) => call.sourceSystem === 'gcs-ssc-opportunity-shim'
-      && call.foreignSystemId === sourceId)
-    if (prior?.published && prior.surveyId === command.surveyId && prior.surveyRevision === command.revision)
-      return { callId: prior.id, published: true }
-    if (prior?.published) throw new Error('The published funding call cannot be changed.')
-    const callId = prior?.id ?? await client.createCall({
-      streamId: command.streamId, nameEn: survey.definition.title.en, nameFr: survey.definition.title.fr,
-      startDate: command.startDate, endDate: command.endDate,
-      sourceSystem: 'gcs-ssc-opportunity-shim', foreignSystemId: sourceId
-    })
-    await client.attachCallSurvey(callId, command.surveyId, command.revision)
-    await client.publishCall(callId)
-    return { callId, published: true }
-  }
   const db = asConnectorDb(context.db)
   const [identities, publications, agreements, structure, sets] = await Promise.all([
     db.selectFrom('extensions.gcs_portal_identity as identity')

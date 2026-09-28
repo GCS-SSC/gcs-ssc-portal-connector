@@ -12,6 +12,14 @@ const connection = {
 }
 
 describe('portal transport', () => {
+  it('sends intake draft deletion to the scoped Portal call route', async () => {
+    const transport = vi.fn(async () => Response.json({ success: true })) as unknown as typeof fetch
+    await createPortalClient(connection, transport).deleteCall('D-ABCDE')
+    const [url, options] = vi.mocked(transport).mock.calls[0]!
+    expect(String(url)).toBe('https://portal.example.test/api/government/calls/D-ABCDE')
+    expect(options?.method).toBe('DELETE')
+    expect((options?.headers as Record<string, string>).Authorization).toBe(`Bearer ${connection.key}`)
+  })
   it('reports a rejected integration key as a user-facing connection error', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: { code: 'INVALID_INTEGRATION_TOKEN' } }, { status: 401 })))
     const context = {

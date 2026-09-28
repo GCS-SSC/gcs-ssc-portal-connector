@@ -12,11 +12,12 @@ const hostGet = vi.fn()
 
 vi.mock('@gcs-ssc/extensions/ui', () => {
   const field = defineComponent({
-    props: ['label', 'name', 'required', 'description'],
+    props: ['label', 'name', 'required', 'description', 'error'],
     setup(props, { slots }) {
       return () => h('div', { 'data-field': props.name }, [
         h('label', { for: props.name }, `${props.label}${props.required ? ' (required)' : ''}`),
         props.description ? h('p', props.description) : null,
+        props.error ? h('p', { role: 'alert' }, props.error) : null,
         slots.default?.()
       ])
     }
@@ -92,6 +93,7 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
 })
 
 import FormCreator from '../components/FormCreator.vue'
+import IntakeWorkspace from '../components/IntakeWorkspace.vue'
 import FormTest from '../components/FormTest.vue'
 import { readFormDraft } from '../components/form-draft-session'
 import PortalConnection from '../components/PortalConnection.vue'
@@ -385,13 +387,136 @@ describe('connector form requirements', () => {
     } finally { vi.unstubAllGlobals() }
   })
 
-  it('puts portal destinations before the optional funding opportunity flow', async () => {
+  it('keeps other-form destinations in the form designer', async () => {
     const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
     await flushPromises()
     await button(wrapper, 'Publish').trigger('click')
     const headings = wrapper.findAll('h4').map((heading) => heading.text())
     expect(headings.indexOf('Publish to portal')).toBeGreaterThan(-1)
-    expect(headings.indexOf('Publish to portal')).toBeLessThan(headings.indexOf('Publish a funding opportunity'))
+    expect(headings).not.toContain('Publish a funding opportunity')
+  })
+
+  it('creates an intake before its form and publishes the attached revision', async () => {
+    let intake: Record<string, unknown> | null = null
+    const defaultGet = get.getMockImplementation()!
+    get.mockImplementation(async (path: string) => path.endsWith('/intakes')
+      ? { intakes: intake ? [intake] : [], streams: [{ id: 'S-ABCDE', nameEn: 'Community', nameFr: 'Communauté' }] }
+      : defaultGet(path))
+    post.mockImplementation(async (_path: string, body: Record<string, unknown>) => {
+      if (body.action === 'create') {
+        intake = { id: 'D-ABCDE', published: false, surveyId: null, surveyRevision: null,
+          ...body, action: undefined }
+        return { intakeId: 'D-ABCDE' }
+      }
+      if (body.action === 'save') {
+        intake = { ...intake, surveyId: 'V-ABCDE', surveyRevision: 1 }
+        return { survey: { id: 'V-ABCDE', revision: 1 } }
+      }
+      if (body.action === 'publish') {
+        intake = { ...intake, published: true }
+        return { intakeId: 'D-ABCDE', published: true }
+      }
+      return {}
+    })
+    const wrapper = mount(IntakeWorkspace, { props: { agencyId: '1' } })
+    await flushPromises()
+    await button(wrapper, 'Create intake opportunity').trigger('click')
+    expect(wrapper.get('input[name="intakeNameEn"]').attributes('required')).toBeDefined()
+    expect(wrapper.text()).toContain('Opportunity name in French')
+    await button(wrapper, 'Save intake').trigger('click')
+    expect(post).not.toHaveBeenCalled()
+    expect(wrapper.get('input[name="intakeNameEn"]').attributes('aria-invalid')).toBe('true')
+    expect(wrapper.text()).toContain('Complete this field.')
+    await wrapper.get('input[name="intakeNameEn"]').setValue('Community intake')
+    await wrapper.get('input[name="intakeNameFr"]').setValue('Appel communautaire')
+    await wrapper.get('select[name="intakeStream"]').setValue('S-ABCDE')
+    await wrapper.get('input[name="intakeStartDate"]').setValue('2027-01-01')
+    await wrapper.get('input[name="intakeEndDate"]').setValue('2027-12-31')
+    await button(wrapper, 'Save intake').trigger('click')
+    await flushPromises()
+    expect(post.mock.calls[0]?.[1]).toMatchObject({ action: 'create', streamId: 'S-ABCDE',
+      nameEn: 'Community intake', nameFr: 'Appel communautaire' })
+    await button(wrapper, 'Create application form').trigger('click')
+    await flushPromises()
+    await wrapper.get('input[name="formTitleEn"]').setValue('Application')
+    await wrapper.get('input[name="formTitleFr"]').setValue('Demande')
+    await button(wrapper, 'Edit').trigger('click')
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('Short answer'))!.trigger('click')
+    await button(wrapper, 'Save revision').trigger('click')
+    await flushPromises()
+    expect(post.mock.calls.some(([, body]) => (body as Record<string, unknown>).action === 'save'
+      && (body as Record<string, unknown>).intakeId === 'D-ABCDE')).toBe(true)
+    await button(wrapper, '← Back to intake').trigger('click')
+    await button(wrapper, 'Publish intake and form').trigger('click')
+    await flushPromises()
+    expect(post.mock.calls.at(-1)?.[1]).toEqual({ action: 'publish', intakeId: 'D-ABCDE' })
+    expect(wrapper.text()).toContain('Published')
+  })
+
+  it('shows French intake labels and validation errors with required control semantics', async () => {
+    state.locale = 'fr'
+    const defaultGet = get.getMockImplementation()!
+    get.mockImplementation(async (path: string) => path.endsWith('/intakes')
+      ? { intakes: [], streams: [{ id: 'S-ABCDE', nameEn: 'Community', nameFr: 'Communauté' }] }
+      : defaultGet(path))
+    const wrapper = mount(IntakeWorkspace, { props: { agencyId: '1' } })
+    await flushPromises()
+    await button(wrapper, 'Créer un appel de demandes').trigger('click')
+    expect(wrapper.text()).toContain('Nom de l’occasion en français')
+    await button(wrapper, 'Enregistrer l’appel').trigger('click')
+    expect(wrapper.get('input[name="intakeNameFr"]').attributes('required')).toBeDefined()
+    expect(wrapper.get('input[name="intakeNameFr"]').attributes('aria-invalid')).toBe('true')
+    expect(wrapper.text()).toContain('Remplissez ce champ.')
+  })
+
+  it('keeps the existing intake Stream read-only and validates date order before mutation', async () => {
+    const defaultGet = get.getMockImplementation()!
+    get.mockImplementation(async (path: string) => path.endsWith('/intakes')
+      ? { intakes: [{ id: 'D-ABCDE', streamId: 'S-ABCDE', nameEn: 'Existing intake', nameFr: 'Appel existant',
+        startDate: '2027-01-01', endDate: '2027-12-31', published: false, surveyId: null, surveyRevision: null }],
+        streams: [{ id: 'S-ABCDE', nameEn: 'Community', nameFr: 'Communauté' }] }
+      : defaultGet(path))
+    const wrapper = mount(IntakeWorkspace, { props: { agencyId: '1' } })
+    await flushPromises()
+    await button(wrapper, 'Existing intake').trigger('click')
+    await button(wrapper, 'Edit intake opportunity').trigger('click')
+    expect(wrapper.get('select[name="intakeStream"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('select[name="intakeStream"]').attributes('required')).toBeUndefined()
+    await wrapper.get('input[name="intakeEndDate"]').setValue('2026-12-31')
+    await button(wrapper, 'Save intake').trigger('click')
+    expect(post).not.toHaveBeenCalled()
+    expect(wrapper.get('input[name="intakeEndDate"]').attributes('aria-invalid')).toBe('true')
+    expect(wrapper.text()).toContain('The closing date must be on or after the opening date.')
+  })
+
+  it('keeps a saved intake form available when attachment fails and retries the same revision', async () => {
+    const defaultGet = get.getMockImplementation()!
+    get.mockImplementation(async (path: string) => path.endsWith('/forms')
+      ? { surveys: [{ id: 'V-ABCDE', revision: 1, title: { en: 'Application', fr: 'Demande' },
+        updatedAt: new Date().toISOString() }], programs: [], streams: [], agreements: [], organizations: [] }
+      : defaultGet(path))
+    post.mockImplementation(async (_path: string, body: Record<string, unknown>) => body.action === 'save'
+      ? { survey: { id: 'V-ABCDE', revision: 1 }, attached: false }
+      : { attached: true })
+    const wrapper = mount(FormCreator, { props: { agencyId: '1', intakeId: 'D-ABCDE' } })
+    await flushPromises()
+    await wrapper.get('input[name="formTitleEn"]').setValue('Application')
+    await wrapper.get('input[name="formTitleFr"]').setValue('Demande')
+    await button(wrapper, 'Edit').trigger('click')
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('Short answer'))!.trigger('click')
+    await button(wrapper, 'Save revision').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('could not be attached')
+    expect(readFormDraft('1:intake:D-ABCDE')).toMatchObject({ formId: 'V-ABCDE', revision: 1, attachmentPending: true })
+    wrapper.unmount()
+    const reopened = mount(FormCreator, { props: { agencyId: '1', intakeId: 'D-ABCDE' } })
+    await flushPromises()
+    expect(button(reopened, 'Retry attaching form').exists()).toBe(true)
+    await button(reopened, 'Retry attaching form').trigger('click')
+    await flushPromises()
+    expect(post.mock.calls.at(-1)?.[1]).toEqual({ action: 'attachIntakeForm', intakeId: 'D-ABCDE',
+      surveyId: 'V-ABCDE', revision: 1 })
+    expect(readFormDraft('1:intake:D-ABCDE')).toBeNull()
   })
 
   it('returns to Settings when a form introduction translation fails validation', async () => {

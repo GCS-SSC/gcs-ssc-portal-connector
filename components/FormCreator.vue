@@ -11,27 +11,28 @@ import FormFlowMap from './FormFlowMap.vue'
 import FormTest from './FormTest.vue'
 import { clearFormDraft, readFormDraft, writeFormDraft, writeFormSelection } from './form-draft-session'
 
-const props = defineProps<{ agencyId: string; disabled?: boolean; selectedFormId?: string }>()
+const props = defineProps<{ agencyId: string; disabled?: boolean; selectedFormId?: string; intakeId?: string }>()
 const emit = defineEmits<{ close: []; saved: [id: string] }>()
 const { locale, t } = useExtensionI18n(messages)
 const language = computed<'en' | 'fr'>(() => locale.value === 'fr' ? 'fr' : 'en')
 const previewLocale = ref<'en' | 'fr'>(language.value)
 const tr = (en: string, fr: string) => language.value === 'fr' ? fr : en
 const api = useExtensionApi('gcs-ssc-portal-connector')
+const draftOwner = computed(() => props.intakeId ? `${props.agencyId}:intake:${props.intakeId}` : props.agencyId)
 type Summary = { id: string; revision: number; title: { en: string; fr: string }; updatedAt: string }
 type Stream = { id: string; nameEn: string; nameFr: string }
 type Program = { id: string; nameEn: string; nameFr: string }
 type Agreement = { id: string; organizationId: string; streamId: string; nameEn: string; nameFr: string; agreementNumber: string }
 type Organization = { id: string; proponentId: string; name: string }
-type Call = { id: string; surveyId: string | null; surveyRevision: number | null; published: boolean }
 const surveys = ref<Summary[]>([]), programs = ref<Program[]>([]), streams = ref<Stream[]>([])
 const formsLoaded = ref(false)
-const agreements = ref<Agreement[]>([]), organizations = ref<Organization[]>([]), calls = ref<Call[]>([])
+const agreements = ref<Agreement[]>([]), organizations = ref<Organization[]>([])
 const formId = ref(''), revision = ref(0), selectedContainerId = ref('page_1'), selectedQuestionId = ref('')
 const tab = ref<'edit' | 'test' | 'settings' | 'publish'>('settings')
 const showFlowMap = ref(false)
 const busy = ref(false), loading = ref(false), error = ref(''), message = ref('')
-const streamId = ref(''), agreementId = ref(''), startDate = ref(''), endDate = ref('')
+const attachmentPending = ref(false)
+const agreementId = ref('')
 const publicationScope = ref<'agreement' | 'program' | 'stream' | 'organization'>('agreement')
 const programId = ref(''), batchStreamId = ref(''), organizationId = ref('')
 const newDefinition = (): AdvancedSurvey => ({ schemaVersion: 3,
@@ -202,9 +203,9 @@ const load = async () => {
   loading.value = true; error.value = ''; formsLoaded.value = false
   try {
     const result = await api.get<{ surveys: Summary[]; programs: Program[]; streams: Stream[];
-      agreements: Agreement[]; organizations: Organization[]; calls: Call[] }>(endpoint.value)
+      agreements: Agreement[]; organizations: Organization[] }>(endpoint.value)
     surveys.value = result.surveys; programs.value = result.programs; streams.value = result.streams
-    agreements.value = result.agreements; organizations.value = result.organizations; calls.value = result.calls
+    agreements.value = result.agreements; organizations.value = result.organizations
     formsLoaded.value = true
   } catch { error.value = tr('Forms could not be loaded. Check the portal connection.', 'Impossible de charger les formulaires. Vérifiez la connexion au portail.') }
   finally { loading.value = false }
@@ -233,7 +234,9 @@ const selectForm = async (id: string) => {
 }
 const closeDesigner = () => {
   if (dirty.value && !confirm(tr('Discard unsaved form changes?', 'Abandonner les modifications non enregistrées?'))) return
-  clearFormDraft(props.agencyId)
+  if (dirty.value && attachmentPending.value) definition.value = JSON.parse(saved.value) as AdvancedSurvey
+  if (attachmentPending.value) persistDraft()
+  else clearFormDraft(draftOwner.value)
   emit('close')
 }
 const save = async () => {
@@ -247,37 +250,50 @@ const save = async () => {
   }
   busy.value = true; error.value = ''; message.value = ''
   try {
-    const result = await api.post<{ survey: { id: string; revision: number } }>(endpoint.value, {
+    const result = await api.post<{ survey: { id: string; revision: number }; attached?: boolean }>(endpoint.value, {
       action: 'save', ...(formId.value ? { surveyId: formId.value, expectedRevision: revision.value } : {}),
+      ...(props.intakeId ? { intakeId: props.intakeId } : {}),
       definition: parsed.data
     })
     formId.value = result.survey.id; revision.value = result.survey.revision
     definition.value = ensureEditableText(parsed.data); saved.value = JSON.stringify(definition.value)
-    writeFormSelection(props.agencyId, formId.value)
-    clearFormDraft(props.agencyId)
-    message.value = tr('Form revision saved.', 'Version du formulaire enregistrée.')
+    attachmentPending.value = Boolean(props.intakeId && result.attached === false)
+    if (!props.intakeId) writeFormSelection(props.agencyId, formId.value)
+    if (attachmentPending.value) persistDraft()
+    else clearFormDraft(draftOwner.value)
+    message.value = attachmentPending.value ? '' : tr('Form revision saved.', 'Version du formulaire enregistrée.')
     emit('saved', formId.value)
     await load()
+    if (attachmentPending.value) error.value = t('intakeAttachFailed')
   } catch { error.value = tr('Save failed. Reload if another editor saved a newer revision.', 'Échec de l’enregistrement. Rechargez si une autre version a été enregistrée.') }
   finally { busy.value = false }
 }
-const publish = async (action: 'publishCall' | 'publishAgreement' | 'publishScope' | 'publishOrganization') => {
+const retryAttachment = async () => {
+  if (!props.intakeId || !formId.value || !revision.value || disabled.value || busy.value) return
+  busy.value = true; error.value = ''; message.value = ''
+  try {
+    await api.post(endpoint.value, { action: 'attachIntakeForm', intakeId: props.intakeId,
+      surveyId: formId.value, revision: revision.value })
+    attachmentPending.value = false
+    clearFormDraft(draftOwner.value)
+    message.value = t('intakeAttachSuccess')
+    emit('saved', formId.value)
+  } catch { error.value = t('intakeAttachFailed') }
+  finally { busy.value = false }
+}
+const publish = async (action: 'publishAgreement' | 'publishScope' | 'publishOrganization') => {
   if (disabled.value || !readyToPublish.value) return
   busy.value = true; error.value = ''; message.value = ''
   try {
     const common = { surveyId: formId.value, revision: revision.value }
-    const body = action === 'publishCall'
-      ? { action, ...common, streamId: streamId.value, startDate: startDate.value, endDate: endDate.value }
-      : action === 'publishAgreement'
+    const body = action === 'publishAgreement'
         ? { action, ...common, agreementId: agreementId.value,
             organizationId: agreements.value.find((item) => item.id === agreementId.value)?.organizationId }
         : action === 'publishOrganization'
           ? { action, ...common, organizationId: organizationId.value }
           : { action, ...common, scope: publicationScope.value, scopeId: publicationScope.value === 'program' ? programId.value : batchStreamId.value }
     await api.post(endpoint.value, body)
-    message.value = action === 'publishCall'
-      ? tr('The funding opportunity and form are published in the portal.', 'L’occasion de financement et le formulaire sont publiés dans le portail.')
-      : t('formPublished')
+    message.value = t('formPublished')
     await load()
   } catch { error.value = tr('Publication failed. Check the selected target, dates, and saved revision.', 'Échec de la publication. Vérifiez la cible, les dates et la version enregistrée.') }
   finally { busy.value = false }
@@ -474,13 +490,15 @@ const setDestination = (page: AdvancedSurvey['pages'][number], index: number, va
 const destinationValue = (destination: AdvancedSurvey['pages'][number]['next']) =>
   destination?.kind === 'page' ? destination.pageId : destination?.kind === 'end' ? 'end' : 'next'
 const restoreDraft = () => {
-  const draft = readFormDraft(props.agencyId)
-  if (!draft || draft.formId !== (props.selectedFormId ?? '')) return false
+  const draft = readFormDraft(draftOwner.value)
+  if (!draft || (draft.formId !== (props.selectedFormId ?? '')
+    && !(props.intakeId && draft.attachmentPending && !props.selectedFormId))) return false
   if (draft.formId && formsLoaded.value && surveys.value.find((item) => item.id === draft.formId)?.revision !== draft.revision) {
-    clearFormDraft(props.agencyId)
+    clearFormDraft(draftOwner.value)
     return false
   }
   formId.value = draft.formId; revision.value = draft.revision
+  attachmentPending.value = Boolean(draft.attachmentPending)
   definition.value = ensureEditableText(draft.definition); saved.value = draft.saved
   selectedContainerId.value = draft.selectedContainerId || definition.value.pages[0]?.id || 'page_1'
   selectedQuestionId.value = draft.selectedQuestionId || ''
@@ -488,34 +506,33 @@ const restoreDraft = () => {
   publicationScope.value = draft.publicationScope || 'agreement'
   agreementId.value = draft.agreementId || ''; organizationId.value = draft.organizationId || ''
   programId.value = draft.programId || ''; batchStreamId.value = draft.batchStreamId || ''
-  streamId.value = draft.streamId || ''; startDate.value = draft.startDate || ''; endDate.value = draft.endDate || ''
   return true
 }
 const persistDraft = () => {
-  if (!dirty.value) { clearFormDraft(props.agencyId); return }
-  writeFormDraft(props.agencyId, {
+  if (!dirty.value && !attachmentPending.value) { clearFormDraft(draftOwner.value); return }
+  writeFormDraft(draftOwner.value, {
     formId: formId.value, revision: revision.value, definition: definition.value,
     saved: saved.value, selectedContainerId: selectedContainerId.value,
     selectedQuestionId: selectedQuestionId.value, tab: tab.value, publicationScope: publicationScope.value,
     agreementId: agreementId.value, organizationId: organizationId.value,
     programId: programId.value, batchStreamId: batchStreamId.value,
-    streamId: streamId.value, startDate: startDate.value, endDate: endDate.value
+    attachmentPending: attachmentPending.value
   })
 }
 onMounted(async () => { await load(); if (!restoreDraft() && props.selectedFormId) await selectForm(props.selectedFormId) })
 watch([definition, formId, revision, saved, selectedContainerId, selectedQuestionId, tab,
-  publicationScope, agreementId, organizationId, programId, batchStreamId, streamId, startDate, endDate],
+  publicationScope, agreementId, organizationId, programId, batchStreamId, attachmentPending],
 persistDraft, { deep: true })
 watch(language, (value) => { previewLocale.value = value })
 watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.value = []; streams.value = [];
-  agreements.value = []; organizations.value = []; calls.value = []; void load() })
+  agreements.value = []; organizations.value = []; void load() })
 </script>
 
 <template>
   <section class="designer space-y-5" :aria-label="tr('Form designer', 'Concepteur de formulaires')">
     <div class="designer-header">
       <div>
-        <button type="button" class="designer-back" @click="closeDesigner">← {{ tr('All forms', 'Tous les formulaires') }}</button>
+        <button type="button" class="designer-back" @click="closeDesigner">← {{ props.intakeId ? tr('Back to intake', 'Retour à l’appel') : tr('All forms', 'Tous les formulaires') }}</button>
         <h3 class="designer-heading">{{ definition.title[language] || tr('Untitled form', 'Formulaire sans titre') }}</h3>
         <p class="designer-subtitle">{{ formId ? `${tr('Revision', 'Version')} ${revision}` : tr('New form', 'Nouveau formulaire') }}<span v-if="dirty"> · {{ tr('Unsaved changes', 'Modifications non enregistrées') }}</span></p>
       </div>
@@ -523,7 +540,7 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
     </div>
     <p v-if="loading" role="status">{{ tr('Loading forms…', 'Chargement des formulaires…') }}</p>
     <div class="designer-tabs" role="tablist" :aria-label="tr('Form workflow', 'Étapes du formulaire')">
-      <button v-for="item in ['edit', 'test', 'settings', 'publish'] as const" :key="item" type="button" role="tab" class="designer-tab"
+      <button v-for="item in (props.intakeId ? ['edit', 'test', 'settings'] : ['edit', 'test', 'settings', 'publish']) as Array<'edit' | 'test' | 'settings' | 'publish'>" :key="item" type="button" role="tab" class="designer-tab"
         :aria-selected="tab === item" :disabled="item === 'test' && !definition.questions.length"
         @click="tab = item">{{ item === 'edit' ? tr('Edit', 'Modifier') : item === 'test' ? tr('Test', 'Tester') : item === 'settings' ? tr('Settings', 'Paramètres') : tr('Publish', 'Publier') }}</button>
     </div>
@@ -829,33 +846,14 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
               {{ t('formPublish') }}
             </ExtensionButton>
           </section>
-          <section class="space-y-3 border-t border-default pt-4">
-            <h4 class="font-semibold">{{ tr('Publish a funding opportunity', 'Publier une occasion de financement') }}</h4>
-            <p class="text-sm text-muted">{{ tr('Create a funding opportunity in the portal with this form.', 'Créez une occasion de financement dans le portail avec ce formulaire.') }}</p>
-            <ExtensionFormField :label="tr('GCS stream', 'Volet GCS')" name="formStream" required>
-              <ExtensionSelect v-model="streamId" name="formStream" value-key="value" :disabled="disabled"
-                :items="streams.map((item) => ({ value: item.id, label: item[locale === 'fr' ? 'nameFr' : 'nameEn'] }))" />
-            </ExtensionFormField>
-            <div class="grid gap-3 sm:grid-cols-2">
-              <ExtensionFormField :label="tr('Opens (YYYY-MM-DD)', 'Ouverture (AAAA-MM-JJ)')" name="formStart" required>
-                <ExtensionInput v-model="startDate" name="formStart" required :disabled="disabled" />
-              </ExtensionFormField>
-              <ExtensionFormField :label="tr('Closes (YYYY-MM-DD)', 'Fermeture (AAAA-MM-JJ)')" name="formEnd" required>
-                <ExtensionInput v-model="endDate" name="formEnd" required :disabled="disabled" />
-              </ExtensionFormField>
-            </div>
-            <ExtensionButton :disabled="disabled || !readyToPublish || !streamId || !startDate || !endDate" :loading="busy" @click="publish('publishCall')">
-              {{ tr('Publish opportunity and form', 'Publier l’occasion et le formulaire') }}
-            </ExtensionButton>
-          </section>
-          <p v-if="calls.some((call) => call.surveyId === formId && call.published)" class="text-sm text-success">
-            {{ tr('This form has a published funding opportunity.', 'Ce formulaire est associé à une occasion de financement publiée.') }}
-          </p>
         </div>
       </div>
     </div>
     <p v-if="message" role="status" class="text-sm text-success">{{ message }}</p>
     <p v-if="error" role="alert" class="text-sm text-error">{{ error }}</p>
+    <ExtensionButton v-if="attachmentPending" :disabled="disabled || busy" :loading="busy" @click="retryAttachment">
+      {{ t('intakeAttachRetry') }}
+    </ExtensionButton>
   </section>
 </template>
 

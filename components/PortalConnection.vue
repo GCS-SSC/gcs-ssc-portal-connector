@@ -9,6 +9,7 @@ import {
 import { messages } from '../i18n/messages'
 import FormCreator from './FormCreator.vue'
 import FormLibrary from './FormLibrary.vue'
+import IntakeWorkspace from './IntakeWorkspace.vue'
 import { readFormSelection, writeFormSelection } from './form-draft-session'
 
 interface Connection {
@@ -38,7 +39,7 @@ interface OutcomeBacklogItem { id: string; submissionId: string; kind: string; s
 interface PortalStatus { id: string; name_en: string; name_fr: string }
 const props = defineProps<{
   agencyId: string
-  section?: 'connection' | 'verification' | 'statuses' | 'queue' | 'delivery' | 'forms'
+  section?: 'connection' | 'verification' | 'statuses' | 'queue' | 'delivery' | 'forms' | 'intakes'
   config?: Record<string, unknown>
   enabled?: boolean
   disabled?: boolean
@@ -547,6 +548,10 @@ watch(() => props.agencyId, searchProponents)
         @open="openFormDesigner($event)" @create="openFormDesigner('')" />
       <FormCreator v-else :key="`${agencyId}:${selectedFormId}`" :agency-id="agencyId" :disabled="locked"
         :selected-form-id="selectedFormId" @close="closeFormDesigner" />
+    </section>
+    <section v-if="section === 'intakes'" class="space-y-4">
+      <p v-if="!connection" class="text-sm text-muted">{{ t('connectionRequired') }}</p>
+      <IntakeWorkspace v-else :agency-id="agencyId" :disabled="locked" />
     </section>
     <section v-if="section === 'verification'" class="space-y-4">
       <div><h3 class="text-base font-semibold text-highlighted">{{ t('organizationLinks') }}</h3>
