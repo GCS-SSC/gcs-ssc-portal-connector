@@ -58,8 +58,8 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
   })
   const button = defineComponent({
     props: ['label', 'disabled'], emits: ['click'],
-    setup(props, { emit, slots }) {
-      return () => h('button', { disabled: props.disabled, onClick: () => emit('click') }, props.label ?? slots.default?.())
+    setup(props, { attrs, emit, slots }) {
+      return () => h('button', { ...attrs, disabled: props.disabled, onClick: () => emit('click') }, props.label ?? slots.default?.())
     }
   })
   const workspace = defineComponent({
@@ -79,6 +79,7 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
       return () => h('div', { 'data-resource-table': '' }, [
         ...(props.showToolbar === false ? [] : [h('input', { 'aria-label': props.searchPlaceholder, value: props.search,
           onInput: (event: Event) => emit('update:search', (event.target as HTMLInputElement).value) })]),
+        slots.filters?.(), slots.actions?.(),
         ...(props.data as Array<{ id?: string; eventId?: string }> ?? []).map(item => h('div', { 'data-organization-row': item.id, 'data-table-row': item.id ?? item.eventId },
           (props.columns as Array<{ id: string }> ?? []).map(column => h('div',
             slots[`${column.id}-cell`]?.({ row: { original: item } }))))),
@@ -105,6 +106,7 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
 })
 
 import FormCreator from '../components/FormCreator.vue'
+import FormLibrary from '../components/FormLibrary.vue'
 import IntakeWorkspace from '../components/IntakeWorkspace.vue'
 import FormTest from '../components/FormTest.vue'
 import { readFormDraft } from '../components/form-draft-session'
@@ -135,6 +137,29 @@ beforeEach(() => {
 })
 
 describe('connector form requirements', () => {
+  it('uses the shared forms table and keeps search, status, and row navigation working', async () => {
+    const defaultGet = get.getMockImplementation()!
+    get.mockImplementation(async (path: string) => path.endsWith('/forms')
+      ? { surveys: [
+        { id: 'draft_form', revision: 1, title: { en: 'Draft form', fr: 'Formulaire brouillon' }, updatedAt: '2026-09-28T00:00:00Z' },
+        { id: 'published_form', revision: 2, title: { en: 'Published form', fr: 'Formulaire publié' }, updatedAt: '2026-09-27T00:00:00Z' }
+      ], publications: [{ surveyId: 'published_form', revision: 2, targetType: 'organization', targetId: 'N-123',
+        targetNameEn: 'Example organization', targetNameFr: 'Organisme exemple', published: true }] }
+      : defaultGet(path))
+    const wrapper = mount(FormLibrary, { props: { agencyId: '1' } })
+    await flushPromises()
+    expect(wrapper.find('[data-resource-table]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-table-row]')).toHaveLength(2)
+    await wrapper.get('input[aria-label="Search forms"]').setValue('Draft')
+    expect(wrapper.findAll('[data-table-row]')).toHaveLength(1)
+    await wrapper.get('input[aria-label="Search forms"]').setValue('')
+    await wrapper.get('select').setValue('published')
+    expect(wrapper.findAll('[data-table-row]')).toHaveLength(1)
+    expect(wrapper.text()).toContain('Published form')
+    await wrapper.get('button[aria-label="Edit form: Published form"]').trigger('click')
+    expect(wrapper.emitted('open')?.[0]).toEqual(['published_form'])
+  })
+
   it('shows delivery and recent receipts in separate searchable host tables', async () => {
     const defaultGet = get.getMockImplementation()!
     get.mockImplementation(async (path: string) => path.endsWith('/backlog')
@@ -560,7 +585,9 @@ describe('connector form requirements', () => {
 
     const firstForms = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', enabled: true } })
     await flushPromises()
-    expect(firstForms.get('table tbody tr td').attributes('colspan')).toBe('5')
+    expect(firstForms.find('[data-resource-table]').exists()).toBe(true)
+    expect(firstForms.text()).toContain('No forms yet')
+    expect(firstForms.get('input[aria-label="Search forms"]').attributes('aria-label')).toBe('Search forms')
     expect(button(firstForms, 'Create form')).toBeDefined()
     await button(firstForms, 'Create form').trigger('click')
     expect(firstForms.emitted('openForm')?.[0]).toEqual([''])
