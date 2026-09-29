@@ -3,8 +3,9 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { customAlphabet } from 'nanoid'
 import { surveyV3Schema, upgradeToAdvancedSurvey, type AdvancedGroup, type AdvancedQuestion,
   type AdvancedSurvey, type SurveyCondition } from '@gcs-ssc/survey'
-import { ExtensionButton, ExtensionCheckbox, ExtensionEntityEditorWorkspace, ExtensionFormField, ExtensionInput,
-  ExtensionRouteTabs, ExtensionSaveButton, ExtensionSelect, useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
+import { ExtensionAssessmentSchemaAccordionSection, ExtensionAssessmentSchemaPageSection, ExtensionButton, ExtensionCheckbox, ExtensionEntityEditorWorkspace, ExtensionEntityHero,
+  ExtensionFormField, ExtensionIcon, ExtensionInput, ExtensionModal, ExtensionRouteTabs, ExtensionSaveButton,
+  ExtensionSelect, ExtensionTextarea, useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
 import { messages } from '../i18n/messages'
 import { computedTemplateReady } from '../shared/form-localization'
 import FormCondition from './FormCondition.vue'
@@ -22,7 +23,7 @@ const tr = (en: string, fr: string) => language.value === 'fr' ? fr : en
 const api = useExtensionApi('gcs-ssc-portal-connector')
 const draftOwner = computed(() => props.opportunityId ? `${props.agencyId}:opportunity:${props.opportunityId}`
   : props.intakeId ? `${props.agencyId}:intake:${props.intakeId}` : props.agencyId)
-type Summary = { id: string; revision: number; title: { en: string; fr: string }; updatedAt: string }
+type Summary = { id: string; revision: number; title: { en: string; fr: string }; updatedAt: string; synced?: boolean }
 type Stream = { id: string; nameEn: string; nameFr: string }
 type Program = { id: string; nameEn: string; nameFr: string }
 type Agreement = { id: string; organizationId: string; streamId: string; nameEn: string; nameFr: string; agreementNumber: string }
@@ -31,16 +32,26 @@ const surveys = ref<Summary[]>([]), programs = ref<Program[]>([]), streams = ref
 const formsLoaded = ref(false)
 const agreements = ref<Agreement[]>([]), organizations = ref<Organization[]>([])
 const formId = ref(''), revision = ref(0), selectedContainerId = ref('page_1'), selectedQuestionId = ref('')
-const tab = ref<'edit' | 'test' | 'settings' | 'publish'>('edit')
+const tab = ref<'edit' | 'flow' | 'test' | 'publish'>('edit')
 const workflowTabs = computed(() => [
   { key: 'edit', value: 'edit', label: t('formEditTab'), icon: 'i-lucide-pencil' },
+  { key: 'flow', value: 'flow', label: t('formFlowTab'), icon: 'i-lucide-git-branch' },
   { key: 'test', value: 'test', label: t('formTestTab'), icon: 'i-lucide-flask-conical' },
-  { key: 'settings', value: 'settings', label: t('formSettingsTab'), icon: 'i-lucide-settings' },
   ...(!props.intakeId && !props.opportunityId ? [{ key: 'publish', value: 'publish', label: t('formPublishTab'), icon: 'i-lucide-send' }] : [])
 ])
-const showFlowMap = ref(false)
 const busy = ref(false), loading = ref(false), error = ref(''), message = ref('')
 const attachmentPending = ref(false)
+const syncPending = ref(false)
+const detailsOpen = ref(false)
+const detailsError = ref('')
+const detailsDraft = ref({ titleEn: '', titleFr: '', introductionEn: '', introductionFr: '' })
+const introductionRequired = computed(() => Boolean(detailsDraft.value.introductionEn.trim() || detailsDraft.value.introductionFr.trim()))
+const detailsValid = computed(() => Boolean(
+  detailsDraft.value.titleEn.trim() && detailsDraft.value.titleFr.trim()
+  && detailsDraft.value.titleEn.trim().length <= 200 && detailsDraft.value.titleFr.trim().length <= 200
+  && (!introductionRequired.value || detailsDraft.value.introductionEn.trim() && detailsDraft.value.introductionFr.trim())
+  && detailsDraft.value.introductionEn.trim().length <= 2000 && detailsDraft.value.introductionFr.trim().length <= 2000
+))
 const agreementId = ref('')
 const publicationScope = ref<'agreement' | 'program' | 'stream' | 'organization'>('agreement')
 const programId = ref(''), batchStreamId = ref(''), organizationId = ref('')
@@ -69,7 +80,62 @@ const forSaving = (survey: AdvancedSurvey) => {
   return copy
 }
 const definition = ref<AdvancedSurvey>(newDefinition())
-const branchCount = computed(() => definition.value.pages.reduce((count, page) => count + page.branches.length, 0))
+const createsLocalDraft = computed(() => Boolean(!formId.value && props.standalone && !props.intakeId && !props.opportunityId))
+const editingDetails = computed(() => Boolean(formId.value || (!createsLocalDraft.value
+  && definition.value.title.en.trim() && definition.value.title.fr.trim())))
+const openDetails = () => {
+  detailsError.value = ''
+  detailsDraft.value = {
+    titleEn: definition.value.title.en, titleFr: definition.value.title.fr,
+    introductionEn: definition.value.description?.en ?? '', introductionFr: definition.value.description?.fr ?? ''
+  }
+  detailsOpen.value = true
+}
+const applyDetails = async () => {
+  if (!detailsValid.value || disabled.value) return
+  const title = { en: detailsDraft.value.titleEn.trim(), fr: detailsDraft.value.titleFr.trim() }
+  const introduction = { en: detailsDraft.value.introductionEn.trim(), fr: detailsDraft.value.introductionFr.trim() }
+  if (createsLocalDraft.value) {
+    busy.value = true
+    detailsError.value = ''
+    try {
+      const result = await api.post<{ survey: { id: string; revision: number } }>(`/agencies/${props.agencyId}/forms`, {
+        action: 'createDraft', title, introduction
+      })
+      definition.value.title = title
+      definition.value.description = introduction
+      formId.value = result.survey.id
+      revision.value = result.survey.revision
+      syncPending.value = false
+      saved.value = JSON.stringify(definition.value)
+      clearFormDraft(draftOwner.value)
+      message.value = t('formDetailsCreated')
+      detailsOpen.value = false
+      emit('saved', formId.value)
+      await load()
+    } catch { detailsError.value = t('formDetailsCreateFailed') }
+    finally { busy.value = false }
+    return
+  }
+  definition.value.title = title
+  definition.value.description = introduction
+  detailsOpen.value = false
+}
+const cancelDetails = () => {
+  detailsOpen.value = false
+  if (!formId.value && !definition.value.title.en.trim() && !definition.value.title.fr.trim()) emit('close')
+}
+const heroActions = computed(() => props.disabled ? [] : [
+  { label: t('formDetailsEdit'), icon: 'i-lucide-edit-3', color: 'neutral' as const,
+    variant: 'outline' as const, disabled: busy.value, onClick: openDetails },
+  { label: tr('Save revision', 'Enregistrer la version'), icon: 'i-lucide-save',
+    disabled: disabled.value, loading: busy.value, onClick: () => { void save() } }
+])
+const heroBadges = computed(() => formId.value
+  ? revision.value > 0
+    ? [{ variant: 'code', label: String(revision.value), prefixLabel: t('formLibraryRevision') }]
+    : [{ enumName: 'publication_state', status: 'draft', label: t('formLibraryDraft') }]
+  : [])
 const saved = ref(JSON.stringify(definition.value))
 const dirty = computed(() => JSON.stringify(definition.value) !== saved.value)
 const disabled = computed(() => props.disabled || busy.value)
@@ -82,21 +148,52 @@ const writeEndpoint = computed(() => props.opportunityId
 const nextId = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 12)
 const uid = (prefix: string) => `${prefix}_${nextId()}`
 type Container = AdvancedSurvey['pages'][number] | AdvancedGroup
-type Node = { id: string; kind: 'page' | 'group'; title: string; depth: number; pageId: string; item: Container; repeatFor?: string }
+type Node = { id: string; kind: 'page' | 'group'; title: string; depth: number; pageId: string; parentId?: string; item: Container; repeatFor?: string }
 const nodes = computed<Node[]>(() => {
   const result: Node[] = []
-  const visit = (groups: AdvancedGroup[], depth: number, pageId: string) => {
+  const visit = (groups: AdvancedGroup[], depth: number, pageId: string, parentId: string) => {
     for (const group of groups) {
-      result.push({ id: group.id, kind: 'group', title: group.title[language.value], depth, pageId, item: group, repeatFor: group.repeatFor })
-      visit(group.groups, depth + 1, pageId)
+      result.push({ id: group.id, kind: 'group', title: group.title[language.value], depth, pageId, parentId, item: group, repeatFor: group.repeatFor })
+      visit(group.groups, depth + 1, pageId, group.id)
     }
   }
   for (const page of definition.value.pages) {
     result.push({ id: page.id, kind: 'page', title: page.title[language.value], depth: 0, pageId: page.id, item: page })
-    visit(page.groups, 1, page.id)
+    visit(page.groups, 1, page.id, page.id)
   }
   return result
 })
+const collapsedNodeIds = ref(new Set<string>())
+const expandableNodeIds = computed(() => new Set(nodes.value.map(node => node.parentId).filter((id): id is string => Boolean(id))))
+const visibleNodes = computed(() => {
+  const byId = new Map(nodes.value.map(node => [node.id, node]))
+  return nodes.value.filter(node => {
+    let parentId = node.parentId
+    while (parentId) {
+      if (collapsedNodeIds.value.has(parentId)) return false
+      parentId = byId.get(parentId)?.parentId
+    }
+    return true
+  })
+})
+const toggleNode = (node: Node) => {
+  const next = new Set(collapsedNodeIds.value)
+  if (next.has(node.id)) next.delete(node.id)
+  else {
+    next.add(node.id)
+    const byId = new Map(nodes.value.map(item => [item.id, item]))
+    let parentId = byId.get(selectedContainerId.value)?.parentId
+    while (parentId) {
+      if (parentId === node.id) {
+        selectedContainerId.value = node.id
+        selectedQuestionId.value = ''
+        break
+      }
+      parentId = byId.get(parentId)?.parentId
+    }
+  }
+  collapsedNodeIds.value = next
+}
 const selected = computed(() => nodes.value.find((node) => node.id === selectedContainerId.value) ?? nodes.value[0])
 const selectedQuestion = computed(() => definition.value.questions.find((question) => question.id === selectedQuestionId.value))
 const repeatSource = computed(() => {
@@ -125,9 +222,9 @@ const publicationChecks = computed(() => {
   definition.value.pages.forEach(collect)
   const contentPair = (value?: { en: string; fr: string }) => !value?.en.trim() && !value?.fr.trim() || bilingual(value)
   return [
-    { label: tr('Form title in English and French', 'Titre du formulaire en anglais et en français'), ok: bilingual(definition.value.title), target: 'settings' as const },
+    { label: tr('Form title in English and French', 'Titre du formulaire en anglais et en français'), ok: bilingual(definition.value.title), target: 'details' as const },
     { label: tr('Page and section headings in both languages', 'Titres des pages et des sections dans les deux langues'), ok: allContainers.every((item) => bilingual(item.title)), target: 'edit' as const },
-    { label: tr('Form introduction translated when provided', 'Introduction du formulaire traduite, si elle est fournie'), ok: contentPair(definition.value.description), target: 'settings' as const },
+    { label: tr('Form introduction translated when provided', 'Introduction du formulaire traduite, si elle est fournie'), ok: contentPair(definition.value.description), target: 'details' as const },
     { label: tr('Page and section instructions translated when provided', 'Instructions des pages et des sections traduites, si elles sont fournies'), ok: allContainers.every((item) => contentPair(item.description)), target: 'edit' as const },
     { label: tr('At least one question', 'Au moins une question'), ok: definition.value.questions.length > 0, target: 'edit' as const },
     { label: tr('Questions and help text translated', 'Questions et textes d’aide traduits'), ok: definition.value.questions.every((item) => bilingual(item.label) && contentPair(item.hint)), target: 'edit' as const },
@@ -136,7 +233,9 @@ const publicationChecks = computed(() => {
         ? item.columns.every((column) => bilingual(column.label)) : true), target: 'edit' as const },
     { label: tr('Calculated values use selected fields without fixed text', 'Les valeurs calculées utilisent les champs sélectionnés sans texte fixe'),
       ok: definition.value.questions.every((item) => item.type !== 'computed' || computedTemplateReady(item.template, item.sourceIds)), target: 'edit' as const },
-    { label: tr('Latest revision saved', 'Dernière version enregistrée'), ok: Boolean(formId.value) && !dirty.value, target: 'edit' as const }
+    { label: tr('Latest revision saved', 'Dernière version enregistrée'), ok: Boolean(formId.value) && revision.value > 0 && !dirty.value, target: 'edit' as const },
+    { label: t('formSyncPendingCheck'),
+      ok: !syncPending.value, target: 'edit' as const }
   ]
 })
 const readyToPublish = computed(() => publicationChecks.value.every((check) => check.ok))
@@ -217,6 +316,11 @@ const pageDestinations = (page: AdvancedSurvey['pages'][number], includeNext = f
     .map((item) => ({ value: item.id, label: item.title[language.value] || item.id })),
   { value: 'end', label: tr('End form', 'Terminer le formulaire') }
 ]
+const openFlowPage = (pageId: string) => {
+  selectedContainerId.value = pageId
+  selectedQuestionId.value = ''
+  tab.value = 'edit'
+}
 
 const load = async () => {
   loading.value = true; error.value = ''; formsLoaded.value = false
@@ -225,12 +329,16 @@ const load = async () => {
       agreements: Agreement[]; organizations: Organization[] }>(endpoint.value)
     surveys.value = result.surveys ?? []; programs.value = result.programs ?? []; streams.value = result.streams ?? []
     agreements.value = result.agreements ?? []; organizations.value = result.organizations ?? []
+    const current = surveys.value.find(item => item.id === formId.value)
+    if (current) syncPending.value = current.revision > 0 && current.synced === false
     formsLoaded.value = true
-  } catch { error.value = tr('Forms could not be loaded. Check the portal connection.', 'Impossible de charger les formulaires. Vérifiez la connexion au portail.') }
+  } catch { error.value = t('formLibraryLoadFailed') }
   finally { loading.value = false }
 }
 const resetForm = () => {
   formId.value = ''; revision.value = 0; definition.value = newDefinition()
+  collapsedNodeIds.value = new Set<string>()
+  syncPending.value = false
   selectedContainerId.value = 'page_1'; selectedQuestionId.value = ''; tab.value = 'edit'
   saved.value = JSON.stringify(definition.value)
 }
@@ -243,9 +351,11 @@ const selectForm = async (id: string) => {
   }
   loading.value = true
   try {
-    const result = await api.get<{ survey: { id: string; revision: number; definition: AdvancedSurvey } }>(`${endpoint.value}/${id}`)
+    const result = await api.get<{ survey: { id: string; revision: number; definition: AdvancedSurvey; synced?: boolean } }>(`${endpoint.value}/${id}`)
     formId.value = result.survey.id; revision.value = result.survey.revision
+    syncPending.value = result.survey.revision > 0 && result.survey.synced === false
     definition.value = ensureEditableText(upgradeToAdvancedSurvey(result.survey.definition))
+    collapsedNodeIds.value = new Set<string>()
     selectedContainerId.value = definition.value.pages[0]!.id; selectedQuestionId.value = ''; tab.value = 'edit'
     saved.value = JSON.stringify(definition.value)
   } catch { error.value = tr('The form could not be opened.', 'Impossible d’ouvrir le formulaire.') }
@@ -263,25 +373,28 @@ const save = async () => {
   const parsed = surveyV3Schema.safeParse(forSaving(definition.value))
   if (!parsed.success) {
     error.value = parsed.error.issues.map((issue) => issue.message).slice(0, 4).join(' · ')
-    tab.value = parsed.error.issues.some((issue) => issue.path[0] === 'title' || issue.path[0] === 'description')
-      ? 'settings' : 'edit'
+    if (parsed.error.issues.some((issue) => issue.path[0] === 'title' || issue.path[0] === 'description')) openDetails()
+    else tab.value = 'edit'
     return
   }
   busy.value = true; error.value = ''; message.value = ''
   try {
-    const result = await api.post<{ survey: { id: string; revision: number }; attached?: boolean }>(writeEndpoint.value, {
+    const result = await api.post<{ survey: { id: string; revision: number }; attached?: boolean; queued?: boolean }>(writeEndpoint.value, {
       action: props.opportunityId ? 'saveForm' : 'save',
       ...(formId.value ? { surveyId: formId.value, expectedRevision: revision.value } : {}),
       ...(props.intakeId ? { intakeId: props.intakeId } : {}),
       definition: parsed.data
     })
     formId.value = result.survey.id; revision.value = result.survey.revision
+    syncPending.value = Boolean(result.queued)
     definition.value = ensureEditableText(parsed.data); saved.value = JSON.stringify(definition.value)
     attachmentPending.value = Boolean(props.intakeId && result.attached === false)
     if (!props.intakeId && !props.opportunityId) writeFormSelection(props.agencyId, formId.value)
     if (attachmentPending.value) persistDraft()
     else clearFormDraft(draftOwner.value)
-    message.value = attachmentPending.value ? '' : tr('Form revision saved.', 'Version du formulaire enregistrée.')
+    message.value = attachmentPending.value ? '' : result.queued
+      ? t('formQueuedSave')
+      : tr('Form revision saved.', 'Version du formulaire enregistrée.')
     emit('saved', formId.value)
     await load()
     if (attachmentPending.value) error.value = t('intakeAttachFailed')
@@ -589,11 +702,12 @@ const restoreDraft = () => {
     return false
   }
   formId.value = draft.formId; revision.value = draft.revision
+  syncPending.value = draft.revision > 0 && surveys.value.find(item => item.id === draft.formId)?.synced === false
   attachmentPending.value = Boolean(draft.attachmentPending)
   definition.value = ensureEditableText(draft.definition); saved.value = draft.saved
   selectedContainerId.value = draft.selectedContainerId || definition.value.pages[0]?.id || 'page_1'
   selectedQuestionId.value = draft.selectedQuestionId || ''
-  tab.value = draft.tab || 'edit'
+  tab.value = draft.tab === 'settings' ? 'edit' : draft.tab || 'edit'
   publicationScope.value = draft.publicationScope || 'agreement'
   agreementId.value = draft.agreementId || ''; organizationId.value = draft.organizationId || ''
   programId.value = draft.programId || ''; batchStreamId.value = draft.batchStreamId || ''
@@ -610,7 +724,16 @@ const persistDraft = () => {
     attachmentPending: attachmentPending.value
   })
 }
-onMounted(async () => { await load(); if (!restoreDraft() && props.selectedFormId) await selectForm(props.selectedFormId) })
+onMounted(async () => {
+  if (!props.selectedFormId) {
+    restoreDraft()
+    if (!formId.value) openDetails()
+    void load()
+    return
+  }
+  await load()
+  if (!restoreDraft()) await selectForm(props.selectedFormId)
+})
 watch([definition, formId, revision, saved, selectedContainerId, selectedQuestionId, tab,
   publicationScope, agreementId, organizationId, programId, batchStreamId, attachmentPending],
 persistDraft, { deep: true })
@@ -620,36 +743,61 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
 </script>
 
 <template>
-  <section class="designer space-y-5" :class="{ 'designer--standalone': standalone }" :aria-label="tr('Form designer', 'Concepteur de formulaires')">
-    <div class="designer-header">
+  <section class="designer space-y-5" :aria-label="tr('Form designer', 'Concepteur de formulaires')">
+    <ExtensionEntityHero v-if="standalone" icon="i-lucide-list" :title="definition.title[language] || t('formUntitled')"
+      :description="definition.description?.[language] || undefined" :badges="heroBadges" :actions="heroActions" />
+    <div v-if="!standalone" class="designer-header">
       <div>
-        <button v-if="!standalone" type="button" class="designer-back" @click="closeDesigner">← {{ props.opportunityId ? tr('Back to opportunity', 'Retour à l’occasion') : props.intakeId ? tr('Back to intake', 'Retour à l’appel') : tr('All forms', 'Tous les formulaires') }}</button>
-        <h3 class="designer-heading">{{ definition.title[language] || tr('Untitled form', 'Formulaire sans titre') }}</h3>
-        <p class="designer-subtitle">{{ formId ? `${tr('Revision', 'Version')} ${revision}` : tr('New form', 'Nouveau formulaire') }}<span v-if="dirty"> · {{ tr('Unsaved changes', 'Modifications non enregistrées') }}</span></p>
+        <button type="button" class="designer-back" @click="closeDesigner">← {{ props.opportunityId ? tr('Back to opportunity', 'Retour à l’occasion') : props.intakeId ? tr('Back to intake', 'Retour à l’appel') : tr('All forms', 'Tous les formulaires') }}</button>
+        <h3 class="designer-heading">{{ definition.title[language] || t('formUntitled') }}</h3>
+        <p class="designer-subtitle">{{ formId ? revision > 0 ? `${tr('Revision', 'Version')} ${revision}` : t('formLibraryDraft') : tr('New form', 'Nouveau formulaire') }}<span v-if="dirty"> · {{ tr('Unsaved changes', 'Modifications non enregistrées') }}</span></p>
       </div>
-      <ExtensionSaveButton :label="tr('Save revision', 'Enregistrer la version')" :disabled="disabled" :loading="busy" @click="save" />
+      <div class="flex flex-wrap gap-2">
+        <ExtensionButton v-if="!props.disabled" color="neutral" variant="outline" icon="i-lucide-edit-3" @click="openDetails">{{ t('formDetailsEdit') }}</ExtensionButton>
+        <ExtensionSaveButton :label="tr('Save revision', 'Enregistrer la version')" :disabled="disabled" :loading="busy" @click="save" />
+      </div>
     </div>
     <p v-if="loading" role="status">{{ tr('Loading forms…', 'Chargement des formulaires…') }}</p>
     <component :is="standalone ? ExtensionEntityEditorWorkspace : 'div'" content-test-id="form-detail-content">
       <template v-if="standalone" #sidebar>
-        <ExtensionRouteTabs v-model="tab" :items="workflowTabs" :sort="false" orientation="vertical"
+        <ExtensionRouteTabs v-model="tab" :items="workflowTabs" :priority-values="['edit', 'flow', 'test', 'publish']" orientation="vertical"
           :ui="{ root: 'w-full', list: 'w-full flex-col items-stretch p-0', trigger: 'w-full justify-start' }" />
+        <nav class="designer-sidebar-outline" :aria-label="tr('Form pages and sections', 'Pages et sections du formulaire')">
+          <h4 class="designer-eyebrow px-3">{{ tr('PAGES & SECTIONS', 'PAGES ET SECTIONS') }}</h4>
+          <ul class="mt-2 space-y-1 text-sm">
+            <li v-for="node in visibleNodes" :key="node.id">
+              <div class="designer-sidebar-row" :class="{ 'designer-sidebar-row--active': tab === 'edit' && selectedContainerId === node.id }"
+                :style="{ paddingInlineStart: `${8 + Math.min(node.depth, 4) * 8}px` }">
+                <button v-if="expandableNodeIds.has(node.id)" type="button" class="designer-sidebar-disclosure"
+                  :aria-label="`${collapsedNodeIds.has(node.id) ? tr('Expand', 'Développer') : tr('Collapse', 'Réduire')} ${node.title || node.id}`"
+                  :aria-expanded="!collapsedNodeIds.has(node.id)" @click="toggleNode(node)">
+                  <ExtensionIcon :name="collapsedNodeIds.has(node.id) ? 'i-lucide-chevron-right' : 'i-lucide-chevron-down'"
+                    class="size-4" aria-hidden="true" />
+                </button>
+                <span v-else class="designer-sidebar-disclosure" aria-hidden="true" />
+                <button type="button" class="designer-sidebar-item" :title="node.title || node.id"
+                  :aria-current="tab === 'edit' && selectedContainerId === node.id ? 'location' : undefined"
+                  @click="tab = 'edit'; selectedContainerId = node.id; selectedQuestionId = ''">
+                  <ExtensionIcon :name="node.kind === 'page' ? 'i-lucide-file-text' : node.repeatFor ? 'i-lucide-repeat' : 'i-lucide-layers'"
+                    class="size-4 shrink-0" aria-hidden="true" />
+                  <span class="min-w-0 truncate">{{ node.title || node.id }}</span>
+                </button>
+              </div>
+            </li>
+          </ul>
+          <ExtensionButton color="neutral" variant="ghost" size="sm" icon="i-lucide-plus"
+            class="mt-2 w-full justify-start" :disabled="disabled" @click="tab = 'edit'; addPage()">
+            {{ tr('Add page', 'Ajouter une page') }}
+          </ExtensionButton>
+        </nav>
       </template>
     <div v-if="!standalone" class="designer-tabs" role="tablist" :aria-label="tr('Form workflow', 'Étapes du formulaire')">
-      <button v-for="item in (props.intakeId || props.opportunityId ? ['edit', 'test', 'settings'] : ['edit', 'test', 'settings', 'publish']) as Array<'edit' | 'test' | 'settings' | 'publish'>" :key="item" type="button" role="tab" class="designer-tab"
+      <button v-for="item in (props.intakeId || props.opportunityId ? ['edit', 'flow', 'test'] : ['edit', 'flow', 'test', 'publish']) as Array<'edit' | 'flow' | 'test' | 'publish'>" :key="item" type="button" role="tab" class="designer-tab"
         :aria-selected="tab === item" :disabled="item === 'test' && !definition.questions.length"
-        @click="tab = item">{{ item === 'edit' ? t('formEditTab') : item === 'test' ? t('formTestTab') : item === 'settings' ? t('formSettingsTab') : t('formPublishTab') }}</button>
+        @click="tab = item">{{ item === 'edit' ? t('formEditTab') : item === 'flow' ? t('formFlowTab') : item === 'test' ? t('formTestTab') : t('formPublishTab') }}</button>
     </div>
-    <section v-if="tab === 'edit'" class="designer-flow-overview">
-      <button type="button" class="designer-flow-toggle" :aria-expanded="showFlowMap" @click="showFlowMap = !showFlowMap">
-        <span><strong>{{ tr('Page flow', 'Parcours des pages') }}</strong><span class="ml-2 text-muted">{{ definition.pages.length }} {{ definition.pages.length === 1 ? tr('page', 'page') : tr('pages', 'pages') }} · {{ branchCount }} {{ branchCount === 1 ? tr('rule', 'règle') : tr('rules', 'règles') }}</span></span>
-        <span class="text-primary">{{ showFlowMap ? tr('Hide map', 'Masquer la carte') : tr('Show map', 'Afficher la carte') }} <span aria-hidden="true">{{ showFlowMap ? '⌃' : '⌄' }}</span></span>
-      </button>
-      <FormFlowMap v-if="showFlowMap" :definition="definition" :locale="language" :selected-page-id="selected?.pageId"
-        @select-page="selectedContainerId = $event; selectedQuestionId = ''" />
-    </section>
-    <div :class="tab === 'edit' ? 'designer-edit-layout' : ''">
-      <nav v-if="tab === 'edit'" class="designer-outline" :aria-label="tr('Form pages', 'Pages du formulaire')">
+    <div :class="tab === 'edit' && !standalone ? 'designer-edit-layout' : ''">
+      <nav v-if="tab === 'edit' && !standalone" class="designer-outline" :aria-label="tr('Form pages', 'Pages du formulaire')">
           <h4 class="designer-eyebrow">{{ tr('PAGES & SECTIONS', 'PAGES ET SECTIONS') }}</h4>
           <ul class="space-y-1 text-sm">
             <li v-for="node in nodes" :key="node.id">
@@ -668,8 +816,10 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
           <template v-if="selected">
             <div class="designer-workspace">
             <div class="designer-canvas space-y-6">
+            <ExtensionAssessmentSchemaPageSection section-id="form-container-details"
+              :title="selected.title || (selected.kind === 'page' ? tr('Untitled page', 'Page sans titre') : tr('Untitled section', 'Section sans titre'))">
+            <ExtensionAssessmentSchemaAccordionSection :key="selected.id" :title="selected.kind === 'page' ? tr('Page details', 'Détails de la page') : tr('Section details', 'Détails de la section')" :default-open="true">
             <div class="space-y-3">
-              <p class="designer-eyebrow">{{ selected.kind === 'page' ? tr('PAGE CONTENT', 'CONTENU DE LA PAGE') : tr('SECTION CONTENT', 'CONTENU DE LA SECTION') }}</p>
               <div class="grid gap-3 sm:grid-cols-2">
                 <ExtensionFormField :label="tr('Heading · English', 'Titre · anglais')" name="groupTitleEn" required>
                   <ExtensionInput v-model="selected.item.title.en" name="groupTitleEn" required :disabled="disabled" />
@@ -716,8 +866,10 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
                 </ExtensionButton>
               </div>
             </div>
+            </ExtensionAssessmentSchemaAccordionSection>
+            </ExtensionAssessmentSchemaPageSection>
+            <ExtensionAssessmentSchemaPageSection section-id="form-questions" :title="`${tr('Questions', 'Questions')} · ${areaQuestions.length}`">
             <div class="designer-question-stack">
-              <p class="designer-eyebrow">{{ tr('QUESTIONS', 'QUESTIONS') }} · {{ areaQuestions.length }}</p>
               <p v-if="selected.kind === 'group' && selected.repeatFor" class="text-sm text-muted">{{ t('formRepeatSetHelp') }}</p>
               <p v-if="!areaQuestions.length" class="designer-empty">{{ selected.kind === 'group' && selected.repeatFor ? t('formEmptyRepeatSet') : tr('Start with a question. Select a type below to add it to this page.', 'Commencez par une question. Sélectionnez un type ci-dessous pour l’ajouter à cette page.') }}</p>
               <ol class="space-y-3">
@@ -727,13 +879,9 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
                     <span class="designer-question-body">
                       <span class="designer-question-title">{{ question.label[language] || tr('Untitled question', 'Question sans titre') }} <span v-if="question.required" class="text-error">*</span></span>
                       <span v-if="question.type === 'select' && question.dependsOn" class="designer-dependency-badge">{{ tr('Depends on', 'Selon') }} {{ definition.questions.find((item) => item.id === question.dependsOn?.questionId)?.label[language] || tr('earlier answer', 'une réponse précédente') }}</span>
-                      <span v-if="question.hint?.[language]" class="designer-question-hint">{{ question.hint[language] }}</span>
-                      <span v-if="question.type === 'select'" class="designer-answer-options"><span v-for="option in question.options.slice(0, 3)" :key="option.value">○ {{ option.label[language] }}</span></span>
-                      <span v-else-if="question.type === 'computed'" class="designer-answer-line">{{ tr('Calculated from earlier answers', 'Calculée à partir des réponses précédentes') }}</span>
-                      <span v-else-if="question.type === 'table'" class="designer-answer-line">{{ question.columns.map((column) => column.label[language]).join(' · ') }}</span>
-                      <span v-else class="designer-answer-line">{{ question.type === 'list' ? tr('Add an item', 'Ajouter un élément') : tr('Your answer', 'Votre réponse') }}</span>
                     </span>
                     <span class="designer-question-type">{{ typeName(question.type) }}</span>
+                    <ExtensionIcon name="i-lucide-pencil" class="size-4 shrink-0" aria-hidden="true" />
                   </button>
                   <ExtensionButton icon="i-lucide-trash-2" color="neutral" variant="ghost" size="sm" class="absolute right-2 top-2"
                     :aria-label="`${t('formRemoveField')}: ${question.label[language] || question.id}`" :disabled="disabled" @click="removeQuestion(question.id)" />
@@ -746,11 +894,14 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
                 </div>
               </div>
             </div>
+            </ExtensionAssessmentSchemaPageSection>
             </div>
             <div class="designer-inspector space-y-5">
+            <ExtensionAssessmentSchemaPageSection v-if="selectedQuestion" section-id="form-question-settings" :title="tr('Question settings', 'Paramètres de la question')">
+            <ExtensionAssessmentSchemaAccordionSection v-if="selectedQuestion" :key="selectedQuestion.id" :title="selectedQuestion.label[language] || tr('Question details', 'Détails de la question')" :default-open="true">
             <div v-if="selectedQuestion" class="space-y-4">
-              <div><p class="designer-eyebrow">{{ tr('QUESTION SETTINGS', 'PARAMÈTRES DE LA QUESTION') }}</p><h4 class="font-semibold">{{ typeName(selectedQuestion.type) }}</h4></div>
-              <div class="grid gap-3">
+              <p class="designer-eyebrow">{{ typeName(selectedQuestion.type) }}</p>
+              <div class="grid gap-4 md:grid-cols-2">
                 <ExtensionFormField :label="tr('Question in English', 'Question en anglais')" name="questionEn" required>
                   <ExtensionInput v-model="selectedQuestion.label.en" name="questionEn" required :disabled="disabled" />
                 </ExtensionFormField>
@@ -758,7 +909,7 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
                   <ExtensionInput v-model="selectedQuestion.label.fr" name="questionFr" required :disabled="disabled" />
                 </ExtensionFormField>
               </div>
-              <div class="grid gap-3">
+              <div class="grid gap-4 md:grid-cols-2">
                 <ExtensionFormField :label="tr('Help text · English', 'Texte d’aide · anglais')" name="questionHintEn">
                   <textarea v-model="selectedQuestion.hint!.en" name="questionHintEn" class="designer-textarea" :disabled="disabled" />
                 </ExtensionFormField>
@@ -868,8 +1019,11 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
                 <FormCondition v-model="selectedQuestion.visibleWhen" :questions="questionConditionOptions" :locale="language" :disabled="disabled" />
               </div>
             </div>
+            </ExtensionAssessmentSchemaAccordionSection>
+            </ExtensionAssessmentSchemaPageSection>
+            <ExtensionAssessmentSchemaPageSection v-if="selected.kind === 'page'" section-id="form-navigation-rules" :title="tr('Navigation rules', 'Règles de navigation')">
+            <ExtensionAssessmentSchemaAccordionSection v-if="selected.kind === 'page'" :key="`${selected.id}:navigation`" :title="tr('Page navigation', 'Navigation entre les pages')">
             <div v-if="selected.kind === 'page'" class="space-y-3 border-t border-default pt-4">
-              <h4 class="font-semibold">{{ tr('Page navigation', 'Navigation entre les pages') }}</h4>
               <p class="text-sm text-muted">{{ tr('Choose where applicants go next. The first matching rule wins; otherwise use the default destination.', 'Choisissez la page suivante. La première règle qui correspond s’applique; sinon, la destination par défaut est utilisée.') }}</p>
               <p v-if="!branchConditionOptions.length" class="text-sm text-muted">{{ tr('Add a question to this or an earlier page before creating a rule.', 'Ajoutez une question à cette page ou à une page précédente avant de créer une règle.') }}</p>
               <div v-for="(branch, index) in (selected.item as AdvancedSurvey['pages'][number]).branches" :key="index" class="space-y-2 border-l-2 border-primary/50 pl-4">
@@ -894,31 +1048,16 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
                   @update:model-value="setDestination(selected!.item as AdvancedSurvey['pages'][number], -1, String($event))" />
               </ExtensionFormField>
             </div>
+            </ExtensionAssessmentSchemaAccordionSection>
+            </ExtensionAssessmentSchemaPageSection>
             </div>
             </div>
           </template>
         </template>
+        <FormFlowMap v-else-if="tab === 'flow'" :definition="definition" :locale="language" :selected-page-id="selected?.pageId" @select-page="openFlowPage" />
         <div v-else-if="tab === 'test'" class="space-y-4">
           <div class="flex items-center justify-end gap-2 text-sm"><span class="text-muted">{{ tr('Preview language', 'Langue de l’aperçu') }}</span><button type="button" class="designer-language" :aria-pressed="previewLocale === 'en'" @click="previewLocale = 'en'">English</button><button type="button" class="designer-language" :aria-pressed="previewLocale === 'fr'" @click="previewLocale = 'fr'">Français</button></div>
           <FormTest :definition="definition" :locale="previewLocale" />
-        </div>
-        <div v-else-if="tab === 'settings'" class="designer-form-details">
-          <div><h4 class="text-lg font-semibold">{{ tr('Form settings', 'Paramètres du formulaire') }}</h4><p class="text-sm text-muted">{{ tr('Set the title and introduction applicants will see in each language.', 'Définissez le titre et l’introduction que les demandeurs verront dans chaque langue.') }}</p></div>
-          <div class="mt-4 grid gap-4 sm:grid-cols-2">
-          <ExtensionFormField :label="tr('Form title · English', 'Titre du formulaire · anglais')" name="formTitleEn" required>
-            <ExtensionInput v-model="definition.title.en" name="formTitleEn" required :disabled="disabled" />
-          </ExtensionFormField>
-          <ExtensionFormField :label="tr('Form title · French', 'Titre du formulaire · français')" name="formTitleFr" required>
-            <ExtensionInput v-model="definition.title.fr" name="formTitleFr" required :disabled="disabled" />
-          </ExtensionFormField>
-          <ExtensionFormField :label="tr('Introduction · English', 'Introduction · anglais')" name="formDescriptionEn">
-            <textarea v-model="definition.description!.en" name="formDescriptionEn" class="designer-textarea" :disabled="disabled" />
-          </ExtensionFormField>
-          <ExtensionFormField :label="tr('Introduction · French', 'Introduction · français')" name="formDescriptionFr">
-            <textarea v-model="definition.description!.fr" name="formDescriptionFr" class="designer-textarea" :disabled="disabled" />
-          </ExtensionFormField>
-          </div>
-          <p class="mt-4 text-sm text-muted">{{ tr('Pages, sections, questions, and their translations are edited in Edit.', 'Les pages, les sections, les questions et leurs traductions se modifient dans Modifier.') }}</p>
         </div>
         <div v-else class="space-y-5">
           <section class="designer-form-details space-y-3">
@@ -927,7 +1066,7 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
             <ul class="space-y-2">
               <li v-for="check in publicationChecks" :key="check.label" class="flex items-start gap-2 text-sm">
                 <span :class="check.ok ? 'text-success' : 'text-warning'" aria-hidden="true">{{ check.ok ? '✓' : '○' }}</span>
-                <button type="button" class="text-left hover:underline" :aria-label="`${check.label} — ${check.ok ? tr('complete', 'terminé') : tr('needs attention', 'à compléter')}`" @click="tab = check.target">{{ check.label }}</button>
+                <button type="button" class="text-left hover:underline" :aria-label="`${check.label} — ${check.ok ? tr('complete', 'terminé') : tr('needs attention', 'à compléter')}`" @click="check.target === 'details' ? openDetails() : tab = check.target">{{ check.label }}</button>
               </li>
             </ul>
           </section>
@@ -976,13 +1115,41 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
       {{ t('intakeAttachRetry') }}
     </ExtensionButton>
     </component>
+    <ExtensionModal v-model:open="detailsOpen" :dismissible="false"
+      :title="editingDetails ? t('formDetailsEditTitle') : t('formDetailsCreateTitle')"
+      :description="createsLocalDraft ? t('formDetailsCreateHelp') : t('formDetailsHelp')">
+      <template #body>
+        <div class="space-y-4">
+            <ExtensionFormField :label="t('formTitleEnglish')" name="formTitleEn" required>
+              <ExtensionInput v-model="detailsDraft.titleEn" name="formTitleEn" required :maxlength="200" :disabled="disabled" />
+            </ExtensionFormField>
+            <ExtensionFormField :label="t('formTitleFrench')" name="formTitleFr" required>
+              <ExtensionInput v-model="detailsDraft.titleFr" name="formTitleFr" required :maxlength="200" :disabled="disabled" />
+            </ExtensionFormField>
+            <ExtensionFormField :label="t('formIntroductionEnglish')" name="formDescriptionEn" :required="introductionRequired">
+              <ExtensionTextarea v-model="detailsDraft.introductionEn" name="formDescriptionEn"
+                :required="introductionRequired" :maxlength="2000" :disabled="disabled" />
+            </ExtensionFormField>
+            <ExtensionFormField :label="t('formIntroductionFrench')" name="formDescriptionFr" :required="introductionRequired">
+              <ExtensionTextarea v-model="detailsDraft.introductionFr" name="formDescriptionFr"
+                :required="introductionRequired" :maxlength="2000" :disabled="disabled" />
+            </ExtensionFormField>
+          <p v-if="detailsError" role="alert" class="text-sm text-error">{{ detailsError }}</p>
+          <div class="flex justify-end gap-2">
+            <ExtensionButton color="neutral" variant="ghost" :disabled="busy" @click="cancelDetails">{{ t('formDetailsCancel') }}</ExtensionButton>
+            <ExtensionButton :disabled="disabled || !detailsValid" :loading="busy" @click="applyDetails">
+              {{ createsLocalDraft ? t('formDetailsCreateAction') : editingDetails ? t('formDetailsApply') : t('formDetailsContinue') }}
+            </ExtensionButton>
+          </div>
+        </div>
+      </template>
+    </ExtensionModal>
   </section>
 </template>
 
 <style scoped>
 .designer { color: var(--ui-text, #e8e8ec); container-type: inline-size; }
 .designer-header { display: flex; align-items: end; justify-content: space-between; gap: 1.25rem; padding-bottom: 1rem; border-bottom: 1px solid var(--ui-border, #33343a); }
-.designer--standalone .designer-header { margin: 1.5rem 1.5rem 0; }
 .designer-back { display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .7rem; color: var(--ui-text-muted, #a2a3ab); font-size: .875rem; }
 .designer-back:hover { color: var(--ui-text, #fff); text-decoration: underline; }
 .designer-heading { font-size: clamp(1.5rem, 2vw, 2rem); font-weight: 700; line-height: 1.2; letter-spacing: -.025em; }
@@ -994,45 +1161,43 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
 .designer-tab:disabled { opacity: .45; cursor: not-allowed; }
 .designer-language { padding: .35rem .6rem; border: 1px solid var(--ui-border, #33343a); border-radius: .35rem; font-weight: 600; }
 .designer-language[aria-pressed="true"] { border-color: var(--ui-primary, #008cca); color: var(--ui-primary, #008cca); }
-.designer-flow-overview { padding: .75rem 1rem; border: 1px solid var(--ui-border, #33343a); border-radius: .55rem; }
-.designer-flow-toggle { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 1rem; text-align: start; font-size: .82rem; }
-.designer-flow-toggle:hover strong { text-decoration: underline; }
-.designer-flow-overview :deep(.flow-map) { padding-top: 1rem; }
 .designer-edit-layout { display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: flex-start; }
 .designer-content { flex: 10 1 50rem; container-type: inline-size; }
 .designer-outline { border-inline-end: 1px solid var(--ui-border, #33343a); padding: .5rem 1rem .5rem 0; }
 .designer-edit-layout .designer-outline { flex: 1 0 12rem; }
+.designer-sidebar-outline { margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid var(--ui-border, #33343a); }
 .designer-eyebrow { color: var(--ui-text-muted, #a2a3ab); font-size: .68rem; letter-spacing: .11em; font-weight: 750; line-height: 1.4; }
 .designer-outline-item { display: block; width: 100%; padding-block: .6rem; border-radius: .4rem; color: var(--ui-text-muted, #a2a3ab); text-align: start; line-height: 1.35; }
 .designer-outline-item:hover { color: var(--ui-text, #fff); background: var(--ui-bg-elevated, #28282e); }
 .designer-outline-item[aria-current="location"] { color: var(--ui-text, #fff); background: var(--ui-bg-elevated, #28282e); font-weight: 650; }
+.designer-sidebar-row { display: flex; min-width: 0; align-items: center; border-radius: .4rem; color: var(--ui-text-muted, #a2a3ab); }
+.designer-sidebar-row:hover { color: var(--ui-text, #fff); background: var(--ui-bg-elevated, #28282e); }
+.designer-sidebar-row--active { color: var(--ui-primary, #008cca); background: color-mix(in srgb, var(--ui-primary, #008cca) 12%, transparent); }
+.designer-sidebar-disclosure { display: flex; width: 1.25rem; height: 2.25rem; flex: none; align-items: center; justify-content: center; }
+button.designer-sidebar-disclosure:hover { color: var(--ui-primary, #008cca); }
+.designer-sidebar-item { display: flex; min-width: 0; min-height: 2.5rem; flex: 1; align-items: center; gap: .45rem; padding-inline: .2rem .5rem; text-align: start; font-weight: 600; }
 .designer-outline-add { margin-top: .75rem; padding: .45rem .5rem; color: var(--ui-primary, #008cca); font-size: .85rem; font-weight: 650; text-align: start; }
 .designer-outline-add:hover { text-decoration: underline; }
 .designer-form-details { padding: 1.25rem; border: 1px solid var(--ui-border, #33343a); border-radius: .65rem; }
-.designer-workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(16rem, 19rem); gap: 1.25rem; align-items: start; }
-.designer-canvas { min-width: 0; padding: 1.4rem; border: 1px solid var(--ui-border, #33343a); border-radius: .65rem; background: var(--ui-bg, #1e1e22); }
-.designer-inspector { min-width: 0; padding: 1.25rem; border: 1px solid var(--ui-border, #33343a); border-radius: .65rem; background: var(--ui-bg-elevated, #242429); }
+.designer-workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2rem; align-items: start; }
+.designer-canvas, .designer-inspector { min-width: 0; }
 .designer-textarea { width: 100%; min-height: 5rem; resize: vertical; border: 1px solid var(--ui-border, #42434a); border-radius: .4rem; background: var(--ui-bg, #1e1e22); color: var(--ui-text, #fff); padding: .6rem .7rem; font: inherit; font-size: .875rem; }
 .designer-textarea:focus { outline: 2px solid var(--ui-primary, #008cca); outline-offset: 1px; }
-.designer-question-stack { padding-top: 1.25rem; border-top: 1px solid var(--ui-border, #33343a); }
+.designer-question-stack { display: grid; gap: 1rem; }
 .designer-empty { margin: 1.5rem 0; color: var(--ui-text-muted, #a2a3ab); font-size: .875rem; }
-.designer-question { display: flex; flex-wrap: wrap; width: 100%; min-height: 6rem; gap: .35rem .85rem; padding: 1.15rem; padding-inline-end: 3.25rem; border: 1px solid var(--ui-border, #3c3c42); border-radius: .55rem; background: var(--ui-bg-elevated, #28282d); text-align: start; transition: border-color .16s ease, transform .16s ease; }
-.designer-question:hover { border-color: var(--ui-primary, #008cca); transform: translateY(-1px); }
-.designer-question[aria-current="true"] { border-color: var(--ui-primary, #008cca); box-shadow: inset 3px 0 0 var(--ui-primary, #008cca); }
+.designer-question { display: flex; width: 100%; min-height: 3.25rem; align-items: center; gap: .75rem; padding: .75rem 3.25rem .75rem 1rem; border-block: 1px solid var(--ui-border, #3c3c42); background: var(--ui-bg-elevated, #28282d); text-align: start; transition: border-color .16s ease, background .16s ease; }
+.designer-question:hover { border-color: var(--ui-primary, #008cca); color: var(--ui-primary, #008cca); }
+.designer-question[aria-current="true"] { border-color: var(--ui-primary, #008cca); background: color-mix(in srgb, var(--ui-primary, #008cca) 15%, var(--ui-bg-elevated, #28282d)); color: var(--ui-primary, #008cca); }
 .designer-question-number { flex: none; color: var(--ui-text-muted, #a2a3ab); font-size: .8rem; }
-.designer-question-body { display: flex; flex: 1; min-width: 8rem; flex-direction: column; gap: .35rem; }
+.designer-question-body { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: .35rem; }
 .designer-question-title { font-size: .95rem; font-weight: 650; line-height: 1.3; }
 .designer-dependency-badge { align-self: start; margin-top: .15rem; padding: .2rem .45rem; border-radius: .3rem; background: var(--ui-bg, #1e1e22); color: var(--ui-primary, #008cca); font-size: .7rem; font-weight: 650; }
-.designer-question-hint { color: var(--ui-text-muted, #a2a3ab); font-size: .8rem; }
-.designer-question-type { align-self: start; margin-inline-start: 1.4rem; color: var(--ui-text-muted, #a2a3ab); font-size: .7rem; white-space: nowrap; }
-.designer-answer-line { display: block; max-width: 19rem; margin-top: .5rem; padding-bottom: .4rem; border-bottom: 1px solid var(--ui-border, #505158); color: var(--ui-text-muted, #a2a3ab); font-size: .75rem; }
-.designer-answer-options { display: flex; flex-direction: column; gap: .25rem; margin-top: .35rem; color: var(--ui-text-muted, #a2a3ab); font-size: .78rem; }
+.designer-question-type { color: var(--ui-text-muted, #a2a3ab); font-size: .7rem; white-space: nowrap; }
 .designer-add { margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px dashed var(--ui-border, #42434a); }
 .designer-type-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; margin-top: .8rem; }
-.designer-type { display: flex; align-items: center; gap: .65rem; min-height: 2.6rem; padding: .55rem .7rem; border: 1px solid var(--ui-border, #3c3c42); border-radius: .4rem; text-align: start; font-size: .8rem; transition: border-color .16s ease, background .16s ease; }
+.designer-type { display: flex; align-items: center; gap: .65rem; min-height: 2.6rem; padding: .55rem .7rem; border: 1px solid color-mix(in srgb, var(--ui-primary, #008cca) 55%, var(--ui-border, #3c3c42)); border-radius: .4rem; color: var(--ui-primary, #008cca); text-align: start; font-size: .78rem; font-weight: 700; letter-spacing: .035em; transition: border-color .16s ease, background .16s ease; }
 .designer-type span { display: grid; width: 1.2rem; place-items: center; color: var(--ui-primary, #008cca); font-size: .95rem; font-weight: 700; }
 .designer-type:hover:not(:disabled) { border-color: var(--ui-primary, #008cca); background: var(--ui-bg-elevated, #28282d); }
 .designer-type:disabled { opacity: .5; cursor: not-allowed; }
-@container (max-width: 52rem) { .designer-workspace { grid-template-columns: 1fr; } }
-@media (max-width: 700px) { .designer-header { align-items: start; flex-direction: column; } .designer-outline { border-inline-end: 0; border-bottom: 1px solid var(--ui-border, #33343a); padding: 0 0 1rem; } .designer-canvas, .designer-inspector { padding: 1rem; } .designer-type-grid { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .designer-header { align-items: start; flex-direction: column; } .designer-outline { border-inline-end: 0; border-bottom: 1px solid var(--ui-border, #33343a); padding: 0 0 1rem; } .designer-type-grid { grid-template-columns: 1fr; } }
 </style>

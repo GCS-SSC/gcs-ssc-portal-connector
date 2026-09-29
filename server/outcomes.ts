@@ -3,7 +3,7 @@ import { readPortalCredentialFromDb } from './connection.ts'
 import { asConnectorDb, type ConnectorDb } from './db.ts'
 import { enabledPortalAgency } from './enablement.ts'
 import { retryDelaySeconds } from './retry.ts'
-import { createPortalClient } from './portal-client.ts'
+import { queuePortalClient } from './operations.ts'
 
 interface LeasedOutcome { id: string; agency_id: string; receipt_id: string; attempts: number }
 interface OutcomeSource {
@@ -58,7 +58,7 @@ export const drainOutcomeOutbox = async (db: ConnectorDb, limit: number, agencyI
         && source.status_en && source.status_fr && source.status_colour
         && /^#[0-9a-fA-F]{6}$/.test(source.status_colour)
       const status = visible ? { en: source.status_en!, fr: source.status_fr!, colour: source.status_colour! } : null
-      const client = createPortalClient({ portalUrl: source.portal_url,
+      const client = queuePortalClient(db, row.agency_id, { portalUrl: source.portal_url,
         portalAgencyId: source.portal_agency_id,
         key: await readPortalCredentialFromDb(asConnectorDb(db), row.agency_id) })
       await client.publishItemStatus(source.submission_id, source.item_submission_id,

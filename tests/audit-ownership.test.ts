@@ -12,7 +12,9 @@ const expectedOwnedTables = [
   'gcs_portal_verification',
   'gcs_portal_outbox',
   'gcs_portal_inbox',
-  'gcs_portal_outcome_outbox'
+  'gcs_portal_outcome_outbox',
+  'gcs_portal_form',
+  'gcs_portal_operation'
 ].map(table => `extensions.${table}`).sort()
 
 describe('portal connector audit ownership', () => {

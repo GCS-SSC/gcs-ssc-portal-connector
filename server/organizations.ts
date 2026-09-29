@@ -5,7 +5,7 @@ import { agencyIdFromContext, authorizedWrite } from './authorization.ts'
 import { readPortalCredential } from './connection.ts'
 import { asConnectorDb, type ConnectorDb } from './db.ts'
 import { enqueueAgreement } from './outbox.ts'
-import { createPortalClient } from './portal-client.ts'
+import { queuePortalClient } from './operations.ts'
 
 const inputSchema = z.object({
   organizationId: z.string().regex(/^N-[A-HJKMNP-Z2-9]{5,}$/),
@@ -18,7 +18,7 @@ const portalClient = async (context: GcsExtensionRouteContext) => {
   const connection = await asConnectorDb(context.db).selectFrom('extensions.gcs_portal_connection')
     .selectAll().where('agency_id', '=', agencyId).executeTakeFirst()
   if (!connection) throw new Error('Connect the portal first.')
-  return createPortalClient({ portalUrl: connection.portal_url,
+  return queuePortalClient(asConnectorDb(context.db), agencyId, { portalUrl: connection.portal_url,
     portalAgencyId: connection.portal_agency_id,
     key: await readPortalCredential(context, agencyId) })
 }

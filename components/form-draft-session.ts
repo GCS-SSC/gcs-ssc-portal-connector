@@ -39,7 +39,7 @@ const editableSurvey = z.object({
     ]).optional()
   })).min(1)
 })
-const draftTab = z.enum(['edit', 'test', 'settings', 'publish'])
+const draftTab = z.enum(['edit', 'flow', 'test', 'settings', 'publish'])
 const draftScope = z.enum(['agreement', 'program', 'stream', 'organization'])
 
 export type FormDraftSession = {
@@ -49,7 +49,7 @@ export type FormDraftSession = {
   saved: string
   selectedContainerId: string
   selectedQuestionId: string
-  tab: 'edit' | 'test' | 'settings' | 'publish'
+  tab: 'edit' | 'flow' | 'test' | 'settings' | 'publish'
   publicationScope: 'agreement' | 'program' | 'stream' | 'organization'
   agreementId: string
   organizationId: string

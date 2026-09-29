@@ -12,6 +12,19 @@ const connection = {
 }
 
 describe('portal transport', () => {
+  it('routes every mutation through the supplied outbound queue while reads use the transport', async () => {
+    const transport = vi.fn(async () => Response.json({ surveys: [] })) as unknown as typeof fetch
+    const queue = vi.fn(async (_path: string, _method: string, _body?: object) =>
+      ({ survey: { id: 'V-ABCDE', revision: 1 } }))
+    const client = createPortalClient(connection, transport, queue)
+    await client.surveys()
+    await client.createSurvey({ schemaVersion: 3, title: { en: 'A', fr: 'B' }, pages: [], questions: [] } as never)
+    await client.publishCall('D-ABCDE')
+    expect(transport).toHaveBeenCalledTimes(1)
+    expect(queue.mock.calls.map(([path, method]) => `${method} ${path}`)).toEqual([
+      'POST surveys', 'PATCH calls/D-ABCDE/publication'
+    ])
+  })
   it('sends intake draft deletion to the scoped Portal call route', async () => {
     const transport = vi.fn(async () => Response.json({ success: true })) as unknown as typeof fetch
     await createPortalClient(connection, transport).deleteCall('D-ABCDE')

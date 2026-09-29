@@ -6,7 +6,7 @@ import { projectAgreement } from './agreement-projection.ts'
 import { agencyIdFromContext, authorizedWrite } from './authorization.ts'
 import { readPortalCredentialFromDb } from './connection.ts'
 import { asConnectorDb, type ConnectorDb } from './db.ts'
-import { createPortalClient } from './portal-client.ts'
+import { queuePortalClient } from './operations.ts'
 
 const publicationInput = z.object({
   agreementId: z.string().regex(/^[1-9]\d{0,18}$/),
@@ -53,7 +53,7 @@ export const publishAgreementCore = async (
   const connection = await db.selectFrom('extensions.gcs_portal_connection').selectAll()
     .where('agency_id', '=', agencyId).executeTakeFirst()
   if (!connection) throw new Error('Connect an organization portal before publishing.')
-  const client = createPortalClient({
+  const client = queuePortalClient(db, agencyId, {
     portalUrl: connection.portal_url, portalAgencyId: connection.portal_agency_id,
     key: await readPortalCredentialFromDb(asConnectorDb(db), agencyId)
   })

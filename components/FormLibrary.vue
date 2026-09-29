@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ExtensionBadge, ExtensionButton, ExtensionResourceLayoutCard, useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
+import { FetchResponseError } from '@gcs-ssc/extensions'
+import { ExtensionBadge, ExtensionButton, ExtensionFormField, ExtensionInput, ExtensionModal, ExtensionResourceLayoutCard, ExtensionTextarea, useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
 import { messages } from '../i18n/messages'
 
 type Bilingual = { en: string; fr: string }
@@ -17,7 +18,7 @@ type Publication = {
 }
 
 const props = defineProps<{ agencyId: string; disabled?: boolean }>()
-const emit = defineEmits<{ open: [formId: string]; create: [] }>()
+const emit = defineEmits<{ open: [formId: string] }>()
 const { locale, t } = useExtensionI18n(messages)
 const language = computed<'en' | 'fr'>(() => locale.value === 'fr' ? 'fr' : 'en')
 const api = useExtensionApi('gcs-ssc-portal-connector')
@@ -25,6 +26,42 @@ const forms = ref<FormSummary[]>([])
 const publications = ref<Publication[]>([])
 const loading = ref(true)
 const error = ref('')
+const createOpen = ref(false)
+const createBusy = ref(false)
+const createError = ref('')
+const createDraft = ref({ titleEn: '', titleFr: '', introductionEn: '', introductionFr: '' })
+const introductionRequired = computed(() => Boolean(createDraft.value.introductionEn.trim() || createDraft.value.introductionFr.trim()))
+const createValid = computed(() => Boolean(
+  createDraft.value.titleEn.trim() && createDraft.value.titleFr.trim()
+  && createDraft.value.titleEn.trim().length <= 200 && createDraft.value.titleFr.trim().length <= 200
+  && (!introductionRequired.value || createDraft.value.introductionEn.trim() && createDraft.value.introductionFr.trim())
+  && createDraft.value.introductionEn.trim().length <= 2000 && createDraft.value.introductionFr.trim().length <= 2000
+))
+const openCreate = () => {
+  createDraft.value = { titleEn: '', titleFr: '', introductionEn: '', introductionFr: '' }
+  createError.value = ''
+  createOpen.value = true
+}
+const createForm = async () => {
+  if (!createValid.value || createBusy.value || props.disabled) return
+  createBusy.value = true
+  createError.value = ''
+  try {
+    const result = await api.post<{ survey: { id: string } }>(`/agencies/${props.agencyId}/forms`, {
+      action: 'createDraft',
+      title: { en: createDraft.value.titleEn.trim(), fr: createDraft.value.titleFr.trim() },
+      introduction: { en: createDraft.value.introductionEn.trim(), fr: createDraft.value.introductionFr.trim() }
+    })
+    createOpen.value = false
+    emit('open', result.survey.id)
+  } catch (error) {
+    createError.value = error instanceof FetchResponseError
+      ? `${t('formDetailsCreateFailed')} ${error.message} (HTTP ${error.response.status})`
+      : t('formDetailsCreateFailed')
+  } finally {
+    createBusy.value = false
+  }
+}
 const search = ref('')
 const statusFilter = ref<'all' | 'published' | 'changes' | 'draft'>('all')
 const pagination = ref({ pageIndex: 0, pageSize: 10 })
@@ -107,6 +144,7 @@ const load = async () => {
   }
 }
 watch(() => props.agencyId, () => {
+  createOpen.value = false
   forms.value = []
   publications.value = []
   search.value = ''
@@ -122,6 +160,7 @@ watch(() => props.agencyId, () => {
         <h3 class="text-xl font-semibold text-highlighted">{{ t('formLibraryTitle') }}</h3>
         <p class="mt-1 text-sm text-muted">{{ t('formLibraryDescription') }}</p>
       </div>
+      <ExtensionButton icon="i-lucide-plus" :disabled="disabled" @click="openCreate">{{ t('formLibraryCreate') }}</ExtensionButton>
     </div>
 
     <p v-if="error" role="alert" class="text-sm text-error">{{ error }}
@@ -144,13 +183,10 @@ watch(() => props.agencyId, () => {
           </select>
         </label>
       </template>
-      <template #actions>
-        <ExtensionButton icon="i-lucide-plus" :disabled="disabled" @click="emit('create')">{{ t('formLibraryCreate') }}</ExtensionButton>
-      </template>
       <template #form-cell="{ row }">
         <button type="button" class="text-left font-semibold text-highlighted underline-offset-2 hover:underline focus-visible:underline"
           @click="emit('open', row.original.id)">{{ row.original.title[language] || row.original.title.en || row.original.id }}</button>
-        <div class="mt-1 text-xs text-muted">{{ t('formLibraryRevision') }} {{ row.original.revision }} · {{ row.original.id }}</div>
+        <div class="mt-1 text-xs text-muted"><template v-if="row.original.revision > 0">{{ t('formLibraryRevision') }} {{ row.original.revision }} · </template>{{ row.original.id }}</div>
       </template>
       <template #publication-cell="{ row }">
         <ExtensionBadge :color="stateFor(row.original) === 'published' ? 'success' : stateFor(row.original) === 'changes' ? 'warning' : 'neutral'" variant="subtle">
@@ -182,5 +218,31 @@ watch(() => props.agencyId, () => {
         <p v-else class="py-8 text-center text-sm text-muted">{{ t('formLibraryNoMatch') }}</p>
       </template>
     </ExtensionResourceLayoutCard>
+    <ExtensionModal v-model:open="createOpen" :dismissible="!createBusy"
+      :title="t('formDetailsCreateTitle')" :description="t('formDetailsCreateHelp')">
+      <template #body>
+        <form class="space-y-4" @submit.prevent="createForm">
+          <ExtensionFormField :label="t('formTitleEnglish')" name="formTitleEn" required>
+            <ExtensionInput v-model="createDraft.titleEn" name="formTitleEn" required :maxlength="200" :disabled="createBusy" />
+          </ExtensionFormField>
+          <ExtensionFormField :label="t('formTitleFrench')" name="formTitleFr" required>
+            <ExtensionInput v-model="createDraft.titleFr" name="formTitleFr" required :maxlength="200" :disabled="createBusy" />
+          </ExtensionFormField>
+          <ExtensionFormField :label="t('formIntroductionEnglish')" name="formDescriptionEn" :required="introductionRequired">
+            <ExtensionTextarea v-model="createDraft.introductionEn" name="formDescriptionEn"
+              :required="introductionRequired" :maxlength="2000" :disabled="createBusy" />
+          </ExtensionFormField>
+          <ExtensionFormField :label="t('formIntroductionFrench')" name="formDescriptionFr" :required="introductionRequired">
+            <ExtensionTextarea v-model="createDraft.introductionFr" name="formDescriptionFr"
+              :required="introductionRequired" :maxlength="2000" :disabled="createBusy" />
+          </ExtensionFormField>
+          <p v-if="createError" role="alert" class="text-sm text-error">{{ createError }}</p>
+          <div class="flex justify-end gap-2">
+            <ExtensionButton type="button" color="neutral" variant="ghost" :disabled="createBusy" @click="createOpen = false">{{ t('formDetailsCancel') }}</ExtensionButton>
+            <ExtensionButton type="submit" :disabled="disabled || !createValid" :loading="createBusy">{{ t('formDetailsCreateAction') }}</ExtensionButton>
+          </div>
+        </form>
+      </template>
+    </ExtensionModal>
   </div>
 </template>

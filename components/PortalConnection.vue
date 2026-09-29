@@ -35,6 +35,7 @@ interface BacklogDetail extends BacklogItem {
 }
 interface InboundItem { eventId: string; kind: string; submissionId: string; state: string; lastError: string | null }
 interface OutcomeBacklogItem { id: string; submissionId: string; kind: string; state: string; attempts: number; nextAttemptAt: string; lastError: string | null }
+interface PortalOperation { id: string; kind: 'form' | 'request'; target: string; state: string; attempts: number; nextAttemptAt: string; lastError: string | null }
 interface PortalStatus { id: string; name_en: string; name_fr: string }
 const props = defineProps<{
   agencyId: string
@@ -45,10 +46,13 @@ const props = defineProps<{
   readOnly?: boolean
   detailFormId?: string
 }>()
-const emit = defineEmits<{ openForm: [formId: string]; savedForm: [formId: string]; formCollectionLabel: [label: string] }>()
+const emit = defineEmits<{ openForm: [formId: string]; savedForm: [formId: string]; closeForm: []; formCollectionLabel: [label: string] }>()
 const section = computed(() => props.section ?? 'connection')
 const formsVisited = ref(section.value === 'forms')
-watch(section, (value) => { if (value === 'forms') formsVisited.value = true })
+watch(section, (value) => {
+  if (value === 'forms') formsVisited.value = true
+  if (value === 'queue') void loadManagement().catch(() => { error.value = t('loadFailed') })
+})
 watch(() => props.agencyId, () => {
   formsVisited.value = section.value === 'forms'
 })
@@ -115,6 +119,7 @@ watch(() => filteredOrganizations.value.length, length => {
   if (organizationPagination.value.pageIndex > lastPage) organizationPagination.value.pageIndex = lastPage
 })
 const backlog: Ref<BacklogItem[]> = ref([])
+const operations: Ref<PortalOperation[]> = ref([])
 const backlogSearch = ref('')
 const backlogPagination = ref({ pageIndex: 0, pageSize: 10 })
 const backlogColumns = computed(() => [
@@ -292,16 +297,21 @@ const proponentOptions = computed(() => proponents.value.map(item => ({
   label: `${locale.value === 'fr' ? item.egcs_ar_legalname_fr : item.egcs_ar_legalname_en} (#${item.id})`
 })))
 const loadManagement = async () => {
-  if (!connection.value) return
-  const [orgs, queue, settings] = await Promise.all([
-    api.get<{ organizations: PortalOrganization[] }>(`${endpoint.value}/organizations`),
-    api.get<{ backlog: BacklogItem[]; outcomes: OutcomeBacklogItem[]; inbound: InboundItem[] }>(`${endpoint.value}/backlog`),
-    api.get<{ statuses: PortalStatus[]; settings: { portalStatusIds: string[]; entityStatusIds: typeof entityStatusIds.value; pullIntervalMinutes: number | null; lastPullAt: string | null; lastPullError: string | null } | null }>(`${endpoint.value}/settings`)
-  ])
-  organizations.value = orgs.organizations
+  const agencyId = props.agencyId
+  const path = `/agencies/${agencyId}`
+  const queue = await api.get<{ backlog: BacklogItem[]; operations: PortalOperation[]; outcomes: OutcomeBacklogItem[]; inbound: InboundItem[] }>(`${path}/backlog`)
+  if (agencyId !== props.agencyId) return
   backlog.value = queue.backlog
+  operations.value = queue.operations ?? []
   inbound.value = queue.inbound
   outcomeBacklog.value = queue.outcomes
+  if (!connection.value) return
+  const [orgs, settings] = await Promise.all([
+    api.get<{ organizations: PortalOrganization[] }>(`${path}/organizations`),
+    api.get<{ statuses: PortalStatus[]; settings: { portalStatusIds: string[]; entityStatusIds: typeof entityStatusIds.value; pullIntervalMinutes: number | null; lastPullAt: string | null; lastPullError: string | null } | null }>(`${path}/settings`)
+  ])
+  if (agencyId !== props.agencyId) return
+  organizations.value = orgs.organizations
   statuses.value = settings.statuses
   selectedStatusIds.value = settings.settings?.portalStatusIds ?? []
   entityStatusIds.value = settings.settings?.entityStatusIds ?? { claim: [], forecast: [], funding_application: [], other_form: [] }
@@ -414,25 +424,36 @@ const toggleStatus = (id: string, enabled: boolean) => {
   if (statusEntity.value === 'agreement') selectedStatusIds.value = next
   else entityStatusIds.value = { ...entityStatusIds.value, [statusEntity.value]: next }
 }
+let loadSequence = 0
 const load = async () => {
+  const sequence = ++loadSequence
+  const path = `/agencies/${props.agencyId}`
   loading.value = true
   error.value = ''
+  connection.value = null
+  operations.value = []
+  backlog.value = []
+  outcomeBacklog.value = []
+  inbound.value = []
+  organizations.value = []
   try {
     const [summary, history] = await Promise.all([
-      api.get<{ connection: Connection | null }>(`${endpoint.value}/connection`),
-      api.get<{ receipts: Receipt[] }>(`${endpoint.value}/receipts`)
+      api.get<{ connection: Connection | null }>(`${path}/connection`),
+      api.get<{ receipts: Receipt[] }>(`${path}/receipts`)
     ])
+    if (sequence !== loadSequence) return
     connection.value = summary.connection
     form.value = {
       portalUrl: summary.connection?.portalUrl ?? '',
       portalAgencyId: summary.connection?.portalAgencyId ?? '', portalKey: ''
     }
     receipts.value = history.receipts
-    if (summary.connection) await loadManagement()
+    await loadManagement()
   } catch {
+    if (sequence !== loadSequence) return
     if (section.value === 'connection') showError(t('loadFailed'))
     else error.value = t('loadFailed')
-  } finally { loading.value = false }
+  } finally { if (sequence === loadSequence) loading.value = false }
 }
 const save = async () => {
   if (locked.value || busy.value) return
@@ -540,11 +561,12 @@ watch(() => props.agencyId, searchProponents)
       <ExtensionAlert v-if="readOnly" color="info" variant="soft" icon="i-lucide-lock-keyhole" :title="t('formsReadOnlyTitle')">
         <template #description>{{ t('formsReadOnlyHelp') }}</template>
       </ExtensionAlert>
-      <p v-if="!connection" class="text-sm text-muted">{{ t('connectionRequired') }}</p>
-      <FormLibrary v-else-if="detailFormId === undefined" :agency-id="agencyId" :disabled="locked"
-        @open="emit('openForm', $event)" @create="emit('openForm', '')" />
+      <ExtensionAlert v-if="!connection" color="info" variant="soft" icon="i-lucide-info" :title="t('formsAwaitConnection')" />
+      <FormLibrary v-if="detailFormId === undefined" :agency-id="agencyId" :disabled="locked"
+        @open="emit('openForm', $event)" />
       <FormCreator v-else :key="agencyId" :agency-id="agencyId" :disabled="locked"
-        :selected-form-id="detailFormId" standalone @saved="emit('savedForm', $event)" />
+        :selected-form-id="detailFormId" standalone @saved="emit('savedForm', $event)"
+        @close="emit('closeForm')" />
     </section>
     <section v-if="section === 'intakes'" class="space-y-4">
       <p v-if="!connection" class="text-sm text-muted">{{ t('connectionRequired') }}</p>
@@ -661,6 +683,18 @@ watch(() => props.agencyId, searchProponents)
       </div>
     </section>
     <section v-if="section === 'queue'" class="space-y-6">
+      <div>
+        <h3 class="text-lg font-semibold text-highlighted">{{ t('portalOperations') }}</h3>
+        <p class="mt-1 text-sm text-muted">{{ t('portalOperationsHelp') }}</p>
+        <p v-if="!operations.length" class="mt-3 text-sm text-muted">{{ t('emptyOperations') }}</p>
+        <ul v-else class="mt-3 divide-y divide-default">
+          <li v-for="operation in operations" :key="operation.id" class="flex flex-wrap items-start justify-between gap-3 py-2 text-sm">
+            <span>{{ operation.kind === 'form' ? t('forms') : operation.target }}<span v-if="operation.kind === 'form'" class="block text-xs text-muted">{{ operation.target }}</span></span>
+            <span><ExtensionBadge :color="queueColor(operation.state)" variant="subtle">{{ queueState(operation.state) }}</ExtensionBadge>
+              <span v-if="operation.lastError" class="block text-error">{{ operation.lastError }}</span></span>
+          </li>
+        </ul>
+      </div>
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div class="min-w-0 flex-1">
           <h3 class="text-lg font-semibold text-highlighted">{{ t('outboundBacklog') }}</h3>

@@ -2,6 +2,32 @@ import type { Generated, Kysely, Transaction } from 'kysely'
 import type { ExtensionSecretDatabase } from '@gcs-ssc/extensions/server'
 
 export interface ConnectorDatabase extends ExtensionSecretDatabase {
+  'extensions.gcs_portal_form': {
+    id: string
+    agency_id: string
+    definition: unknown
+    revision: Generated<number>
+    portal_id: string | null
+    portal_revision: number | null
+    updated_at: Generated<Date>
+  }
+  'extensions.gcs_portal_operation': {
+    id: Generated<string>
+    agency_id: string
+    kind: 'request' | 'form'
+    method: string | null
+    path: string | null
+    body: unknown | null
+    form_id: string | null
+    state: Generated<'pending' | 'leased' | 'delivered'>
+    attempts: Generated<number>
+    next_attempt_at: Generated<Date>
+    last_error: string | null
+    response: unknown | null
+    created_at: Generated<Date>
+    updated_at: Generated<Date>
+    delivered_at: Date | null
+  }
   'extensions.gcs_portal_connection': {
     agency_id: string
     portal_agency_id: string

@@ -66,6 +66,22 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
   const workspace = defineComponent({
     setup(_, { slots }) { return () => h('div', { 'data-form-workspace': '' }, [slots.sidebar?.(), slots.default?.()]) }
   })
+  const pageSection = defineComponent({
+    props: ['title'],
+    setup(props, { slots }) { return () => h('section', [h('h2', String(props.title)), slots.actions?.(), slots.default?.()]) }
+  })
+  const accordionSection = defineComponent({
+    props: ['title'],
+    setup(props, { slots }) { return () => h('section', [h('h3', String(props.title)), slots.default?.()]) }
+  })
+  const hero = defineComponent({
+    props: ['title', 'description', 'actions'],
+    setup(props) { return () => h('header', { 'data-form-hero': '' }, [
+      h('h1', String(props.title)), h('p', String(props.description ?? '')),
+      ...(props.actions as Array<{ label: string; onClick: () => void }> ?? [])
+        .map(action => h('button', { onClick: action.onClick }, action.label))
+    ]) }
+  })
   const routeTabs = defineComponent({
     props: ['modelValue', 'items'], emits: ['update:modelValue'],
     setup(props, { emit }) { return () => h('nav', { 'aria-label': 'Form workflow' },
@@ -97,8 +113,10 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
     useExtensionApi: () => ({ get, post, put }), useHostApi: () => ({ get: hostGet, patch: vi.fn() }),
     ExtensionFormField: field, ExtensionInput: input, ExtensionSelect: select,
     ExtensionCheckbox: checkbox, ExtensionButton: button, ExtensionSaveButton: button,
+    ExtensionIcon: defineComponent({ setup() { return () => h('span') } }),
     ExtensionTextarea: textarea, ExtensionModal: modal, ExtensionResourceLayoutCard: resourceTable,
-    ExtensionEntityEditorWorkspace: workspace, ExtensionRouteTabs: routeTabs,
+    ExtensionAssessmentSchemaPageSection: pageSection, ExtensionAssessmentSchemaAccordionSection: accordionSection,
+    ExtensionEntityEditorWorkspace: workspace, ExtensionEntityHero: hero, ExtensionRouteTabs: routeTabs,
     ExtensionBadge: defineComponent({ setup(_, { slots }) { return () => h('span', slots.default?.()) } }),
     ExtensionAlert: defineComponent({ props: ['title'], setup(props, { slots }) {
       return () => h('div', { role: 'alert' }, [h('strong', props.title), slots.description?.()])
@@ -133,7 +151,9 @@ beforeEach(() => {
     return {}
   })
   hostGet.mockReset().mockResolvedValue({ items: [{ id: '7', egcs_ar_legalname_en: 'Recipient', egcs_ar_legalname_fr: 'Bénéficiaire' }] })
-  post.mockReset().mockResolvedValue({ survey: { id: 'survey_1', revision: 1 }, results: [] })
+  post.mockReset().mockImplementation(async (_path: string, body: { action?: string }) => body.action === 'createDraft'
+    ? { survey: { id: 'V-ABCDE', revision: 0 }, queued: false }
+    : { survey: { id: 'survey_1', revision: 1 }, results: [] })
   put.mockReset().mockResolvedValue({ connection: { portalUrl: 'https://portal.example/', portalAgencyId: 'G-ABCDE', hasCredential: true } })
 })
 
@@ -189,7 +209,6 @@ describe('connector form requirements', () => {
     expect(detail.get('[role="alert"]').text()).toContain('Forms are read-only')
     expect(button(detail, 'Save revision').attributes('disabled')).toBeDefined()
     expect(detail.get('.designer-outline-add').attributes('disabled')).toBeDefined()
-    await button(detail, 'Settings').trigger('click')
     expect(detail.find('input[name="formTitleEn"]').exists()).toBe(true)
   })
 
@@ -214,6 +233,67 @@ describe('connector form requirements', () => {
     expect(wrapper.text()).toContain('Published form')
     await wrapper.get('button[aria-label="Edit form: Published form"]').trigger('click')
     expect(wrapper.emitted('open')?.[0]).toEqual(['published_form'])
+  })
+
+  it('keeps a failed form creation on the list until saving succeeds', async () => {
+    post.mockRejectedValueOnce(new Error('Save failed'))
+    const wrapper = mount(FormLibrary, { props: { agencyId: '1' } })
+    await flushPromises()
+    await button(wrapper, 'Create form').trigger('click')
+    await wrapper.get('input[name="formTitleEn"]').setValue('Project form')
+    await wrapper.get('input[name="formTitleFr"]').setValue('Formulaire de projet')
+    const submit = () => wrapper.findAll('[role="dialog"] button').find(item => item.text() === 'Create form')!
+    await submit().trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('open')).toBeUndefined()
+    expect(wrapper.get('[role="dialog"] [role="alert"]').text()).toContain('could not be created')
+    await submit().trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('open')?.[0]).toEqual(['V-ABCDE'])
+  })
+
+  it('opens form design and queues a saved revision without a configured Portal connection', async () => {
+    const defaultGet = get.getMockImplementation()!
+    let created = false
+    get.mockImplementation(async (path: string) => path.endsWith('/connection')
+      ? { connection: null }
+      : path.endsWith('/forms/V-ABCDE') ? { survey: { id: 'V-ABCDE', revision: 0, definition: {
+        schemaVersion: 3, title: { en: 'Project form', fr: 'Formulaire de projet' }, questions: [],
+        pages: [{ id: 'page_1', title: { en: 'Page 1', fr: 'Page 1' }, questionIds: [], groups: [], branches: [] }]
+      } } }
+        : path.endsWith('/forms') && created ? { surveys: [{ id: 'V-ABCDE', revision: 0,
+          title: { en: 'Project form', fr: 'Formulaire de projet' }, updatedAt: new Date().toISOString() }] }
+      : defaultGet(path))
+    post.mockImplementation(async (_path: string, body: { action?: string }) => {
+      if (body.action === 'createDraft') { created = true; return { survey: { id: 'V-ABCDE', revision: 0 }, queued: false } }
+      return { survey: { id: 'V-ABCDE', revision: 1 }, queued: true }
+    })
+    const collection = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', enabled: true } })
+    await flushPromises()
+    expect(collection.text()).toContain('You can design and save forms now')
+    await button(collection, 'Create form').trigger('click')
+    expect(collection.emitted('openForm')).toBeUndefined()
+    expect(collection.find('[data-form-workspace]').exists()).toBe(false)
+    await collection.get('input[name="formTitleEn"]').setValue('Project form')
+    await collection.get('input[name="formTitleFr"]').setValue('Formulaire de projet')
+    await collection.findAll('[role="dialog"] button').find(item => item.text() === 'Create form')!.trigger('click')
+    await flushPromises()
+    expect(post).toHaveBeenCalledWith('/agencies/1/forms', expect.objectContaining({ action: 'createDraft',
+      title: { en: 'Project form', fr: 'Formulaire de projet' } }))
+    expect(collection.emitted('openForm')?.[0]).toEqual(['V-ABCDE'])
+    collection.unmount()
+    const detail = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', detailFormId: 'V-ABCDE', enabled: true } })
+    await flushPromises()
+    expect(detail.get('[data-form-hero] h1').text()).toBe('Project form')
+    await button(detail, 'Edit details').trigger('click')
+    expect(detail.get('[role="dialog"]').text()).toContain('Edit form details')
+    await button(detail, 'Cancel').trigger('click')
+    await detail.findAll('.designer-type').find(item => item.text().includes('Short answer'))!.trigger('click')
+    await button(detail, 'Save revision').trigger('click')
+    await flushPromises()
+    expect(post).toHaveBeenCalledWith('/agencies/1/forms', expect.objectContaining({ action: 'save',
+      surveyId: 'V-ABCDE', expectedRevision: 0 }))
+    expect(detail.text()).toContain('queued for Portal sync')
   })
 
   it('shows delivery and recent receipts in separate searchable host tables', async () => {
@@ -429,10 +509,9 @@ describe('connector form requirements', () => {
     const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
     await flushPromises()
     expect(button(wrapper, 'Edit').attributes('aria-selected')).toBe('true')
-    await button(wrapper, 'Settings').trigger('click')
     await wrapper.get('input[name="formTitleEn"]').setValue('Title')
     await wrapper.get('input[name="formTitleFr"]').setValue('Titre')
-    await button(wrapper, 'Edit').trigger('click')
+    await button(wrapper, 'Continue to designer').trigger('click')
     if (type === 'repeat') await button(wrapper, 'Add repeating set').trigger('click')
     else await wrapper.findAll('.designer-type').find(item => item.text().includes(({ text: 'Short answer', table: 'Table' } as Record<string, string>)[type]!))!.trigger('click')
     const limit = wrapper.get(`input[name="${name}"]`)
@@ -448,10 +527,9 @@ describe('connector form requirements', () => {
   it('identifies computed sources as a required group and requires one before save', async () => {
     const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
     await flushPromises()
-    await button(wrapper, 'Settings').trigger('click')
     await wrapper.get('input[name="formTitleEn"]').setValue('Title')
     await wrapper.get('input[name="formTitleFr"]').setValue('Titre')
-    await button(wrapper, 'Edit').trigger('click')
+    await button(wrapper, 'Continue to designer').trigger('click')
     await wrapper.findAll('.designer-type').find(item => item.text().includes('Short answer'))!.trigger('click')
     await wrapper.findAll('.designer-type').find(item => item.text().includes('Calculated value'))!.trigger('click')
     const group = wrapper.get('[role="group"][aria-labelledby="computed-sources-label"]')
@@ -474,8 +552,9 @@ describe('connector form requirements', () => {
     try {
       const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
       await flushPromises()
-      await button(wrapper, 'Settings').trigger('click')
       await wrapper.get('input[name="formTitleEn"]').setValue('Draft title')
+      await wrapper.get('input[name="formTitleFr"]').setValue('Titre provisoire')
+      await button(wrapper, 'Continue to designer').trigger('click')
       await button(wrapper, '← All forms').trigger('click')
       expect(confirm).toHaveBeenCalled()
       expect(wrapper.emitted('close')).toBeUndefined()
@@ -536,10 +615,9 @@ describe('connector form requirements', () => {
       nameEn: 'Community intake', nameFr: 'Appel communautaire' })
     await button(wrapper, 'Create application form').trigger('click')
     await flushPromises()
-    await button(wrapper, 'Settings').trigger('click')
     await wrapper.get('input[name="formTitleEn"]').setValue('Application')
     await wrapper.get('input[name="formTitleFr"]').setValue('Demande')
-    await button(wrapper, 'Edit').trigger('click')
+    await button(wrapper, 'Continue to designer').trigger('click')
     await wrapper.findAll('.designer-type').find(item => item.text().includes('Short answer'))!.trigger('click')
     await button(wrapper, 'Save revision').trigger('click')
     await flushPromises()
@@ -599,10 +677,9 @@ describe('connector form requirements', () => {
       : { attached: true })
     const wrapper = mount(FormCreator, { props: { agencyId: '1', intakeId: 'D-ABCDE' } })
     await flushPromises()
-    await button(wrapper, 'Settings').trigger('click')
     await wrapper.get('input[name="formTitleEn"]').setValue('Application')
     await wrapper.get('input[name="formTitleFr"]').setValue('Demande')
-    await button(wrapper, 'Edit').trigger('click')
+    await button(wrapper, 'Continue to designer').trigger('click')
     await wrapper.findAll('.designer-type').find(item => item.text().includes('Short answer'))!.trigger('click')
     await button(wrapper, 'Save revision').trigger('click')
     await flushPromises()
@@ -619,22 +696,36 @@ describe('connector form requirements', () => {
     expect(readFormDraft('1:intake:D-ABCDE')).toBeNull()
   })
 
-  it('returns to Settings when a form introduction translation fails validation', async () => {
+  it('requires both introduction translations when one is supplied', async () => {
     const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
     await flushPromises()
-    await button(wrapper, 'Settings').trigger('click')
     await wrapper.get('input[name="formTitleEn"]').setValue('Project report')
     await wrapper.get('input[name="formTitleFr"]').setValue('Rapport de projet')
     await wrapper.get('textarea[name="formDescriptionEn"]').setValue('Describe the project.')
-    await button(wrapper, 'Edit').trigger('click')
-    await wrapper.findAll('.designer-type').find(item => item.text().includes('Short answer'))!.trigger('click')
-    await button(wrapper, 'Save revision').trigger('click')
-    expect(post).not.toHaveBeenCalled()
-    expect(button(wrapper, 'Settings').attributes('aria-selected')).toBe('true')
-    expect(wrapper.find('textarea[name="formDescriptionFr"]').exists()).toBe(true)
+    expect(wrapper.get('textarea[name="formDescriptionFr"]').attributes('required')).toBeDefined()
+    expect(button(wrapper, 'Continue to designer').attributes('disabled')).toBeDefined()
+    await wrapper.get('textarea[name="formDescriptionFr"]').setValue('Décrivez le projet.')
+    await button(wrapper, 'Continue to designer').trigger('click')
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Project report')
   })
 
-  it('opens a new form on a detail page and restores its unsaved draft there', async () => {
+  it('creates a form record from its modal and restores later unsaved edits', async () => {
+    let created = false
+    const defaultGet = get.getMockImplementation()!
+    get.mockImplementation(async (path: string) => path === '/agencies/1/forms/V-ABCDE' && created
+      ? { survey: { id: 'V-ABCDE', revision: 0, definition: {
+        schemaVersion: 3, title: { en: 'Unsaved draft', fr: 'Brouillon non enregistré' }, questions: [],
+        pages: [{ id: 'page_1', title: { en: 'Page 1', fr: 'Page 1' }, questionIds: [], groups: [], branches: [] }]
+      } } }
+      : path === '/agencies/1/forms' && created
+      ? { surveys: [{ id: 'V-ABCDE', revision: 0, title: { en: 'Unsaved draft', fr: 'Brouillon non enregistré' },
+        updatedAt: new Date().toISOString(), synced: false }], streams: [], agreements: [], calls: [] }
+      : defaultGet(path))
+    post.mockImplementation(async (_path: string, body: { action?: string }) => {
+      if (body.action === 'createDraft') { created = true; return { survey: { id: 'V-ABCDE', revision: 0 }, queued: false } }
+      return { survey: { id: 'V-ABCDE', revision: 1 }, queued: true }
+    })
     const connection = mount(PortalConnection, { props: { agencyId: '1', section: 'connection', enabled: true } })
     await flushPromises()
     expect(get).not.toHaveBeenCalledWith('/agencies/1/forms')
@@ -647,28 +738,49 @@ describe('connector form requirements', () => {
     expect(firstForms.get('input[aria-label="Search forms"]').attributes('aria-label')).toBe('Search forms')
     expect(button(firstForms, 'Create form')).toBeDefined()
     await button(firstForms, 'Create form').trigger('click')
-    expect(firstForms.emitted('openForm')?.[0]).toEqual([''])
-    expect(firstForms.find('input[name="formTitleEn"]').exists()).toBe(false)
+    expect(firstForms.emitted('openForm')).toBeUndefined()
+    expect(firstForms.find('input[name="formTitleEn"]').exists()).toBe(true)
+    await firstForms.get('input[name="formTitleEn"]').setValue('Unsaved draft')
+    await firstForms.get('input[name="formTitleFr"]').setValue('Brouillon non enregistré')
+    await firstForms.findAll('[role="dialog"] button').find(item => item.text() === 'Create form')!.trigger('click')
+    await flushPromises()
+    expect(firstForms.emitted('openForm')?.[0]).toEqual(['V-ABCDE'])
     firstForms.unmount()
 
-    const firstDetail = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', detailFormId: '', enabled: true } })
+    const firstDetail = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', detailFormId: 'V-ABCDE', enabled: true } })
     await flushPromises()
     expect(firstDetail.emitted('formCollectionLabel')?.[0]).toEqual(['All forms'])
     expect(button(firstDetail, 'Edit').attributes('aria-selected')).toBe('true')
+    expect(firstDetail.get('[data-form-workspace] nav').text()).toContain('Flow')
     expect(firstDetail.get('[data-form-workspace] nav').text()).toContain('Publish')
     expect(firstDetail.find('.designer-back').exists()).toBe(false)
-    await button(firstDetail, 'Settings').trigger('click')
-    await firstDetail.get('input[name="formTitleEn"]').setValue('Unsaved draft')
+    expect(firstDetail.find('.designer-outline').exists()).toBe(false)
+    expect(firstDetail.get('.designer-sidebar-outline').text()).toContain('PAGES & SECTIONS')
+    await button(firstDetail, 'Add nested section').trigger('click')
+    expect(firstDetail.text()).toContain('Section details')
+    expect(firstDetail.get('input[name="groupTitleEn"]')).toBeTruthy()
+    const sidebarItems = firstDetail.findAll('.designer-sidebar-item')
+    expect(sidebarItems).toHaveLength(2)
+    const sidebarRows = firstDetail.findAll('.designer-sidebar-row')
+    expect(sidebarRows[1]!.attributes('style')).not.toBe(sidebarRows[0]!.attributes('style'))
+    await firstDetail.get('.designer-sidebar-disclosure[aria-expanded="true"]').trigger('click')
+    expect(firstDetail.findAll('.designer-sidebar-item')).toHaveLength(1)
+    await firstDetail.get('.designer-sidebar-disclosure[aria-expanded="false"]').trigger('click')
+    expect(firstDetail.findAll('.designer-sidebar-item')).toHaveLength(2)
+    await button(firstDetail, 'Publish').trigger('click')
+    await firstDetail.findAll('.designer-sidebar-item')[0]!.trigger('click')
+    expect(button(firstDetail, 'Edit').attributes('aria-selected')).toBe('true')
     await flushPromises()
     firstDetail.unmount()
 
-    const restored = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', detailFormId: '', enabled: true } })
+    const restored = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', detailFormId: 'V-ABCDE', enabled: true } })
     await flushPromises()
-    expect((restored.get('input[name="formTitleEn"]').element as HTMLInputElement).value).toBe('Unsaved draft')
+    expect(restored.get('[data-form-hero] h1').text()).toBe('Unsaved draft')
+    expect(restored.findAll('.designer-sidebar-item')).toHaveLength(2)
     restored.unmount()
     const library = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', enabled: true } })
     await flushPromises()
-    expect(library.text()).toContain('No forms yet')
+    expect(library.text()).toContain('Unsaved draft')
   })
 
   it('loads a newer server revision instead of restoring a stale saved-form draft', async () => {
@@ -707,7 +819,6 @@ describe('connector form requirements', () => {
     }))
     const wrapper = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', detailFormId: '', enabled: true } })
     await flushPromises()
-    await button(wrapper, 'Settings').trigger('click')
     expect((wrapper.get('input[name="formTitleEn"]').element as HTMLInputElement).value).toBe('')
     expect(wrapper.text()).toContain('New form')
   })
@@ -728,6 +839,8 @@ describe('connector form requirements', () => {
     expect(readFormDraft('1')).toBeNull()
     window.sessionStorage.setItem(key, JSON.stringify(draft))
     expect(readFormDraft('1')).not.toBeNull()
+    window.sessionStorage.setItem(key, JSON.stringify({ ...draft, tab: 'flow' }))
+    expect(readFormDraft('1')?.tab).toBe('flow')
   })
 
   it('offers only earlier answers and later pages when building a branch', async () => {
@@ -738,7 +851,12 @@ describe('connector form requirements', () => {
     await wrapper.get('input[name="choiceEn0"]').setValue('Yes')
     await wrapper.get('.designer-outline-add').trigger('click')
     await button(wrapper, 'Add an if rule').trigger('click')
-    expect(wrapper.get('.designer-flow-toggle').text()).toContain('2 pages · 1 rule')
+    await button(wrapper, 'Flow').trigger('click')
+    expect(wrapper.get('.flow-stats').text()).toContain('2 pages')
+    expect(wrapper.get('.flow-stats').text()).toContain('1 rule')
+    expect(wrapper.findAll('.flow-route--conditional')).toHaveLength(1)
+    expect(wrapper.findAll('.flow-route--default')).toHaveLength(1)
+    await button(wrapper, 'Edit').trigger('click')
     const questionChoices = wrapper.get('select[name="conditionQuestion0"]').findAll('option').map(item => item.text())
     expect(questionChoices).toContain('New question')
     const destinations = wrapper.get('select[name="branchDestination0"]').findAll('option').map(item => item.text())
@@ -955,14 +1073,18 @@ describe('connector form requirements', () => {
     expect(wrapper.text()).toContain('Navigation to that page was updated')
   })
 
-  it('opens the page flow map and selects a page for editing', async () => {
+  it('opens Flow as a separate view and selects a page for editing', async () => {
     const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
     await flushPromises()
     await button(wrapper, 'Edit').trigger('click')
     await wrapper.get('.designer-outline-add').trigger('click')
-    await wrapper.get('.designer-flow-toggle').trigger('click')
+    await button(wrapper, 'Flow').trigger('click')
     expect(wrapper.findAll('.flow-page-node')).toHaveLength(2)
+    expect(wrapper.findAll('.flow-route')).toHaveLength(0)
+    expect(wrapper.findAll('[data-flow-kind="direct"]')).toHaveLength(3)
+    expect(wrapper.find('.designer-workspace').exists()).toBe(false)
     await wrapper.findAll('.flow-page-node')[0]!.trigger('click')
+    expect(button(wrapper, 'Edit').attributes('aria-selected')).toBe('true')
     expect(wrapper.findAll('.designer-outline-item')[0]!.attributes('aria-current')).toBe('location')
   })
 

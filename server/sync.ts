@@ -4,7 +4,7 @@ import { claimItemSchema, forecastItemSchema, type PortalSubmission, type Portal
 import { agencyIdFromContext, authorizedWrite } from './authorization.ts'
 import { readPortalCredential } from './connection.ts'
 import { asConnectorDb, type ConnectorDb } from './db.ts'
-import { createPortalClient } from './portal-client.ts'
+import { queuePortalClient } from './operations.ts'
 
 const loadConnection = async (context: GcsExtensionRouteContext) => {
   const agencyId = agencyIdFromContext(context)
@@ -14,7 +14,7 @@ const loadConnection = async (context: GcsExtensionRouteContext) => {
   return {
     agencyId,
     scanCursor: row.scan_cursor ?? undefined,
-    client: createPortalClient({
+    client: queuePortalClient(asConnectorDb(context.db), agencyId, {
       portalUrl: row.portal_url,
       portalAgencyId: row.portal_agency_id,
       key: await readPortalCredential(context, agencyId)

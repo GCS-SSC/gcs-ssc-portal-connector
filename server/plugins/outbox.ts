@@ -6,6 +6,7 @@ import { drainOutcomeOutbox } from '../outcomes.ts'
 import { pullDueAgencies, releasePullLease } from '../pull.ts'
 import { syncPortal } from '../sync.ts'
 import { EXTENSION_KEY } from '../authorization.ts'
+import { drainOperations } from '../operations.ts'
 
 /** A short startup grace and small batches keep a restarted service responsive. */
 export default defineGcsExtensionNitroPlugin((nitroApp) => {
@@ -15,7 +16,7 @@ export default defineGcsExtensionNitroPlugin((nitroApp) => {
   const timer = setInterval(async () => {
     if (!database || busy || Date.now() < readyAt) return
     busy = true
-    try { await drainOutbox(database, 2); await drainOutcomeOutbox(database, 2) }
+    try { await drainOperations(database, 2); await drainOutbox(database, 2); await drainOutcomeOutbox(database, 2) }
     catch (error) { console.error('Portal outbox drain failed', error) }
     finally { busy = false }
   }, 5000)

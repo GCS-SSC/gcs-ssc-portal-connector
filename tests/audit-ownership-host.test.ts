@@ -21,7 +21,9 @@ const concreteRows = [
   { table: 'extensions.gcs_portal_verification', row: { id: '1009', portal_organization_id: 'N-ABCDE', proponent_id: '44' }, agencies: [] },
   { table: 'extensions.gcs_portal_outbox', row: { id: '1005', agency_id: '11' }, agencies: ['11'] },
   { table: 'extensions.gcs_portal_inbox', row: { id: '1006', agency_id: '22' }, agencies: ['22'] },
-  { table: 'extensions.gcs_portal_outcome_outbox', row: { id: '1007', agency_id: '11' }, agencies: ['11'] }
+  { table: 'extensions.gcs_portal_outcome_outbox', row: { id: '1007', agency_id: '11' }, agencies: ['11'] },
+  { table: 'extensions.gcs_portal_form', row: { id: 'V-ABCDE', agency_id: '22' }, agencies: ['22'] },
+  { table: 'extensions.gcs_portal_operation', row: { id: '1010', agency_id: '11' }, agencies: ['11'] }
 ]
 
 fixture.verifyExtensionAuditContract(extension, concreteRows)

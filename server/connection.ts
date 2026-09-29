@@ -94,6 +94,9 @@ export const saveConnection = async (context: GcsExtensionRouteContext) => {
         const linked = await transaction.selectFrom('extensions.gcs_portal_identity').select('agency_id')
           .where('agency_id', '=', agencyId).executeTakeFirst()
         if (linked) throw new Error('A connected agency with verified organizations cannot switch portals. Rotate its key or migrate the links explicitly.')
+        const pending = await transaction.selectFrom('extensions.gcs_portal_operation').select('id')
+          .where('agency_id', '=', agencyId).where('state', '!=', 'delivered').executeTakeFirst()
+        if (pending) throw new Error('Deliver pending Portal operations before changing the Portal URL or agency code.')
       }
       await transaction.updateTable('extensions.gcs_portal_connection')
         .set({ portal_url: input.portalUrl, portal_agency_id: input.portalAgencyId,
@@ -105,6 +108,9 @@ export const saveConnection = async (context: GcsExtensionRouteContext) => {
         portal_agency_id: input.portalAgencyId, updated_at: new Date()
       }).execute()
     }
+    await transaction.updateTable('extensions.gcs_portal_operation')
+      .set({ next_attempt_at: new Date() })
+      .where('agency_id', '=', agencyId).where('kind', '=', 'form').where('state', '=', 'pending').execute()
   })
   return getConnection(context)
 }

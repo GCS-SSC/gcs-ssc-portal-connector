@@ -19,8 +19,11 @@ export class PortalRequestError extends Error {
 }
 
 /** Server-only transport. Redirects cannot carry the agency bearer credential elsewhere. */
-export const createPortalClient = (connection: PortalConnection, transport: typeof fetch = fetch) => {
-  const request = async (path: string, method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' = 'GET', body?: object): Promise<unknown> => {
+export type PortalMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+export type PortalMutationQueue = (path: string, method: Exclude<PortalMethod, 'GET'>, body?: object) => Promise<unknown>
+
+export const portalRequest = async (connection: PortalConnection, path: string,
+  method: PortalMethod = 'GET', body?: object, transport: typeof fetch = fetch): Promise<unknown> => {
     const url = new URL(`api/government/${path}`, connection.portalUrl)
     const response = await transport(url, {
       method, redirect: 'manual', signal: AbortSignal.timeout(30000),
@@ -35,6 +38,13 @@ export const createPortalClient = (connection: PortalConnection, transport: type
     const bytes = await response.arrayBuffer()
     if (bytes.byteLength > 4 * 1024 * 1024) throw new Error('Portal response exceeds 4 MiB.')
     return JSON.parse(new TextDecoder().decode(bytes)) as unknown
+}
+
+export const createPortalClient = (connection: PortalConnection, transport: typeof fetch = fetch,
+  queue?: PortalMutationQueue) => {
+  const request = async (path: string, method: PortalMethod = 'GET', body?: object): Promise<unknown> => {
+    if (method === 'GET' || !queue) return portalRequest(connection, path, method, body, transport)
+    return queue(path, method, body)
   }
   return {
     updates: async (after?: string) => updatesSchema.parse(await request(

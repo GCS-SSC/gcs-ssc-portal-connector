@@ -2,7 +2,7 @@ import { defineGcsAuditOwnership, defineGcsExtension } from '@gcs-ssc/extensions
 
 export default defineGcsExtension({
   key: 'gcs-ssc-portal-connector',
-  sdkVersion: '^0.3.3',
+  sdkVersion: '^0.3.4',
   name: { en: 'Organization portal', fr: 'Portail des organismes' },
   description: {
     en: 'Publishes funding data and receives organization submissions.',
@@ -56,7 +56,9 @@ export default defineGcsExtension({
     { table: 'extensions.gcs_portal_verification', owner: { kind: 'global', reason: 'A verified Portal organization maps to one GCS Proponent across all agencies.' } },
     { table: 'extensions.gcs_portal_outbox', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
     { table: 'extensions.gcs_portal_inbox', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
-    { table: 'extensions.gcs_portal_outcome_outbox', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } }
+    { table: 'extensions.gcs_portal_outcome_outbox', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
+    { table: 'extensions.gcs_portal_form', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
+    { table: 'extensions.gcs_portal_operation', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } }
   ]),
   migrations: [
     { path: './server/migrations/0001_portal_connector.ts' },
@@ -67,7 +69,8 @@ export default defineGcsExtension({
     { path: './server/migrations/0006_outcome_queue.ts' },
     { path: './server/migrations/0007_organization_verification.ts' },
     { path: './server/migrations/0008_entity_status_settings.ts' },
-    { path: './server/migrations/0009_delivery_payload.ts' }
+    { path: './server/migrations/0009_delivery_payload.ts' },
+    { path: './server/migrations/0010_portal_operations.ts' }
   ],
   serverHandlers: [
     {
