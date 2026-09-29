@@ -99,7 +99,7 @@ export const manageOpportunity = async (context: GcsExtensionRouteContext) => {
     if (!call) throw new Error('The new portal opportunity could not be read back.')
   } else if (!call.published) {
     if (call.streamId !== portalStreamId) throw new Error('The opportunity changed Streams after portal creation.')
-    await client.updateCall(call.id, metadata)
+    await client.updateCall(call.id, call.revision, metadata)
   }
   if (command.action === 'saveForms') {
     for (const form of command.forms) {

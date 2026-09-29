@@ -3,10 +3,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const drainOutbox = vi.hoisted(() => vi.fn(async () => ({ results: [] })))
 const drainOutcomeOutbox = vi.hoisted(() => vi.fn(async () => ({ results: [] })))
 const pullDueAgencies = vi.hoisted(() => vi.fn(async () => ({ results: [] })))
+const drainOperations = vi.hoisted(() => vi.fn(async () => ({ results: [] })))
 
 vi.mock('../server/outbox.ts', () => ({ drainOutbox }))
 vi.mock('../server/outcomes.ts', () => ({ drainOutcomeOutbox }))
 vi.mock('../server/pull.ts', () => ({ pullDueAgencies, releasePullLease: vi.fn() }))
+vi.mock('../server/operations.ts', () => ({ drainOperations }))
 vi.mock('../server/sync.ts', () => ({ syncPortal: vi.fn() }))
 
 afterEach(() => {
@@ -34,6 +36,7 @@ describe('headless scheduled portal worker', () => {
       expect(drainOutbox).not.toHaveBeenCalled()
 
       await vi.advanceTimersByTimeAsync(30_000)
+      expect(drainOperations).toHaveBeenCalledWith(database, 2)
       expect(drainOutbox).toHaveBeenCalledWith(database, 2)
       expect(drainOutcomeOutbox).toHaveBeenCalledWith(database, 2)
     } finally {

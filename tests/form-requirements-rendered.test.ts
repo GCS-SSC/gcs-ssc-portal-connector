@@ -60,7 +60,11 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
   const button = defineComponent({
     props: ['label', 'disabled'], emits: ['click'],
     setup(props, { attrs, emit, slots }) {
-      return () => h('button', { ...attrs, disabled: props.disabled, onClick: () => emit('click') }, props.label ?? slots.default?.())
+      return () => h('button', { ...attrs, disabled: props.disabled, onClick: (event: MouseEvent) => {
+        emit('click')
+        if (attrs.type === 'submit') (event.currentTarget as HTMLButtonElement).closest('form')
+          ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+      } }, props.label ?? slots.default?.())
     }
   })
   const workspace = defineComponent({
@@ -151,7 +155,7 @@ beforeEach(() => {
     return {}
   })
   hostGet.mockReset().mockResolvedValue({ items: [{ id: '7', egcs_ar_legalname_en: 'Recipient', egcs_ar_legalname_fr: 'Bénéficiaire' }] })
-  post.mockReset().mockImplementation(async (_path: string, body: { action?: string }) => body.action === 'createDraft'
+  post.mockReset().mockImplementation(async (_path: string, body?: { action?: string }) => body?.action === 'createDraft'
     ? { survey: { id: 'V-ABCDE', revision: 0 }, queued: false }
     : { survey: { id: 'survey_1', revision: 1 }, results: [] })
   put.mockReset().mockResolvedValue({ connection: { portalUrl: 'https://portal.example/', portalAgencyId: 'G-ABCDE', hasCredential: true } })
@@ -167,7 +171,7 @@ describe('connector form requirements', () => {
       await wrapper.get('.designer-outline-add').trigger('click')
       expect(wrapper.findAll('.designer-outline-item')).toHaveLength(2)
       await wrapper.findAll('.designer-type').find(item => item.text().includes('Short answer'))!.trigger('click')
-      expect(wrapper.text()).toContain('QUESTIONS · 1')
+      expect(wrapper.text()).toContain('Questions · 1')
     } finally {
       vi.unstubAllGlobals()
     }
@@ -204,12 +208,18 @@ describe('connector form requirements', () => {
     expect(button(collection, 'Create form').attributes('disabled')).toBeDefined()
     collection.unmount()
 
-    const detail = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', detailFormId: '', enabled: true, readOnly: true } })
+    const defaultGet = get.getMockImplementation()!
+    get.mockImplementation(async (path: string) => path.endsWith('/forms/V-ABCDE')
+      ? { survey: { id: 'V-ABCDE', revision: 1, definition: {
+        schemaVersion: 3, title: { en: 'Project', fr: 'Projet' }, questions: [],
+        pages: [{ id: 'page_1', title: { en: 'Page 1', fr: 'Page 1' }, questionIds: [], groups: [], branches: [] }]
+      } } } : defaultGet(path))
+    const detail = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', detailFormId: 'V-ABCDE', enabled: true, readOnly: true } })
     await flushPromises()
     expect(detail.get('[role="alert"]').text()).toContain('Forms are read-only')
-    expect(button(detail, 'Save revision').attributes('disabled')).toBeDefined()
-    expect(detail.get('.designer-outline-add').attributes('disabled')).toBeDefined()
-    expect(detail.find('input[name="formTitleEn"]').exists()).toBe(true)
+    expect(button(detail, 'Save revision')).toBeUndefined()
+    expect(button(detail, 'Add page').attributes('disabled')).toBeDefined()
+    expect(detail.find('input[name="formTitleEn"]').exists()).toBe(false)
   })
 
   it('uses the shared forms table and keeps search, status, and row navigation working', async () => {
@@ -495,6 +505,7 @@ describe('connector form requirements', () => {
     await flushPromises()
     await button(wrapper, 'Refresh Portal organizations').trigger('click')
     await flushPromises()
+    expect(post).toHaveBeenCalledWith('/agencies/1/organization-sync')
     expect(state.toastAdd).toHaveBeenCalledWith({
       title: 'Success', description: 'Portal organizations refreshed.', color: 'success'
     })
@@ -664,6 +675,42 @@ describe('connector form requirements', () => {
     expect(post).not.toHaveBeenCalled()
     expect(wrapper.get('input[name="intakeEndDate"]').attributes('aria-invalid')).toBe('true')
     expect(wrapper.text()).toContain('The closing date must be on or after the opening date.')
+  })
+  it('keeps intake edits visible after a revision conflict and requires review before retry', async () => {
+    const defaultGet = get.getMockImplementation()!
+    let revision = 2
+    get.mockImplementation(async (path: string) => path.endsWith('/intakes')
+      ? { intakes: [{ id: 'D-ABCDE', revision, streamId: 'S-ABCDE', nameEn: 'Existing intake',
+        nameFr: revision === 2 ? 'Appel existant' : 'Appel modifié ailleurs',
+        startDate: '2027-01-01', endDate: '2027-12-31', published: false,
+        surveyId: null, surveyRevision: null }],
+        streams: [{ id: 'S-ABCDE', nameEn: 'Community', nameFr: 'Communauté' }] }
+      : defaultGet(path))
+    post.mockImplementation(async (_path: string, body: Record<string, unknown>) => {
+      if (body.expectedRevision === 2) {
+        revision = 3
+        throw new FetchResponseError(new Response(null, { status: 409 }), {
+          data: { code: 'GCS_PORTAL_INTAKE_REVISION_CONFLICT' }
+        })
+      }
+      return { intakeId: 'D-ABCDE' }
+    })
+    const wrapper = mount(IntakeWorkspace, { props: { agencyId: '1' } })
+    await flushPromises()
+    await button(wrapper, 'Existing intake').trigger('click')
+    await button(wrapper, 'Edit intake opportunity').trigger('click')
+    await wrapper.get('input[name="intakeNameEn"]').setValue('My draft')
+    await button(wrapper, 'Save intake').trigger('click')
+    await flushPromises()
+    expect(post.mock.calls[0]?.[1]).toMatchObject({ expectedRevision: 2, nameEn: 'My draft' })
+    expect(wrapper.get('input[name="intakeNameEn"]').element).toHaveProperty('value', 'My draft')
+    expect(wrapper.text()).toContain('Appel modifié ailleurs')
+    expect(button(wrapper, 'Save intake').attributes('disabled')).toBeDefined()
+    expect(post).toHaveBeenCalledTimes(1)
+    await button(wrapper, 'Continue with latest revision').trigger('click')
+    await button(wrapper, 'Save intake').trigger('click')
+    await flushPromises()
+    expect(post.mock.calls[1]?.[1]).toMatchObject({ expectedRevision: 3, nameEn: 'My draft' })
   })
 
   it('keeps a saved intake form available when attachment fails and retries the same revision', async () => {

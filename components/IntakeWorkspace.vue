@@ -2,12 +2,13 @@
 import { computed, ref, watch, type Ref } from 'vue'
 import { ExtensionButton, ExtensionFormField, ExtensionInput, ExtensionSaveButton, ExtensionSelect,
   useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
+import { FetchResponseError } from '@gcs-ssc/extensions'
 import { messages } from '../i18n/messages'
 import { intakeDraftSchema, type IntakeDraft } from '../shared/intake'
 import FormCreator from './FormCreator.vue'
 
 type Intake = IntakeDraft & {
-  id: string; published: boolean; surveyId: string | null; surveyRevision: number | null
+  id: string; revision: number; published: boolean; surveyId: string | null; surveyRevision: number | null
 }
 type Stream = { id: string; nameEn: string; nameFr: string }
 const props = defineProps<{ agencyId: string; disabled?: boolean }>()
@@ -19,6 +20,8 @@ const streams: Ref<Stream[]> = ref([])
 const selectedId = ref<string | null>(null)
 const selected = computed(() => intakes.value.find((item) => item.id === selectedId.value) ?? null)
 const draft: Ref<IntakeDraft | null> = ref(null)
+const editingRevision: Ref<number | null> = ref(null)
+const revisionConflict = ref(false)
 const requestKey = ref('')
 const editingForm = ref(false)
 const busy = ref(false)
@@ -58,6 +61,8 @@ watch(() => props.agencyId, () => {
   streams.value = []
   selectedId.value = null
   draft.value = null
+  editingRevision.value = null
+  revisionConflict.value = false
   editingForm.value = false
   search.value = ''
   void load()
@@ -75,6 +80,8 @@ const openCreate = () => {
   requestKey.value = createRequestKey()
   fieldErrors.value = {}
   message.value = ''
+  editingRevision.value = null
+  revisionConflict.value = false
   draft.value = { streamId: '', nameEn: '', nameFr: '', startDate: '', endDate: '' }
 }
 const openDetails = () => {
@@ -83,9 +90,18 @@ const openDetails = () => {
     nameFr: selected.value.nameFr, startDate: selected.value.startDate, endDate: selected.value.endDate }
   fieldErrors.value = {}
   message.value = ''
+  editingRevision.value = selected.value.revision
+  revisionConflict.value = false
+}
+const acceptLatestRevision = () => {
+  if (!selected.value || !draft.value || !revisionConflict.value) return
+  editingRevision.value = selected.value.revision
+  revisionConflict.value = false
+  error.value = ''
 }
 const save = async () => {
   if (!draft.value || props.disabled || busy.value) return
+  if (revisionConflict.value) return
   const parsed = intakeDraftSchema.safeParse(draft.value)
   if (!parsed.success) {
     const errors: Partial<Record<keyof IntakeDraft, string>> = {}
@@ -106,13 +122,27 @@ const save = async () => {
   fieldErrors.value = {}
   try {
     const result = await api.post<{ intakeId: string }>(endpoint.value, selected.value
-      ? { action: 'update', intakeId: selected.value.id, ...parsed.data }
+      ? { action: 'update', intakeId: selected.value.id, expectedRevision: editingRevision.value, ...parsed.data }
       : { action: 'create', requestKey: requestKey.value, ...parsed.data })
     selectedId.value = result.intakeId
     draft.value = null
+    editingRevision.value = null
     message.value = t('intakeSaved')
     await load()
-  } catch { error.value = t('intakeSaveFailed') }
+  } catch (failure) {
+    const payload = failure instanceof FetchResponseError ? failure.data : null
+    const code = payload && typeof payload === 'object' && 'data' in payload
+      ? (payload.data as { code?: unknown } | null)?.code : null
+    if (selected.value && failure instanceof FetchResponseError && failure.response.status === 409
+      && code === 'GCS_PORTAL_INTAKE_REVISION_CONFLICT') {
+      const editedId = selected.value.id
+      await load()
+      if (selected.value?.id === editedId) {
+        revisionConflict.value = true
+        error.value = t('intakeRevisionConflict')
+      }
+    } else error.value = t('intakeSaveFailed')
+  }
   finally { busy.value = false }
 }
 const act = async (action: 'publish' | 'withdraw' | 'delete') => {
@@ -136,6 +166,8 @@ const act = async (action: 'publish' | 'withdraw' | 'delete') => {
 const returnToList = () => {
   selectedId.value = null
   draft.value = null
+  editingRevision.value = null
+  revisionConflict.value = false
   editingForm.value = false
   fieldErrors.value = {}
   message.value = ''
@@ -155,6 +187,12 @@ const returnToList = () => {
       <div>
         <h3 class="text-xl font-semibold text-highlighted">{{ selected ? t('intakeEdit') : t('intakeNew') }}</h3>
         <p class="mt-1 text-sm text-muted">{{ t('intakeHelp') }}</p>
+      </div>
+      <div v-if="revisionConflict && selected" class="space-y-2 border-l-4 border-warning pl-4">
+        <p class="font-semibold">{{ t('intakeLatestDetails') }}</p>
+        <p>{{ selected.nameEn }} / {{ selected.nameFr }} · {{ selected.startDate }} — {{ selected.endDate }}</p>
+        <p>{{ t('intakeReviewLatest') }}</p>
+        <ExtensionButton :disabled="busy || loading" @click="acceptLatestRevision">{{ t('intakeUseLatestRevision') }}</ExtensionButton>
       </div>
       <div class="grid gap-4 sm:grid-cols-2">
         <ExtensionFormField :label="t('intakeNameEn')" name="intakeNameEn" required :error="fieldErrors.nameEn">
@@ -181,7 +219,7 @@ const returnToList = () => {
             :disabled="disabled || busy" :aria-invalid="Boolean(fieldErrors.endDate)" />
         </ExtensionFormField>
       </div>
-      <ExtensionSaveButton :label="t('intakeSave')" :disabled="disabled || busy" :loading="busy" @click="save" />
+      <ExtensionSaveButton :label="t('intakeSave')" :disabled="disabled || busy || revisionConflict" :loading="busy" @click="save" />
     </template>
 
     <template v-else-if="selected">

@@ -90,7 +90,8 @@ export const createPortalClient = (connection: PortalConnection, transport: type
       programs: z.array(z.object({ id: z.string(), foreignSystemId: z.string().nullable(), sourceSystem: z.string() }).passthrough()),
       streams: z.array(z.object({ id: z.string(), nameEn: z.string(), nameFr: z.string(), foreignSystemId: z.string().nullable(), sourceSystem: z.string() }).passthrough()),
       calls: z.array(z.object({ id: z.string(), streamId: z.string(), nameEn: z.string(), nameFr: z.string(),
-        published: z.boolean(), surveyId: z.string().nullable(), surveyRevision: z.number().int().nullable(),
+        revision: z.number().int().positive(), published: z.boolean(),
+        surveyId: z.string().nullable(), surveyRevision: z.number().int().nullable(),
         forms: z.array(z.object({ surveyId: z.string(), revision: z.number().int().positive() })).default([]),
         startDate: z.string(), endDate: z.string(), sourceSystem: z.string(), foreignSystemId: z.string().nullable()
       }).passthrough())
@@ -108,8 +109,9 @@ export const createPortalClient = (connection: PortalConnection, transport: type
       z.object({ survey: z.object({ id: z.string(), revision: z.number().int() }) }).parse(await request(
         `surveys/${encodeURIComponent(id)}`, 'PUT', { expectedRevision, definition })).survey,
     createCall: async (input: object) => z.object({ id: z.string() }).parse(await request('calls', 'POST', input)).id,
-    updateCall: async (id: string, input: object) => z.object({ id: z.string() }).parse(await request(
-      `calls/${encodeURIComponent(id)}`, 'PUT', input)).id,
+    updateCall: async (id: string, expectedRevision: number, input: object) =>
+      z.object({ id: z.string() }).parse(await request(
+        `calls/${encodeURIComponent(id)}`, 'PUT', { ...input, expectedRevision })).id,
     attachCallSurvey: async (id: string, surveyId: string, revision: number) => await request(
       `calls/${encodeURIComponent(id)}/survey`, 'PUT', { surveyId, revision }),
     attachCallForms: async (id: string, forms: Array<{ surveyId: string; revision: number }>) => await request(

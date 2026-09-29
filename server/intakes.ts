@@ -7,11 +7,13 @@ import { clientForAgency } from './portal-context.ts'
 import { upgradeToAdvancedSurvey } from '@gcs-ssc/survey'
 import { intakeDraftSchema } from '../shared/intake.ts'
 import { intakeError } from './intake-errors.ts'
+import { PortalRequestError } from './portal-client.ts'
 
 const portalCode = z.string().regex(/^[A-Z]-[A-HJKMNP-Z2-9]{5,}$/)
 const input = z.discriminatedUnion('action', [
   intakeDraftSchema.safeExtend({ action: z.literal('create'), requestKey: z.uuid() }).strict(),
-  intakeDraftSchema.safeExtend({ action: z.literal('update'), intakeId: portalCode }).strict(),
+  intakeDraftSchema.safeExtend({ action: z.literal('update'), intakeId: portalCode,
+    expectedRevision: z.number().int().positive() }).strict(),
   z.object({ action: z.literal('publish'), intakeId: portalCode }).strict(),
   z.object({ action: z.literal('withdraw'), intakeId: portalCode }).strict(),
   z.object({ action: z.literal('delete'), intakeId: portalCode }).strict()
@@ -64,7 +66,17 @@ export const manageIntake = async (context: GcsExtensionRouteContext) => {
     const call = requireIntakeCall(structure, command.intakeId)
     if (call.published) throw intakeError('intakeWithdrawToEdit')
     if (call.streamId !== command.streamId) throw intakeError('intakeStreamImmutable')
-    await client.updateCall(call.id, { ...data, sourceSystem: call.sourceSystem, foreignSystemId: call.foreignSystemId })
+    if (call.revision !== command.expectedRevision) throw intakeError('intakeRevisionConflict')
+    try {
+      await client.updateCall(call.id, command.expectedRevision,
+        { ...data, sourceSystem: call.sourceSystem, foreignSystemId: call.foreignSystemId })
+    } catch (error) {
+      if (error instanceof PortalRequestError && error.status === 409) {
+        const latest = (await client.structure()).calls.find((item) => item.id === call.id)
+        if (latest && latest.revision !== command.expectedRevision) throw intakeError('intakeRevisionConflict')
+      }
+      throw error
+    }
     return { intakeId: call.id }
   }
   const call = requireIntakeCall(structure, command.intakeId)

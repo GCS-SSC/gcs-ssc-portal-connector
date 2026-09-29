@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const state = vi.hoisted(() => ({ authorized: vi.fn(), portal: vi.fn() }))
-vi.mock('../server/authorization.ts', () => ({ authorizedWrite: state.authorized }))
+vi.mock('../server/authorization.ts', async importOriginal => ({
+  ...await importOriginal<typeof import('../server/authorization.ts')>(), authorizedWrite: state.authorized
+}))
 vi.mock('../server/portal-context.ts', () => ({ clientForAgency: state.portal }))
 
 import { manageForm } from '../server/forms.ts'

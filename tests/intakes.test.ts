@@ -5,12 +5,13 @@ vi.mock('../server/authorization.ts', () => ({ authorizedWrite: state.authorized
 vi.mock('../server/portal-context.ts', () => ({ clientForAgency: state.portal }))
 
 import { listIntakes, manageIntake } from '../server/intakes.ts'
+import { PortalRequestError } from '../server/portal-client.ts'
 
 const stream = { id: 'S-ABCDE', sourceSystem: 'gcs-ssc', nameEn: 'Stream', nameFr: 'Volet' }
 const otherStream = { id: 'S-BCDEF', sourceSystem: 'other', nameEn: 'Other', nameFr: 'Autre' }
 const draft = { id: 'D-ABCDE', streamId: stream.id, nameEn: 'Apply', nameFr: 'Demande',
   startDate: '2027-01-01', endDate: '2027-12-31', sourceSystem: 'gcs-ssc-intake',
-  foreignSystemId: '123', published: false, surveyId: null, surveyRevision: null }
+  foreignSystemId: '123', revision: 3, published: false, surveyId: null, surveyRevision: null }
 const client = {
   structure: vi.fn(), surveys: vi.fn(), survey: vi.fn(), createCall: vi.fn(), updateCall: vi.fn(),
   attachCallSurvey: vi.fn(), publishCall: vi.fn(), withdrawCall: vi.fn(), deleteCall: vi.fn()
@@ -56,14 +57,37 @@ describe('intake opportunity management', () => {
   })
 
   it('rejects a foreign or published intake before changing it', async () => {
-    await expect(manageIntake(context({ action: 'update', intakeId: 'D-BCDEF', ...input })))
+    await expect(manageIntake(context({ action: 'update', intakeId: 'D-BCDEF', expectedRevision: 3, ...input })))
       .rejects.toMatchObject({ code: 'GCS_PORTAL_INTAKE_UNAVAILABLE', statusCode: 404,
         localizedMessage: { en: 'The intake opportunity is unavailable in this agency.',
           fr: 'Cet appel de demandes est inaccessible dans cet organisme gouvernemental.' } })
     client.structure.mockResolvedValue({ streams: [stream], calls: [{ ...draft, published: true }] })
-    await expect(manageIntake(context({ action: 'update', intakeId: draft.id, ...input })))
+    await expect(manageIntake(context({ action: 'update', intakeId: draft.id, expectedRevision: 3, ...input })))
       .rejects.toThrow('Withdraw')
     expect(client.updateCall).not.toHaveBeenCalled()
+  })
+  it('passes the loaded revision and rejects a stale intake before queuing a write', async () => {
+    const command = { action: 'update', intakeId: draft.id, expectedRevision: 3, ...input }
+    expect(await manageIntake(context(command))).toEqual({ intakeId: draft.id })
+    expect(client.updateCall).toHaveBeenCalledWith(draft.id, 3, {
+      ...input, sourceSystem: draft.sourceSystem, foreignSystemId: draft.foreignSystemId
+    })
+    await expect(manageIntake(context({ ...command, expectedRevision: 2 })))
+      .rejects.toMatchObject({ code: 'GCS_PORTAL_INTAKE_REVISION_CONFLICT', statusCode: 409 })
+    expect(client.updateCall).toHaveBeenCalledTimes(1)
+  })
+
+  it('classifies a raced call conflict only when the revision changed', async () => {
+    const command = { action: 'update', intakeId: draft.id, expectedRevision: 3, ...input }
+    client.updateCall.mockRejectedValue(new PortalRequestError(409, `calls/${draft.id}`))
+    client.structure.mockResolvedValueOnce({ streams: [stream], calls: [draft] })
+      .mockResolvedValueOnce({ streams: [stream], calls: [{ ...draft, revision: 4 }] })
+    await expect(manageIntake(context(command)))
+      .rejects.toMatchObject({ code: 'GCS_PORTAL_INTAKE_REVISION_CONFLICT' })
+
+    client.structure.mockResolvedValue({ streams: [stream], calls: [draft] })
+    await expect(manageIntake(context(command)))
+      .rejects.toBeInstanceOf(PortalRequestError)
   })
 
   it('rejects invalid dates and a Stream outside this agency before creating', async () => {

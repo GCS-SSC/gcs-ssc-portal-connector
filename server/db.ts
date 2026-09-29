@@ -19,7 +19,7 @@ export interface ConnectorDatabase extends ExtensionSecretDatabase {
     path: string | null
     body: unknown | null
     form_id: string | null
-    state: Generated<'pending' | 'leased' | 'delivered'>
+    state: Generated<'pending' | 'leased' | 'delivered' | 'failed'>
     attempts: Generated<number>
     next_attempt_at: Generated<Date>
     last_error: string | null

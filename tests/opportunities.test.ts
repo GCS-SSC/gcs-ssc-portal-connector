@@ -12,7 +12,7 @@ const projection = { sourceSystem: 'gcs-ssc', foreignSystemId: '44', opportunity
   nameEn: 'Opportunity', nameFr: 'Occasion', startDate: '2027-01-01', endDate: '2027-12-31' }
 const form = { surveyId: 'V-ABCDE', revision: 1 }
 const call = { id: 'D-ABCDE', sourceSystem: 'gcs-ssc-opportunity', foreignSystemId: '44',
-  streamId: 'S-ABCDE', published: false, forms: [form] }
+  streamId: 'S-ABCDE', revision: 2, published: false, forms: [form] }
 const client = {
   structure: vi.fn(), surveys: vi.fn(), survey: vi.fn(), createProgram: vi.fn(), createStream: vi.fn(),
   createCall: vi.fn(), updateCall: vi.fn(), createSurvey: vi.fn(), updateSurvey: vi.fn(),

@@ -8,6 +8,7 @@ type IntakeErrorKey =
   | 'intakeSaveFormFirst' | 'intakeLatestForm' | 'intakeLatestAttachment'
   | 'intakeTranslationsIncomplete' | 'intakeWithdrawToDelete' | 'intakeDifferentForm'
   | 'intakeFormRevisionRequired'
+  | 'intakeRevisionConflict'
 
 export const intakeError = (key: IntakeErrorKey, statusCode = 409) => createGcsExtensionUserError({
   code: `GCS_PORTAL_${key.replace(/([A-Z])/g, '_$1').toUpperCase()}`,

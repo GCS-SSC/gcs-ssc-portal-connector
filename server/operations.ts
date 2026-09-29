@@ -3,7 +3,7 @@ import { surveyV3Schema } from '@gcs-ssc/survey'
 import { readPortalCredentialFromDb } from './connection.ts'
 import { asConnectorDb, type ConnectorDb } from './db.ts'
 import { enabledPortalAgency } from './enablement.ts'
-import { createPortalClient, portalRequest, type PortalConnection, type PortalMethod } from './portal-client.ts'
+import { createPortalClient, PortalRequestError, portalRequest, type PortalConnection, type PortalMethod } from './portal-client.ts'
 import { retryDelaySeconds } from './retry.ts'
 
 type Operation = {
@@ -50,6 +50,14 @@ const deliver = async (db: ConnectorDb, operation: Operation) => {
     return { id: operation.id, delivered: true, response }
   } catch (error) {
     const message = error instanceof Error ? error.message.slice(0, 500) : 'Unknown Portal delivery error'
+    const callConflict = error instanceof PortalRequestError && error.status === 409
+      && operation.method === 'PUT' && /^calls\/[^/]+$/.test(operation.path ?? '')
+    if (callConflict) {
+      await db.updateTable('extensions.gcs_portal_operation').set({ state: 'failed', last_error: message,
+        updated_at: new Date() }).where('id', '=', operation.id)
+        .where('state', '=', 'leased').where('attempts', '=', operation.attempts).execute()
+      return { id: operation.id, delivered: false, error: message, conflict: true }
+    }
     await sql`UPDATE extensions.gcs_portal_operation SET state='pending', last_error=${message},
       next_attempt_at=now() + (${retryDelaySeconds(operation.attempts)} || ' seconds')::interval,
       updated_at=now() WHERE id=${operation.id}::bigint AND state='leased'
@@ -98,6 +106,7 @@ export const queuePortalClient = (db: ConnectorDb, agencyId: string, connection:
       throw new Error('Portal operation is queued behind an earlier delivery.')
     }
     const result = await deliver(db, operation)
+    if ('conflict' in result && result.conflict) throw new PortalRequestError(409, path)
     if (!result.delivered) throw new Error(result.error)
     return result.response
   })

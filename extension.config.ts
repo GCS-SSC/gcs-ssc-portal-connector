@@ -70,7 +70,8 @@ export default defineGcsExtension({
     { path: './server/migrations/0007_organization_verification.ts' },
     { path: './server/migrations/0008_entity_status_settings.ts' },
     { path: './server/migrations/0009_delivery_payload.ts' },
-    { path: './server/migrations/0010_portal_operations.ts' }
+    { path: './server/migrations/0010_portal_operations.ts' },
+    { path: './server/migrations/0011_terminal_call_conflicts.ts' }
   ],
   serverHandlers: [
     {

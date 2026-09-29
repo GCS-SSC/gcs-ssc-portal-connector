@@ -33,6 +33,16 @@ describe('portal transport', () => {
     expect(options?.method).toBe('DELETE')
     expect((options?.headers as Record<string, string>).Authorization).toBe(`Bearer ${connection.key}`)
   })
+  it('sends the expected call revision with a metadata update', async () => {
+    const transport = vi.fn(async () => Response.json({ id: 'D-ABCDE' })) as unknown as typeof fetch
+    await createPortalClient(connection, transport).updateCall('D-ABCDE', 4, {
+      streamId: 'S-ABCDE', nameEn: 'Updated', nameFr: 'Modifié',
+      startDate: '2027-01-01', endDate: '2027-12-31'
+    })
+    expect(JSON.parse(String(vi.mocked(transport).mock.calls[0]?.[1]?.body))).toMatchObject({
+      expectedRevision: 4, nameEn: 'Updated'
+    })
+  })
   it('reports a rejected integration key as a user-facing connection error', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: { code: 'INVALID_INTEGRATION_TOKEN' } }, { status: 401 })))
     const context = {
