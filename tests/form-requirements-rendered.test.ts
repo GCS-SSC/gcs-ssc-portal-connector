@@ -138,6 +138,22 @@ beforeEach(() => {
 })
 
 describe('connector form requirements', () => {
+  it('explains why form design controls are disabled without agency configuration access', async () => {
+    const collection = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', enabled: true, readOnly: true } })
+    await flushPromises()
+    expect(collection.get('[role="alert"]').text()).toContain('Agency Manager access is required')
+    expect(button(collection, 'Create form').attributes('disabled')).toBeDefined()
+    collection.unmount()
+
+    const detail = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', detailFormId: '', enabled: true, readOnly: true } })
+    await flushPromises()
+    expect(detail.get('[role="alert"]').text()).toContain('Forms are read-only')
+    expect(button(detail, 'Save revision').attributes('disabled')).toBeDefined()
+    expect(detail.get('.designer-outline-add').attributes('disabled')).toBeDefined()
+    await button(detail, 'Settings').trigger('click')
+    expect(detail.find('input[name="formTitleEn"]').exists()).toBe(true)
+  })
+
   it('uses the shared forms table and keeps search, status, and row navigation working', async () => {
     const defaultGet = get.getMockImplementation()!
     get.mockImplementation(async (path: string) => path.endsWith('/forms')

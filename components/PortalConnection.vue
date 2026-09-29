@@ -537,6 +537,9 @@ watch(() => props.agencyId, searchProponents)
       </template>
     </section>
     <section v-if="formsVisited" v-show="section === 'forms'" class="space-y-4">
+      <ExtensionAlert v-if="readOnly" color="info" variant="soft" icon="i-lucide-lock-keyhole" :title="t('formsReadOnlyTitle')">
+        <template #description>{{ t('formsReadOnlyHelp') }}</template>
+      </ExtensionAlert>
       <p v-if="!connection" class="text-sm text-muted">{{ t('connectionRequired') }}</p>
       <FormLibrary v-else-if="detailFormId === undefined" :agency-id="agencyId" :disabled="locked"
         @open="emit('openForm', $event)" @create="emit('openForm', '')" />
