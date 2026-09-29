@@ -11,14 +11,16 @@ import FormFlowMap from './FormFlowMap.vue'
 import FormTest from './FormTest.vue'
 import { clearFormDraft, readFormDraft, writeFormDraft, writeFormSelection } from './form-draft-session'
 
-const props = defineProps<{ agencyId: string; disabled?: boolean; selectedFormId?: string; intakeId?: string }>()
+const props = defineProps<{ agencyId: string; disabled?: boolean; selectedFormId?: string; intakeId?: string;
+  opportunityId?: string; streamId?: string }>()
 const emit = defineEmits<{ close: []; saved: [id: string] }>()
 const { locale, t } = useExtensionI18n(messages)
 const language = computed<'en' | 'fr'>(() => locale.value === 'fr' ? 'fr' : 'en')
 const previewLocale = ref<'en' | 'fr'>(language.value)
 const tr = (en: string, fr: string) => language.value === 'fr' ? fr : en
 const api = useExtensionApi('gcs-ssc-portal-connector')
-const draftOwner = computed(() => props.intakeId ? `${props.agencyId}:intake:${props.intakeId}` : props.agencyId)
+const draftOwner = computed(() => props.opportunityId ? `${props.agencyId}:opportunity:${props.opportunityId}`
+  : props.intakeId ? `${props.agencyId}:intake:${props.intakeId}` : props.agencyId)
 type Summary = { id: string; revision: number; title: { en: string; fr: string }; updatedAt: string }
 type Stream = { id: string; nameEn: string; nameFr: string }
 type Program = { id: string; nameEn: string; nameFr: string }
@@ -65,7 +67,11 @@ const saved = ref(JSON.stringify(definition.value))
 const dirty = computed(() => JSON.stringify(definition.value) !== saved.value)
 const disabled = computed(() => props.disabled || busy.value)
 const invalidLimit = (value: number, max: number) => !Number.isInteger(value) || value < 1 || value > max
-const endpoint = computed(() => `/agencies/${props.agencyId}/forms`)
+const endpoint = computed(() => props.opportunityId
+  ? `/agencies/${props.agencyId}/opportunities/${props.opportunityId}/forms`
+  : `/agencies/${props.agencyId}/forms`)
+const writeEndpoint = computed(() => props.opportunityId
+  ? `/agencies/${props.agencyId}/opportunities/${props.opportunityId}` : endpoint.value)
 const uid = (prefix: string) => `${prefix}_${crypto.randomUUID().replaceAll('-', '').slice(0, 12)}`
 type Container = AdvancedSurvey['pages'][number] | AdvancedGroup
 type Node = { id: string; kind: 'page' | 'group'; title: string; depth: number; pageId: string; item: Container }
@@ -204,8 +210,8 @@ const load = async () => {
   try {
     const result = await api.get<{ surveys: Summary[]; programs: Program[]; streams: Stream[];
       agreements: Agreement[]; organizations: Organization[] }>(endpoint.value)
-    surveys.value = result.surveys; programs.value = result.programs; streams.value = result.streams
-    agreements.value = result.agreements; organizations.value = result.organizations
+    surveys.value = result.surveys ?? []; programs.value = result.programs ?? []; streams.value = result.streams ?? []
+    agreements.value = result.agreements ?? []; organizations.value = result.organizations ?? []
     formsLoaded.value = true
   } catch { error.value = tr('Forms could not be loaded. Check the portal connection.', 'Impossible de charger les formulaires. Vérifiez la connexion au portail.') }
   finally { loading.value = false }
@@ -250,15 +256,16 @@ const save = async () => {
   }
   busy.value = true; error.value = ''; message.value = ''
   try {
-    const result = await api.post<{ survey: { id: string; revision: number }; attached?: boolean }>(endpoint.value, {
-      action: 'save', ...(formId.value ? { surveyId: formId.value, expectedRevision: revision.value } : {}),
+    const result = await api.post<{ survey: { id: string; revision: number }; attached?: boolean }>(writeEndpoint.value, {
+      action: props.opportunityId ? 'saveForm' : 'save',
+      ...(formId.value ? { surveyId: formId.value, expectedRevision: revision.value } : {}),
       ...(props.intakeId ? { intakeId: props.intakeId } : {}),
       definition: parsed.data
     })
     formId.value = result.survey.id; revision.value = result.survey.revision
     definition.value = ensureEditableText(parsed.data); saved.value = JSON.stringify(definition.value)
     attachmentPending.value = Boolean(props.intakeId && result.attached === false)
-    if (!props.intakeId) writeFormSelection(props.agencyId, formId.value)
+    if (!props.intakeId && !props.opportunityId) writeFormSelection(props.agencyId, formId.value)
     if (attachmentPending.value) persistDraft()
     else clearFormDraft(draftOwner.value)
     message.value = attachmentPending.value ? '' : tr('Form revision saved.', 'Version du formulaire enregistrée.')
@@ -532,7 +539,7 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
   <section class="designer space-y-5" :aria-label="tr('Form designer', 'Concepteur de formulaires')">
     <div class="designer-header">
       <div>
-        <button type="button" class="designer-back" @click="closeDesigner">← {{ props.intakeId ? tr('Back to intake', 'Retour à l’appel') : tr('All forms', 'Tous les formulaires') }}</button>
+        <button type="button" class="designer-back" @click="closeDesigner">← {{ props.opportunityId ? tr('Back to opportunity', 'Retour à l’occasion') : props.intakeId ? tr('Back to intake', 'Retour à l’appel') : tr('All forms', 'Tous les formulaires') }}</button>
         <h3 class="designer-heading">{{ definition.title[language] || tr('Untitled form', 'Formulaire sans titre') }}</h3>
         <p class="designer-subtitle">{{ formId ? `${tr('Revision', 'Version')} ${revision}` : tr('New form', 'Nouveau formulaire') }}<span v-if="dirty"> · {{ tr('Unsaved changes', 'Modifications non enregistrées') }}</span></p>
       </div>
@@ -540,7 +547,7 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
     </div>
     <p v-if="loading" role="status">{{ tr('Loading forms…', 'Chargement des formulaires…') }}</p>
     <div class="designer-tabs" role="tablist" :aria-label="tr('Form workflow', 'Étapes du formulaire')">
-      <button v-for="item in (props.intakeId ? ['edit', 'test', 'settings'] : ['edit', 'test', 'settings', 'publish']) as Array<'edit' | 'test' | 'settings' | 'publish'>" :key="item" type="button" role="tab" class="designer-tab"
+      <button v-for="item in (props.intakeId || props.opportunityId ? ['edit', 'test', 'settings'] : ['edit', 'test', 'settings', 'publish']) as Array<'edit' | 'test' | 'settings' | 'publish'>" :key="item" type="button" role="tab" class="designer-tab"
         :aria-selected="tab === item" :disabled="item === 'test' && !definition.questions.length"
         @click="tab = item">{{ item === 'edit' ? tr('Edit', 'Modifier') : item === 'test' ? tr('Test', 'Tester') : item === 'settings' ? tr('Settings', 'Paramètres') : tr('Publish', 'Publier') }}</button>
     </div>

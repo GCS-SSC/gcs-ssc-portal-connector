@@ -81,6 +81,7 @@ export const createPortalClient = (connection: PortalConnection, transport: type
       streams: z.array(z.object({ id: z.string(), nameEn: z.string(), nameFr: z.string(), foreignSystemId: z.string().nullable(), sourceSystem: z.string() }).passthrough()),
       calls: z.array(z.object({ id: z.string(), streamId: z.string(), nameEn: z.string(), nameFr: z.string(),
         published: z.boolean(), surveyId: z.string().nullable(), surveyRevision: z.number().int().nullable(),
+        forms: z.array(z.object({ surveyId: z.string(), revision: z.number().int().positive() })).default([]),
         startDate: z.string(), endDate: z.string(), sourceSystem: z.string(), foreignSystemId: z.string().nullable()
       }).passthrough())
     }).parse(await request(`agencies/${encodeURIComponent(connection.portalAgencyId)}`)),
@@ -101,6 +102,8 @@ export const createPortalClient = (connection: PortalConnection, transport: type
       `calls/${encodeURIComponent(id)}`, 'PUT', input)).id,
     attachCallSurvey: async (id: string, surveyId: string, revision: number) => await request(
       `calls/${encodeURIComponent(id)}/survey`, 'PUT', { surveyId, revision }),
+    attachCallForms: async (id: string, forms: Array<{ surveyId: string; revision: number }>) => await request(
+      `calls/${encodeURIComponent(id)}/forms`, 'PUT', { forms }),
     publishCall: async (id: string) => await request(`calls/${encodeURIComponent(id)}/publication`,
       'PATCH', { published: true }),
     withdrawCall: async (id: string) => await request(`calls/${encodeURIComponent(id)}/publication`,

@@ -39,6 +39,11 @@ export default defineGcsExtension({
       rbac: { subject: 'applicant_recipient', action: 'read' },
       agencyConfigVisibility: { key: 'portalProponentVerificationAccess', values: ['manager', 'contributor'] },
       path: './components/ProponentVerification.vue'
+    }, {
+      id: 'portal-forms', target: 'opportunity',
+      label: { en: 'Portal forms', fr: 'Formulaires du portail' }, icon: 'i-lucide-file-text',
+      rbac: { subject: 'transfer_payment', action: 'read' },
+      path: './components/OpportunityForms.vue'
     }]
   },
   nitroPlugin: './server/plugins/outbox.ts',
@@ -69,6 +74,21 @@ export default defineGcsExtension({
       route: '/agencies/[agencyId]/intakes', method: 'get',
       rbac: { subject: 'agency', action: 'read', agency: { param: 'agencyId' } },
       path: './server/api/intakes.get.ts'
+    },
+    {
+      route: '/agencies/[agencyId]/opportunities/[opportunityId]', method: 'post',
+      rbac: { subject: 'transfer_payment', action: 'update', entity: { target: 'opportunity', param: 'opportunityId' } },
+      path: './server/api/opportunities.post.ts'
+    },
+    {
+      route: '/agencies/[agencyId]/opportunities/[opportunityId]/forms', method: 'get',
+      rbac: { subject: 'transfer_payment', action: 'read', entity: { target: 'opportunity', param: 'opportunityId' } },
+      path: './server/api/opportunity-forms.get.ts'
+    },
+    {
+      route: '/agencies/[agencyId]/opportunities/[opportunityId]/forms/[formId]', method: 'get',
+      rbac: { subject: 'transfer_payment', action: 'read', entity: { target: 'opportunity', param: 'opportunityId' } },
+      path: './server/api/opportunity-form.get.ts'
     },
     {
       route: '/agencies/[agencyId]/intakes', method: 'post',
