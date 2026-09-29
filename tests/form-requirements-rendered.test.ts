@@ -790,7 +790,7 @@ describe('connector form requirements', () => {
       expect(after.pages[0]!.groups[0]!.groups).toHaveLength(0)
       const afterParsed = surveyV3Schema.safeParse(validSurvey(after))
       expect(afterParsed.success, afterParsed.error?.message).toBe(true)
-      expect(confirm).toHaveBeenCalledWith(expect.stringContaining('1 fields'))
+      expect(confirm).toHaveBeenCalledWith(expect.stringContaining('1 field?'))
       await wrapper.findAll('.designer-outline-item')[1]!.trigger('click')
       await button(wrapper, 'Remove section and its contents').trigger('click')
     } finally { vi.unstubAllGlobals() }
@@ -822,6 +822,13 @@ describe('connector form requirements', () => {
     await button(wrapper, 'Ajouter des champs pour chaque élément').trigger('click')
     expect(button(wrapper, 'Ajouter une liste répétable imbriquée')).toBeDefined()
     expect(button(wrapper, 'Retirer la section et son contenu')).toBeDefined()
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('Réponse courte'))!.trigger('click')
+    const confirm = vi.fn().mockReturnValue(false)
+    vi.stubGlobal('confirm', confirm)
+    try {
+      await button(wrapper, 'Retirer la section et son contenu').trigger('click')
+      expect(confirm).toHaveBeenCalledWith(expect.stringContaining('1 champ?'))
+    } finally { vi.unstubAllGlobals() }
   })
 
   it('keeps a repeat source section until dependent repeat sets are removed', async () => {

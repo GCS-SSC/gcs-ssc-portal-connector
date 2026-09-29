@@ -504,7 +504,8 @@ const removeContainer = () => {
       return
     }
     if (questionIds.length || group.groups.length) {
-      if (!confirm(t('formRemoveSetConfirm', { count: questionIds.length }))) return
+      const fieldNoun = questionIds.length === 1 ? t('formFieldSingular') : t('formFieldPlural')
+      if (!confirm(t('formRemoveSetConfirm', { count: questionIds.length, fieldNoun }))) return
     }
     for (const id of questionIds) removeQuestionById(id)
     for (const parent of nodes.value) parent.item.groups = parent.item.groups.filter((item) => item.id !== node.id)
@@ -633,7 +634,7 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
       <FormFlowMap v-if="showFlowMap" :definition="definition" :locale="language" :selected-page-id="selected?.pageId"
         @select-page="selectedContainerId = $event; selectedQuestionId = ''" />
     </section>
-    <div :class="tab === 'edit' ? 'grid gap-6 lg:grid-cols-[12rem_minmax(0,1fr)]' : ''">
+    <div :class="tab === 'edit' ? 'designer-edit-layout' : ''">
       <nav v-if="tab === 'edit'" class="designer-outline" :aria-label="tr('Form pages', 'Pages du formulaire')">
           <h4 class="designer-eyebrow">{{ tr('PAGES & SECTIONS', 'PAGES ET SECTIONS') }}</h4>
           <ul class="space-y-1 text-sm">
@@ -648,7 +649,7 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
           </ul>
           <button type="button" class="designer-outline-add" :disabled="disabled" @click="addPage">+ {{ tr('Add page', 'Ajouter une page') }}</button>
       </nav>
-      <div class="min-w-0 space-y-5">
+      <div class="designer-content min-w-0 space-y-5">
         <template v-if="tab === 'edit'">
           <template v-if="selected">
             <div class="designer-workspace">
@@ -967,7 +968,10 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
 .designer-flow-toggle { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 1rem; text-align: start; font-size: .82rem; }
 .designer-flow-toggle:hover strong { text-decoration: underline; }
 .designer-flow-overview :deep(.flow-map) { padding-top: 1rem; }
+.designer-edit-layout { display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: flex-start; }
+.designer-content { flex: 10 1 50rem; container-type: inline-size; }
 .designer-outline { border-inline-end: 1px solid var(--ui-border, #33343a); padding: .5rem 1rem .5rem 0; }
+.designer-edit-layout .designer-outline { flex: 1 0 12rem; }
 .designer-eyebrow { color: var(--ui-text-muted, #a2a3ab); font-size: .68rem; letter-spacing: .11em; font-weight: 750; line-height: 1.4; }
 .designer-outline-item { display: block; width: 100%; padding-block: .6rem; border-radius: .4rem; color: var(--ui-text-muted, #a2a3ab); text-align: start; line-height: 1.35; }
 .designer-outline-item:hover { color: var(--ui-text, #fff); background: var(--ui-bg-elevated, #28282e); }
@@ -982,15 +986,15 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
 .designer-textarea:focus { outline: 2px solid var(--ui-primary, #008cca); outline-offset: 1px; }
 .designer-question-stack { padding-top: 1.25rem; border-top: 1px solid var(--ui-border, #33343a); }
 .designer-empty { margin: 1.5rem 0; color: var(--ui-text-muted, #a2a3ab); font-size: .875rem; }
-.designer-question { display: flex; width: 100%; min-height: 6rem; gap: .85rem; padding: 1.15rem; border: 1px solid var(--ui-border, #3c3c42); border-radius: .55rem; background: var(--ui-bg-elevated, #28282d); text-align: start; transition: border-color .16s ease, transform .16s ease; }
+.designer-question { display: flex; flex-wrap: wrap; width: 100%; min-height: 6rem; gap: .35rem .85rem; padding: 1.15rem; padding-inline-end: 3.25rem; border: 1px solid var(--ui-border, #3c3c42); border-radius: .55rem; background: var(--ui-bg-elevated, #28282d); text-align: start; transition: border-color .16s ease, transform .16s ease; }
 .designer-question:hover { border-color: var(--ui-primary, #008cca); transform: translateY(-1px); }
 .designer-question[aria-current="true"] { border-color: var(--ui-primary, #008cca); box-shadow: inset 3px 0 0 var(--ui-primary, #008cca); }
 .designer-question-number { flex: none; color: var(--ui-text-muted, #a2a3ab); font-size: .8rem; }
-.designer-question-body { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: .35rem; }
+.designer-question-body { display: flex; flex: 1; min-width: 8rem; flex-direction: column; gap: .35rem; }
 .designer-question-title { font-size: .95rem; font-weight: 650; line-height: 1.3; }
 .designer-dependency-badge { align-self: start; margin-top: .15rem; padding: .2rem .45rem; border-radius: .3rem; background: var(--ui-bg, #1e1e22); color: var(--ui-primary, #008cca); font-size: .7rem; font-weight: 650; }
 .designer-question-hint { color: var(--ui-text-muted, #a2a3ab); font-size: .8rem; }
-.designer-question-type { align-self: start; color: var(--ui-text-muted, #a2a3ab); font-size: .7rem; white-space: nowrap; }
+.designer-question-type { align-self: start; margin-inline-start: 1.4rem; color: var(--ui-text-muted, #a2a3ab); font-size: .7rem; white-space: nowrap; }
 .designer-answer-line { display: block; max-width: 19rem; margin-top: .5rem; padding-bottom: .4rem; border-bottom: 1px solid var(--ui-border, #505158); color: var(--ui-text-muted, #a2a3ab); font-size: .75rem; }
 .designer-answer-options { display: flex; flex-direction: column; gap: .25rem; margin-top: .35rem; color: var(--ui-text-muted, #a2a3ab); font-size: .78rem; }
 .designer-add { margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px dashed var(--ui-border, #42434a); }
@@ -999,6 +1003,6 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
 .designer-type span { display: grid; width: 1.2rem; place-items: center; color: var(--ui-primary, #008cca); font-size: .95rem; font-weight: 700; }
 .designer-type:hover:not(:disabled) { border-color: var(--ui-primary, #008cca); background: var(--ui-bg-elevated, #28282d); }
 .designer-type:disabled { opacity: .5; cursor: not-allowed; }
-@container (max-width: 48rem) { .designer-workspace { grid-template-columns: 1fr; } }
+@container (max-width: 52rem) { .designer-workspace { grid-template-columns: 1fr; } }
 @media (max-width: 700px) { .designer-header { align-items: start; flex-direction: column; } .designer-outline { border-inline-end: 0; border-bottom: 1px solid var(--ui-border, #33343a); padding: 0 0 1rem; } .designer-canvas, .designer-inspector { padding: 1rem; } .designer-type-grid { grid-template-columns: 1fr; } }
 </style>
