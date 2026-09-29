@@ -58,23 +58,30 @@ export type FormDraftSession = {
   attachmentPending?: boolean
 }
 
-const key = (agencyId: string) => `gcs-ssc-portal-connector:forms:${agencyId}:draft`
+const key = (agencyId: string, kind: 'selection' | 'draft') => `gcs-ssc-portal-connector:forms:${agencyId}:${kind}`
 const storage = () => {
   try { return typeof window === 'undefined' ? undefined : window.sessionStorage }
   catch { return undefined }
 }
 
+export const readFormSelection = (agencyId: string) => storage()?.getItem(key(agencyId, 'selection')) ?? null
+export const writeFormSelection = (agencyId: string, id: string | null) => {
+  try {
+    if (id === null) storage()?.removeItem(key(agencyId, 'selection'))
+    else storage()?.setItem(key(agencyId, 'selection'), id)
+  } catch { /* Session storage may be unavailable in a private browser context. */ }
+}
 export const clearFormDraft = (agencyId: string) => {
-  try { storage()?.removeItem(key(agencyId)) }
+  try { storage()?.removeItem(key(agencyId, 'draft')) }
   catch { /* Editing still works without session storage. */ }
 }
 export const writeFormDraft = (agencyId: string, draft: FormDraftSession) => {
-  try { storage()?.setItem(key(agencyId), JSON.stringify(draft)) }
+  try { storage()?.setItem(key(agencyId, 'draft'), JSON.stringify(draft)) }
   catch { /* Editing still works without session storage. */ }
 }
 export const readFormDraft = (agencyId: string): FormDraftSession | null => {
   try {
-    const value = storage()?.getItem(key(agencyId))
+    const value = storage()?.getItem(key(agencyId, 'draft'))
     if (!value) return null
     const draft: unknown = JSON.parse(value)
     if (!draft || typeof draft !== 'object') return null
