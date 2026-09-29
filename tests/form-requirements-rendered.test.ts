@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { FetchResponseError, translateGcsExtensionMessage, type GcsExtensionMessages } from '@gcs-ssc/extensions'
+import { instanceKey, resolveAdvancedSurvey, surveyV3Schema } from '@gcs-ssc/survey'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -728,6 +729,115 @@ describe('connector form requirements', () => {
     await wrapper.get('.designer-question').trigger('click')
     expect((wrapper.get('select[name="choiceDependency"]').element as HTMLSelectElement).value).toBe('none')
     expect(wrapper.text()).toContain('Rules and dependencies using it were updated')
+  })
+
+  it('adds fields to list items, nests another list, and removes the populated repeat set', async () => {
+    const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
+    await flushPromises()
+    await button(wrapper, 'Edit').trigger('click')
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('Repeating list'))!.trigger('click')
+    const outerListId = readFormDraft('1')!.definition.questions[0]!.id
+    await button(wrapper, 'Add fields for each item').trigger('click')
+    expect((wrapper.get('select[name="repeatFor"]').element as HTMLSelectElement).value).toBe(outerListId)
+    await wrapper.findAll('.designer-outline-item')[0]!.trigger('click')
+    await wrapper.get('button[aria-label="Remove field: New question"]').trigger('click')
+    expect(wrapper.text()).toContain('Remove the repeating section for this list')
+    expect(readFormDraft('1')!.definition.questions).toHaveLength(1)
+    await wrapper.findAll('.designer-outline-item')[1]!.trigger('click')
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('Short answer'))!.trigger('click')
+    await button(wrapper, 'Add nested repeating list').trigger('click')
+    const nestedListId = readFormDraft('1')!.definition.questions.find(item => item.type === 'list' && item.id !== outerListId)!.id
+    expect(wrapper.findAll('.designer-outline-item')).toHaveLength(3)
+    await wrapper.findAll('.designer-outline-item')[2]!.trigger('click')
+    expect((wrapper.get('select[name="repeatFor"]').element as HTMLSelectElement).value).toBe(nestedListId)
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('Number'))!.trigger('click')
+    const before = readFormDraft('1')!.definition
+    const validSurvey = (definition: typeof before) => {
+      const copy = structuredClone(definition)
+      copy.title = { en: 'List form', fr: 'Formulaire de listes' }
+      copy.description = { en: 'Instructions', fr: 'Instructions' }
+      const visit = (groups: typeof copy.pages[number]['groups']) => {
+        for (const group of groups) {
+          group.description = { en: 'Instructions', fr: 'Instructions' }
+          visit(group.groups)
+        }
+      }
+      for (const page of copy.pages) {
+        page.description = { en: 'Instructions', fr: 'Instructions' }
+        visit(page.groups)
+      }
+      for (const question of copy.questions) question.hint = { en: 'Help', fr: 'Aide' }
+      return copy
+    }
+    const beforeParsed = surveyV3Schema.safeParse(validSurvey(before))
+    expect(beforeParsed.success, beforeParsed.error?.message).toBe(true)
+    if (!beforeParsed.success) throw beforeParsed.error
+    const resolved = resolveAdvancedSurvey(beforeParsed.data, {
+      [outerListId]: JSON.stringify([{ id: 'r_outer_1', value: 'First item' }]),
+      [instanceKey(nestedListId, ['r_outer_1'])]: JSON.stringify([{ id: 'r_nested_1', value: 'Nested item' }])
+    })
+    expect(resolved.pages[0]!.groups[0]!.instanceId).toBe('r_outer_1')
+    expect(resolved.pages[0]!.groups[0]!.groups[0]!.instanceId).toBe('r_nested_1')
+    const confirm = vi.fn().mockReturnValue(false)
+    vi.stubGlobal('confirm', confirm)
+    try {
+      await button(wrapper, 'Remove section and its contents').trigger('click')
+      expect(readFormDraft('1')!.definition.questions).toHaveLength(4)
+      confirm.mockReturnValue(true)
+      await button(wrapper, 'Remove section and its contents').trigger('click')
+      const after = readFormDraft('1')!.definition
+      expect(after.questions).toHaveLength(3)
+      expect(after.pages[0]!.groups[0]!.groups).toHaveLength(0)
+      const afterParsed = surveyV3Schema.safeParse(validSurvey(after))
+      expect(afterParsed.success, afterParsed.error?.message).toBe(true)
+      expect(confirm).toHaveBeenCalledWith(expect.stringContaining('1 fields'))
+      await wrapper.findAll('.designer-outline-item')[1]!.trigger('click')
+      await button(wrapper, 'Remove section and its contents').trigger('click')
+    } finally { vi.unstubAllGlobals() }
+    const finalDraft = readFormDraft('1')!.definition
+    expect(finalDraft.questions).toHaveLength(1)
+    expect(finalDraft.pages[0]!.groups).toHaveLength(0)
+    const finalParsed = surveyV3Schema.safeParse(validSurvey(finalDraft))
+    expect(finalParsed.success, finalParsed.error?.message).toBe(true)
+  })
+
+  it('removes a field directly from its section card', async () => {
+    const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
+    await flushPromises()
+    await button(wrapper, 'Edit').trigger('click')
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('Short answer'))!.trigger('click')
+    expect(wrapper.get('button[aria-label="Remove field: New question"]').attributes('aria-label')).toBe('Remove field: New question')
+    await wrapper.get('button[aria-label="Remove field: New question"]').trigger('click')
+    expect(wrapper.findAll('.designer-question')).toHaveLength(0)
+    expect(readFormDraft('1')).toBeNull()
+  })
+
+  it('shows the repeating-list actions in French', async () => {
+    state.locale = 'fr'
+    const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
+    await flushPromises()
+    await button(wrapper, 'Modifier').trigger('click')
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('Liste répétable'))!.trigger('click')
+    expect(button(wrapper, 'Ajouter des champs pour chaque élément')).toBeDefined()
+    await button(wrapper, 'Ajouter des champs pour chaque élément').trigger('click')
+    expect(button(wrapper, 'Ajouter une liste répétable imbriquée')).toBeDefined()
+    expect(button(wrapper, 'Retirer la section et son contenu')).toBeDefined()
+  })
+
+  it('keeps a repeat source section until dependent repeat sets are removed', async () => {
+    const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
+    await flushPromises()
+    await button(wrapper, 'Edit').trigger('click')
+    await button(wrapper, 'Add nested section').trigger('click')
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('Repeating list'))!.trigger('click')
+    const listId = readFormDraft('1')!.definition.questions[0]!.id
+    await wrapper.findAll('.designer-outline-item')[0]!.trigger('click')
+    await button(wrapper, 'Add nested section').trigger('click')
+    await wrapper.get('select[name="repeatFor"]').setValue(listId)
+    await wrapper.findAll('.designer-outline-item')[1]!.trigger('click')
+    await button(wrapper, 'Remove section and its contents').trigger('click')
+    expect(wrapper.text()).toContain('Remove the repeating section that uses a list')
+    expect(readFormDraft('1')!.definition.pages[0]!.groups).toHaveLength(2)
   })
 
   it('retargets a calculated template when its referenced source is deleted', async () => {

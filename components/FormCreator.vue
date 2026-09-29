@@ -80,12 +80,12 @@ const writeEndpoint = computed(() => props.opportunityId
   ? `/agencies/${props.agencyId}/opportunities/${props.opportunityId}` : endpoint.value)
 const uid = (prefix: string) => `${prefix}_${crypto.randomUUID().replaceAll('-', '').slice(0, 12)}`
 type Container = AdvancedSurvey['pages'][number] | AdvancedGroup
-type Node = { id: string; kind: 'page' | 'group'; title: string; depth: number; pageId: string; item: Container }
+type Node = { id: string; kind: 'page' | 'group'; title: string; depth: number; pageId: string; item: Container; repeatFor?: string }
 const nodes = computed<Node[]>(() => {
   const result: Node[] = []
   const visit = (groups: AdvancedGroup[], depth: number, pageId: string) => {
     for (const group of groups) {
-      result.push({ id: group.id, kind: 'group', title: group.title[language.value], depth, pageId, item: group })
+      result.push({ id: group.id, kind: 'group', title: group.title[language.value], depth, pageId, item: group, repeatFor: group.repeatFor })
       visit(group.groups, depth + 1, pageId)
     }
   }
@@ -136,8 +136,6 @@ const readyToPublish = computed(() => publicationChecks.value.every((check) => c
 const questionOptions = computed(() => definition.value.questions.map((question) => ({
   value: question.id, label: `${question.label[language.value] || question.id} (${question.id})`
 })))
-const listOptions = computed(() => definition.value.questions.filter((question) => question.type === 'list')
-  .map((question) => ({ value: question.id, label: question.label[language.value] || question.id })))
 type ConditionQuestion = { id: string; label: string; type: AdvancedQuestion['type']; options?: { value: string; label: string }[] }
 const conditionChoicesFor = (kind: 'question' | 'group' | 'page', targetId: string, survey = definition.value): ConditionQuestion[] => {
   const seen: { question: AdvancedQuestion; scope: string[] }[] = []
@@ -194,6 +192,8 @@ const questionConditionOptions = computed(() => selectedQuestion.value
   ? conditionChoicesFor('question', selectedQuestion.value.id) : [])
 const groupConditionOptions = computed(() => selected.value?.kind === 'group'
   ? conditionChoicesFor('group', selected.value.id) : [])
+const listOptions = computed(() => groupConditionOptions.value.filter((question) => question.type === 'list')
+  .map((question) => ({ value: question.id, label: question.label })))
 const branchConditionOptions = computed(() => selected.value?.kind === 'page'
   ? conditionChoicesFor('page', selected.value.id) : [])
 const selectOptions = computed(() => questionConditionOptions.value.filter((question) => question.type === 'select')
@@ -324,6 +324,18 @@ const addGroup = () => {
   target.groups.push({ id, title: { en: 'New section', fr: 'Nouvelle section' }, description: { en: '', fr: '' }, questionIds: [], groups: [] })
   selectedContainerId.value = id; selectedQuestionId.value = ''
 }
+const addRepeatGroup = (target: Container, listId: string) => {
+  error.value = ''
+  const existing = target.groups.find((group) => group.repeatFor === listId)
+  if (existing) {
+    selectedContainerId.value = existing.id; selectedQuestionId.value = ''
+    return
+  }
+  const id = uid('group')
+  target.groups.push({ id, title: { en: 'Details for {{item}}', fr: 'Détails pour {{item}}' },
+    description: { en: '', fr: '' }, repeatFor: listId, questionIds: [], groups: [] })
+  selectedContainerId.value = id; selectedQuestionId.value = ''
+}
 const addQuestion = (type: AdvancedQuestion['type']) => {
   const target = selected.value?.item
   if (!target) return
@@ -339,9 +351,26 @@ const addQuestion = (type: AdvancedQuestion['type']) => {
   definition.value.questions.push(question)
   target.questionIds.push(id)
   selectedQuestionId.value = id
+  error.value = ''
 }
-const removeQuestion = () => {
-  const id = selectedQuestionId.value
+const addFieldsForList = () => {
+  const target = selected.value?.item
+  const question = selectedQuestion.value
+  if (!target || question?.type !== 'list') return
+  addRepeatGroup(target, question.id)
+}
+const addNestedRepeatList = () => {
+  const target = selected.value?.item
+  if (!target || selected.value?.kind !== 'group' || !selected.value.repeatFor) return
+  const parentId = selected.value.id
+  addQuestion('list')
+  const listId = selectedQuestionId.value
+  addRepeatGroup(target, listId)
+  selectedContainerId.value = parentId
+  selectedQuestionId.value = listId
+}
+const removeQuestionById = (id: string) => {
+  if (!id) return
   definition.value.questions = definition.value.questions.filter((item) => item.id !== id)
   for (const node of nodes.value) node.item.questionIds = node.item.questionIds.filter((key) => key !== id)
   const cleanCondition = (condition?: SurveyCondition) => {
@@ -373,7 +402,16 @@ const removeQuestion = () => {
     })
     cleanGroups(page.groups)
   }
-  selectedQuestionId.value = ''
+  if (selectedQuestionId.value === id) selectedQuestionId.value = ''
+}
+const removeQuestion = (id = selectedQuestionId.value) => {
+  if (!id) return
+  if (nodes.value.some((node) => node.repeatFor === id)) {
+    error.value = t('formRemoveRepeatSourceFirst')
+    return
+  }
+  removeQuestionById(id)
+  error.value = ''
   message.value = tr('Question removed. Rules and dependencies using it were updated; check any calculated values.',
     'Question retirée. Les règles et dépendances qui l’utilisaient ont été mises à jour; vérifiez les valeurs calculées.')
 }
@@ -436,7 +474,8 @@ const placeQuestion = (targetId: string) => {
 }
 const removeContainer = () => {
   const node = selected.value
-  if (!node || node.item.questionIds.length || node.item.groups.length) {
+  if (!node) return
+  if (node.kind === 'page' && (node.item.questionIds.length || node.item.groups.length)) {
     error.value = tr('Move or remove this container’s questions and groups first.', 'Déplacez ou retirez d’abord les questions et les groupes de ce conteneur.')
     return
   }
@@ -449,8 +488,32 @@ const removeContainer = () => {
         branch.destination = { kind: 'end' }
     }
     message.value = tr('Page removed. Navigation to that page was updated.', 'Page retirée. La navigation vers cette page a été mise à jour.')
-  } else for (const parent of nodes.value) parent.item.groups = parent.item.groups.filter((item) => item.id !== node.id)
-  selectedContainerId.value = definition.value.pages[0]!.id; selectedQuestionId.value = ''
+  } else {
+    const group = node.item as AdvancedGroup
+    const parentId = nodes.value.find((item) => item.item.groups.some((child) => child.id === node.id))?.id
+    const questionIds: string[] = []
+    const groupIds = new Set<string>()
+    const collect = (item: AdvancedGroup) => {
+      groupIds.add(item.id)
+      questionIds.push(...item.questionIds)
+      item.groups.forEach(collect)
+    }
+    collect(group)
+    if (nodes.value.some((item) => item.repeatFor && questionIds.includes(item.repeatFor) && !groupIds.has(item.id))) {
+      error.value = t('formRemoveDependentSetFirst')
+      return
+    }
+    if (questionIds.length || group.groups.length) {
+      if (!confirm(t('formRemoveSetConfirm', { count: questionIds.length }))) return
+    }
+    for (const id of questionIds) removeQuestionById(id)
+    for (const parent of nodes.value) parent.item.groups = parent.item.groups.filter((item) => item.id !== node.id)
+    message.value = t('formSetRemoved')
+    selectedContainerId.value = parentId ?? definition.value.pages[0]!.id
+  }
+  error.value = ''
+  if (node.kind === 'page') selectedContainerId.value = definition.value.pages[0]!.id
+  selectedQuestionId.value = ''
 }
 const addChoice = () => {
   const question = selectedQuestion.value
@@ -579,7 +642,7 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
                 :style="{ paddingInlineStart: `${8 + node.depth * 14}px` }"
                 :aria-current="selectedContainerId === node.id ? 'location' : undefined"
                 @click="selectedContainerId = node.id; selectedQuestionId = ''">
-                <span aria-hidden="true">{{ node.kind === 'page' ? '▤' : '⌞' }}</span> {{ node.title || node.id }}
+                <span aria-hidden="true">{{ node.kind === 'page' ? '▤' : node.repeatFor ? '↻' : '⌞' }}</span> {{ node.title || node.id }}
               </button>
             </li>
           </ul>
@@ -617,8 +680,9 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
               </div>
               <div class="flex flex-wrap gap-2 pt-2">
                 <ExtensionButton color="neutral" variant="outline" size="sm" :disabled="disabled" @click="addGroup">{{ tr('Add nested section', 'Ajouter une section imbriquée') }}</ExtensionButton>
+                <ExtensionButton v-if="selected.kind === 'group' && selected.repeatFor" color="neutral" variant="outline" size="sm" :disabled="disabled" @click="addNestedRepeatList">{{ t('formAddNestedList') }}</ExtensionButton>
                 <ExtensionButton color="neutral" variant="ghost" size="sm" :disabled="disabled || (selected.kind === 'page' && definition.pages.length === 1)" @click="removeContainer">
-                  {{ tr('Remove empty group or page', 'Retirer le groupe ou la page vide') }}
+                  {{ selected.kind === 'group' ? t('formRemoveSet') : tr('Remove empty group or page', 'Retirer le groupe ou la page vide') }}
                 </ExtensionButton>
               </div>
             </div>
@@ -626,7 +690,7 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
               <p class="designer-eyebrow">{{ tr('QUESTIONS', 'QUESTIONS') }} · {{ areaQuestions.length }}</p>
               <p v-if="!areaQuestions.length" class="designer-empty">{{ tr('Start with a question. Select a type below to add it to this page.', 'Commencez par une question. Sélectionnez un type ci-dessous pour l’ajouter à cette page.') }}</p>
               <ol class="space-y-3">
-                <li v-for="(question, index) in areaQuestions" :key="question.id">
+                <li v-for="(question, index) in areaQuestions" :key="question.id" class="relative">
                   <button type="button" class="designer-question" :aria-current="selectedQuestionId === question.id ? 'true' : undefined" @click="selectedQuestionId = question.id">
                     <span class="designer-question-number">{{ index + 1 }}</span>
                     <span class="designer-question-body">
@@ -640,6 +704,8 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
                     </span>
                     <span class="designer-question-type">{{ typeName(question.type) }}</span>
                   </button>
+                  <ExtensionButton icon="i-lucide-trash-2" color="neutral" variant="ghost" size="sm" class="absolute right-2 top-2"
+                    :aria-label="`${t('formRemoveField')}: ${question.label[language] || question.id}`" :disabled="disabled" @click="removeQuestion(question.id)" />
                 </li>
               </ol>
               <div class="designer-add">
@@ -678,7 +744,7 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
               <div class="flex flex-wrap gap-2">
                 <ExtensionButton color="neutral" variant="outline" size="sm" :disabled="disabled || !canMoveQuestion(-1)" @click="moveQuestion(-1)">{{ tr('Move up', 'Monter') }}</ExtensionButton>
                 <ExtensionButton color="neutral" variant="outline" size="sm" :disabled="disabled || !canMoveQuestion(1)" @click="moveQuestion(1)">{{ tr('Move down', 'Descendre') }}</ExtensionButton>
-                <ExtensionButton color="neutral" variant="ghost" size="sm" :disabled="disabled" @click="removeQuestion">{{ tr('Remove question', 'Retirer la question') }}</ExtensionButton>
+                <ExtensionButton color="neutral" variant="ghost" size="sm" :disabled="disabled" @click="removeQuestion()">{{ tr('Remove question', 'Retirer la question') }}</ExtensionButton>
               </div>
               <ExtensionFormField v-if="selectedQuestion.type === 'text'" :label="tr('Maximum characters', 'Nombre maximal de caractères')" name="maxLength" required>
                 <ExtensionInput :model-value="selectedQuestion.maxLength || ''" name="maxLength" type="number" min="1" max="5000" required :disabled="disabled"
@@ -692,6 +758,10 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
                   @update:model-value="selectedQuestion.maxItems = Number($event)" />
                 <p v-if="invalidLimit(selectedQuestion.maxItems, 50)" id="maxItems-error" role="alert" class="text-sm text-error">{{ t('maxItemsInvalid') }}</p>
               </ExtensionFormField>
+              <div v-if="selectedQuestion.type === 'list'" class="space-y-2 border-t border-default pt-4">
+                <p class="text-sm text-muted">{{ t('formListFieldsHelp') }}</p>
+                <ExtensionButton color="neutral" variant="outline" size="sm" :disabled="disabled" @click="addFieldsForList">{{ t('formAddFieldsForList') }}</ExtensionButton>
+              </div>
               <template v-if="selectedQuestion.type === 'select'">
                 <h5 class="font-medium">{{ tr('Choices', 'Choix') }}</h5>
                 <div v-for="(option, index) in selectedQuestion.options" :key="option.value" class="grid gap-2 border-b border-default pb-3">
