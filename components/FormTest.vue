@@ -33,7 +33,7 @@ const previous = (back: () => void, complete: boolean, pageIndex: number) => {
           <p class="font-medium">{{ locale === 'fr' ? 'Page' : 'Page' }} {{ pageIndex + 1 }} · {{ page.title[locale] }}</p>
           <p v-if="page.description?.[locale]" class="text-sm text-muted whitespace-pre-line">{{ page.description[locale] }}</p>
           <template v-for="(entry, index) in layout(page)" :key="`${entry.kind}-${index}`">
-            <div v-if="entry.kind === 'heading'" class="border-t border-default pt-3"><h5 class="font-semibold">{{ entry.title }}</h5><p v-if="entry.description" class="mt-1 text-sm text-muted whitespace-pre-line">{{ entry.description }}</p></div>
+            <div v-if="entry.kind === 'heading'" class="border-t border-default pt-3" :class="entry.depth > 1 ? 'ml-4 border-l-2 pl-3' : ''"><h5 class="font-semibold">{{ entry.title }}</h5><p v-if="entry.description" class="mt-1 text-sm text-muted whitespace-pre-line">{{ entry.description }}</p></div>
             <FormTestControl v-else-if="fieldFor(fields, entry.id)" :field="fieldFor(fields, entry.id)!" :locale="locale" />
           </template>
         </template>

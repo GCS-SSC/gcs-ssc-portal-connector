@@ -22,6 +22,7 @@ const question = z.discriminatedUnion('type', [
       value: z.string(), label: bilingual
     }))) }).optional() }),
   questionBase.extend({ type: z.literal('list'), maxItems: z.number() }),
+  questionBase.extend({ type: z.literal('repeat'), maxItems: z.number() }),
   questionBase.extend({ type: z.literal('table'), maxRows: z.number(), columns: z.array(z.object({
     id: z.string(), label: bilingual, type: z.enum(['text', 'number', 'date']), required: z.boolean()
   })) }),

@@ -99,16 +99,17 @@ const nodes = computed<Node[]>(() => {
 })
 const selected = computed(() => nodes.value.find((node) => node.id === selectedContainerId.value) ?? nodes.value[0])
 const selectedQuestion = computed(() => definition.value.questions.find((question) => question.id === selectedQuestionId.value))
+const repeatSource = computed(() => selected.value?.kind === 'group' && selected.value.repeatFor
+  ? definition.value.questions.find((question) => question.id === selected.value.repeatFor && question.type === 'repeat') as Extract<AdvancedQuestion, { type: 'repeat' }> | undefined : undefined)
 const areaQuestions = computed(() => selected.value?.item.questionIds
   .map((id) => definition.value.questions.find((question) => question.id === id))
-  .filter((question): question is AdvancedQuestion => Boolean(question)) ?? [])
+  .filter((question): question is AdvancedQuestion => question !== undefined && question.type !== 'repeat') ?? [])
 const questionTypes = computed(() => [
   { value: 'text', label: tr('Short answer', 'Réponse courte'), glyph: 'T' },
   { value: 'email', label: tr('Email', 'Courriel'), glyph: '@' },
   { value: 'number', label: tr('Number', 'Nombre'), glyph: '#' },
   { value: 'date', label: tr('Date', 'Date'), glyph: '▦' },
   { value: 'select', label: tr('Choice', 'Choix'), glyph: '◉' },
-  { value: 'list', label: t('formListQuestionType'), glyph: '☷' },
   { value: 'table', label: tr('Table', 'Tableau'), glyph: '▤' },
   { value: 'computed', label: tr('Calculated value', 'Valeur calculée'), glyph: '∑' }
 ] as const)
@@ -194,7 +195,7 @@ const questionConditionOptions = computed(() => selectedQuestion.value
   ? conditionChoicesFor('question', selectedQuestion.value.id) : [])
 const groupConditionOptions = computed(() => selected.value?.kind === 'group'
   ? conditionChoicesFor('group', selected.value.id) : [])
-const listOptions = computed(() => groupConditionOptions.value.filter((question) => question.type === 'list')
+const listOptions = computed(() => groupConditionOptions.value.filter((question) => question.type === 'list' || question.type === 'repeat')
   .map((question) => ({ value: question.id, label: question.label })))
 const branchConditionOptions = computed(() => selected.value?.kind === 'page'
   ? conditionChoicesFor('page', selected.value.id) : [])
@@ -334,7 +335,11 @@ const addRepeatGroup = (target: Container, listId: string) => {
     return
   }
   const id = uid('group')
-  target.groups.push({ id, title: { en: 'Details for {{item}}', fr: 'Détails pour {{item}}' },
+  const source = definition.value.questions.find((question) => question.id === listId)
+  const title = source?.type === 'repeat'
+    ? { en: `${source.label.en} · Entry {{item}}`, fr: `${source.label.fr} · Entrée {{item}}` }
+    : { en: 'Details for {{item}}', fr: 'Détails pour {{item}}' }
+  target.groups.push({ id, title,
     description: { en: '', fr: '' }, repeatFor: listId, questionIds: [], groups: [] })
   selectedContainerId.value = id; selectedQuestionId.value = ''
 }
@@ -345,7 +350,7 @@ const addQuestion = (type: AdvancedQuestion['type']) => {
   const base = { id, label: { en: 'New question', fr: 'Nouvelle question' }, hint: { en: '', fr: '' }, required: false }
   const question: AdvancedQuestion = type === 'text' ? { ...base, type, maxLength: 500 }
     : type === 'select' ? { ...base, type, options: [{ value: 'option_1', label: { en: 'Option 1', fr: 'Option 1' } }] }
-      : type === 'list' ? { ...base, type, maxItems: 10 }
+      : type === 'list' || type === 'repeat' ? { ...base, type, maxItems: 10 }
         : type === 'table' ? { ...base, type, maxRows: 20,
             columns: [{ id: 'column_1', label: { en: 'Column 1', fr: 'Colonne 1' }, type: 'text', required: true }] }
           : type === 'computed' ? { ...base, type, template: '{{source}}', sourceIds: [] }
@@ -365,10 +370,10 @@ const addRepeatingSet = () => {
   const target = selected.value?.item
   if (!target) return
   const setNumber = nodes.value.filter((node) => node.repeatFor).length + 1
-  addQuestion('list')
+  addQuestion('repeat')
   const listId = selectedQuestionId.value
   const list = definition.value.questions.find((question) => question.id === listId)
-  if (list) list.label = { en: `Items in set ${setNumber}`, fr: `Éléments de la série ${setNumber}` }
+  if (list) list.label = { en: `Set ${setNumber}`, fr: `Série ${setNumber}` }
   addRepeatGroup(target, listId)
 }
 const removeQuestionById = (id: string) => {
@@ -510,6 +515,9 @@ const removeContainer = () => {
       if (!confirm(t('formRemoveSetConfirm', { count: questionIds.length, fieldNoun }))) return
     }
     for (const id of questionIds) removeQuestionById(id)
+    if (group.repeatFor && definition.value.questions.find((question) => question.id === group.repeatFor)?.type === 'repeat'
+      && !nodes.value.some((item) => item.id !== group.id && item.repeatFor === group.repeatFor))
+      removeQuestionById(group.repeatFor)
     for (const parent of nodes.value) parent.item.groups = parent.item.groups.filter((item) => item.id !== node.id)
     message.value = t('formSetRemoved')
     selectedContainerId.value = parentId ?? definition.value.pages[0]!.id
@@ -677,6 +685,21 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
                   :items="[{ value: 'none', label: tr('Do not repeat', 'Ne pas répéter') }, ...listOptions]"
                   @update:model-value="(selected.item as AdvancedGroup).repeatFor = String($event) === 'none' ? undefined : String($event)" />
               </ExtensionFormField>
+              <div v-if="repeatSource" class="grid gap-3 sm:grid-cols-2">
+                <ExtensionFormField :label="tr('Set label · English', 'Libellé de la série · anglais')" name="repeatLabelEn" required>
+                  <ExtensionInput v-model="repeatSource.label.en" name="repeatLabelEn" required :disabled="disabled" />
+                </ExtensionFormField>
+                <ExtensionFormField :label="tr('Set label · French', 'Libellé de la série · français')" name="repeatLabelFr" required>
+                  <ExtensionInput v-model="repeatSource.label.fr" name="repeatLabelFr" required :disabled="disabled" />
+                </ExtensionFormField>
+                <ExtensionFormField :label="tr('Maximum repetitions', 'Nombre maximal de répétitions')" name="maxItems" required>
+                  <ExtensionInput :model-value="repeatSource.maxItems || ''" name="maxItems" type="number" min="1" max="50" required :disabled="disabled"
+                    :aria-invalid="invalidLimit(repeatSource.maxItems, 50)" :aria-describedby="invalidLimit(repeatSource.maxItems, 50) ? 'maxItems-error' : undefined"
+                    @update:model-value="repeatSource.maxItems = Number($event)" />
+                  <p v-if="invalidLimit(repeatSource.maxItems, 50)" id="maxItems-error" role="alert" class="text-sm text-error">{{ t('maxItemsInvalid') }}</p>
+                </ExtensionFormField>
+                <ExtensionCheckbox v-model="repeatSource.required" :label="tr('At least one required', 'Au moins un élément requis')" :disabled="disabled" />
+              </div>
               <div v-if="selected.kind === 'group'">
                 <p class="text-sm font-medium">{{ tr('Show this group when', 'Afficher ce groupe lorsque') }}</p>
                 <FormCondition v-model="(selected.item as AdvancedGroup).visibleWhen" :questions="groupConditionOptions" :locale="language" :disabled="disabled" />
