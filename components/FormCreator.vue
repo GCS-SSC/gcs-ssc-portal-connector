@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { customAlphabet } from 'nanoid'
 import { surveyV3Schema, upgradeToAdvancedSurvey, type AdvancedGroup, type AdvancedQuestion,
   type AdvancedSurvey, type SurveyCondition } from '@gcs-ssc/survey'
 import { ExtensionButton, ExtensionCheckbox, ExtensionEntityEditorWorkspace, ExtensionFormField, ExtensionInput,
@@ -78,7 +79,8 @@ const endpoint = computed(() => props.opportunityId
   : `/agencies/${props.agencyId}/forms`)
 const writeEndpoint = computed(() => props.opportunityId
   ? `/agencies/${props.agencyId}/opportunities/${props.opportunityId}` : endpoint.value)
-const uid = (prefix: string) => `${prefix}_${crypto.randomUUID().replaceAll('-', '').slice(0, 12)}`
+const nextId = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 12)
+const uid = (prefix: string) => `${prefix}_${nextId()}`
 type Container = AdvancedSurvey['pages'][number] | AdvancedGroup
 type Node = { id: string; kind: 'page' | 'group'; title: string; depth: number; pageId: string; item: Container; repeatFor?: string }
 const nodes = computed<Node[]>(() => {

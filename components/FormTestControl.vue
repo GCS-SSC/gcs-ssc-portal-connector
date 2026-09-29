@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { nanoid } from 'nanoid'
 import { parseList, parseTable, type ListItem, type TableRow } from '@gcs-ssc/survey'
 import type { SurveyField } from '@gcs-ssc/survey/vue'
 import { ExtensionButton, ExtensionFormField, ExtensionInput, ExtensionSelect } from '@gcs-ssc/extensions/ui'
@@ -8,7 +9,7 @@ const previewLabel = (label: string, required: boolean) => required
   ? `${label} ${tr('(required)', '(obligatoire)')}` : label
 const rows = () => parseList(props.field.value)
 const table = () => parseTable(props.field.value)
-const id = () => `r_${crypto.randomUUID().replaceAll('-', '_')}`
+const id = () => `r_${nanoid()}`
 const updateList = (items: ListItem[]) => props.field.setValue(JSON.stringify(items))
 const updateTable = (items: TableRow[]) => props.field.setValue(JSON.stringify(items))
 </script>

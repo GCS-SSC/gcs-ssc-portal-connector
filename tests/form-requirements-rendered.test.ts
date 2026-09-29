@@ -138,6 +138,45 @@ beforeEach(() => {
 })
 
 describe('connector form requirements', () => {
+  it('creates form pages and questions without randomUUID on a LAN HTTP origin', async () => {
+    const browserCrypto = globalThis.crypto
+    vi.stubGlobal('crypto', { getRandomValues: browserCrypto.getRandomValues.bind(browserCrypto) })
+    try {
+      const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
+      await flushPromises()
+      await wrapper.get('.designer-outline-add').trigger('click')
+      expect(wrapper.findAll('.designer-outline-item')).toHaveLength(2)
+      await wrapper.findAll('.designer-type').find(item => item.text().includes('Short answer'))!.trigger('click')
+      expect(wrapper.text()).toContain('QUESTIONS · 1')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('keeps intake request keys valid without randomUUID on a LAN HTTP origin', async () => {
+    const browserCrypto = globalThis.crypto
+    vi.stubGlobal('crypto', { getRandomValues: browserCrypto.getRandomValues.bind(browserCrypto) })
+    try {
+      const defaultGet = get.getMockImplementation()!
+      get.mockImplementation(async (path: string) => path.endsWith('/intakes')
+        ? { intakes: [], streams: [{ id: 'S-ABCDE', nameEn: 'Community', nameFr: 'Communauté' }] }
+        : defaultGet(path))
+      const wrapper = mount(IntakeWorkspace, { props: { agencyId: '1' } })
+      await flushPromises()
+      await button(wrapper, 'Create intake opportunity').trigger('click')
+      await wrapper.get('input[name="intakeNameEn"]').setValue('Community intake')
+      await wrapper.get('input[name="intakeNameFr"]').setValue('Appel communautaire')
+      await wrapper.get('select[name="intakeStream"]').setValue('S-ABCDE')
+      await wrapper.get('input[name="intakeStartDate"]').setValue('2027-01-01')
+      await wrapper.get('input[name="intakeEndDate"]').setValue('2027-12-31')
+      await button(wrapper, 'Save intake').trigger('click')
+      expect((post.mock.calls[0]?.[1] as { requestKey: string }).requestKey)
+        .toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('explains why form design controls are disabled without agency configuration access', async () => {
     const collection = mount(PortalConnection, { props: { agencyId: '1', section: 'forms', enabled: true, readOnly: true } })
     await flushPromises()
