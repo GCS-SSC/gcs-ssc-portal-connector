@@ -42,7 +42,11 @@ export const sourceKey = (id, path, active) => {
     return undefined;
 };
 const valueFor = (question, key, answers) => {
-    if (question.type === 'list' || question.type === 'repeat')
+    if (question.type === 'repeat') {
+        const count = parseList(answers[key]).length;
+        return count ? String(count) : '';
+    }
+    if (question.type === 'list')
         return parseList(answers[key]).map((item) => item.value).join(', ');
     return answers[key] ?? '';
 };
