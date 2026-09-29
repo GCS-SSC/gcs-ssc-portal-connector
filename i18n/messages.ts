@@ -1,7 +1,11 @@
+import { previewMessages } from './preview'
+import { designHelpMessages } from './design-help'
 import { defineGcsExtensionMessages } from '@gcs-ssc/extensions'
 
 export const messages = defineGcsExtensionMessages({
   en: {
+    ...designHelpMessages.en,
+    ...previewMessages.en,
     successNotice: 'Success',
     errorNotice: 'Error',
     formCreator: 'Form creator',
@@ -177,6 +181,8 @@ export const messages = defineGcsExtensionMessages({
     queuedState: 'Queued', sendingState: 'Sending', deliveredState: 'Delivered', cancelledState: 'Cancelled'
   },
   fr: {
+    ...designHelpMessages.fr,
+    ...previewMessages.fr,
     successNotice: 'Succès',
     errorNotice: 'Erreur',
     formCreator: 'Créateur de formulaires',

@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { SurveyCondition } from '@gcs-ssc/survey'
-import { ExtensionButton, ExtensionFormField, ExtensionInput, ExtensionSelect } from '@gcs-ssc/extensions/ui'
+import { ExtensionButton, ExtensionFormField, ExtensionInput, ExtensionSelect, useExtensionI18n } from '@gcs-ssc/extensions/ui'
+import { messages } from '../i18n/messages'
+const { t } = useExtensionI18n(messages)
 type Question = { id: string; label: string; type?: string; options?: { value: string; label: string }[] }
-const props = defineProps<{ questions: Question[]; disabled?: boolean; locale: 'en' | 'fr' }>()
+const props = defineProps<{ questions: Question[]; disabled?: boolean; locale: 'en' | 'fr'; purpose?: 'visibility' | 'branch' }>()
 const condition = defineModel<SurveyCondition | undefined>({ required: true })
 const label = (en: string, fr: string) => props.locale === 'fr' ? fr : en
 const operators = computed(() => [
@@ -53,6 +55,9 @@ const remove = (index: number) => {
 
 <template>
   <div class="space-y-3">
+    <p v-if="!condition?.conditions.length" class="text-sm text-muted">{{ t(purpose === 'branch' ? 'designConditionBranchEmpty' : 'designConditionAlways') }}</p>
+    <p v-if="!questions.length" class="text-sm text-muted">{{ t('designConditionEmpty') }}</p>
+    <p v-if="condition && condition.conditions.length > 1" class="text-sm text-muted">{{ t('designConditionMatchHelp') }}</p>
     <ExtensionFormField v-if="condition && condition.conditions.length > 1" :label="label('Match', 'Correspondance')" name="conditionMatch">
       <ExtensionSelect :model-value="condition.match" name="conditionMatch" value-key="value" :disabled="disabled"
         :items="[{ value: 'all', label: label('All rules', 'Toutes les règles') }, { value: 'any', label: label('Any rule', 'Une règle') }]"

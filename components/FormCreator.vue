@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch, type Ref } from 'vue'
 import { customAlphabet } from 'nanoid'
 import { surveyV3Schema, upgradeToAdvancedSurvey, type AdvancedGroup, type AdvancedQuestion,
   type AdvancedSurvey, type SurveyCondition } from '@gcs-ssc/survey'
@@ -9,6 +9,7 @@ import { ExtensionAssessmentSchemaAccordionSection, ExtensionAssessmentSchemaPag
 import { messages } from '../i18n/messages'
 import { computedTemplateReady } from '../shared/form-localization'
 import FormCondition from './FormCondition.vue'
+import FormDesignHelp from './FormDesignHelp.vue'
 import FormFlowMap from './FormFlowMap.vue'
 import FormTest from './FormTest.vue'
 import { clearFormDraft, readFormDraft, writeFormDraft, writeFormSelection } from './form-draft-session'
@@ -153,7 +154,8 @@ const nodes = computed<Node[]>(() => {
   const result: Node[] = []
   const visit = (groups: AdvancedGroup[], depth: number, pageId: string, parentId: string) => {
     for (const group of groups) {
-      result.push({ id: group.id, kind: 'group', title: group.title[language.value], depth, pageId, parentId, item: group, repeatFor: group.repeatFor })
+      const repeatLabel = group.repeatFor ? definition.value.questions.find(question => question.id === group.repeatFor)?.label[language.value] : undefined
+      result.push({ id: group.id, kind: 'group', title: repeatLabel ? `${repeatLabel} · ${t('designEachEntry')}` : group.title[language.value].replaceAll('{{item}}', t('designEachEntry')), depth, pageId, parentId, item: group, repeatFor: group.repeatFor })
       visit(group.groups, depth + 1, pageId, group.id)
     }
   }
@@ -196,6 +198,16 @@ const toggleNode = (node: Node) => {
 }
 const selected = computed(() => nodes.value.find((node) => node.id === selectedContainerId.value) ?? nodes.value[0])
 const selectedQuestion = computed(() => definition.value.questions.find((question) => question.id === selectedQuestionId.value))
+const questionInspector: Ref<HTMLElement | null> = ref(null)
+const selectQuestion = async (id: string) => {
+  selectedQuestionId.value = id
+  await nextTick()
+  const inspector = questionInspector.value
+  if (inspector && inspector.getBoundingClientRect().top > window.innerHeight - 120) {
+    inspector.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
+    inspector.querySelector<HTMLInputElement>('input')?.focus({ preventScroll: true })
+  }
+}
 const repeatSource = computed(() => {
   const node = selected.value
   return node?.kind === 'group' && node.repeatFor
@@ -239,9 +251,6 @@ const publicationChecks = computed(() => {
   ]
 })
 const readyToPublish = computed(() => publicationChecks.value.every((check) => check.ok))
-const questionOptions = computed(() => definition.value.questions.map((question) => ({
-  value: question.id, label: `${question.label[language.value] || question.id} (${question.id})`
-})))
 type ConditionQuestion = { id: string; label: string; type: AdvancedQuestion['type']; options?: { value: string; label: string }[] }
 const conditionChoicesFor = (kind: 'question' | 'group' | 'page', targetId: string, survey = definition.value): ConditionQuestion[] => {
   const seen: { question: AdvancedQuestion; scope: string[] }[] = []
@@ -296,6 +305,15 @@ const referencesValid = (survey: AdvancedSurvey) => {
 }
 const questionConditionOptions = computed(() => selectedQuestion.value
   ? conditionChoicesFor('question', selectedQuestion.value.id) : [])
+const computedSourceOptions = computed(() => questionConditionOptions.value.map((question) => ({
+  value: question.id, label: question.label
+})))
+const computedFormatLabel = computed(() => {
+  const question = selectedQuestion.value
+  if (question?.type !== 'computed' || !question.sourceIds.length) return t('designFormatEmpty')
+  return question.template.replace(/\{\{([a-zA-Z][a-zA-Z0-9_-]{0,63})\}\}/g, (_reference, id: string) =>
+    definition.value.questions.find(source => source.id === id)?.label[language.value] ?? t('designFormatEmpty'))
+})
 const groupConditionOptions = computed(() => selected.value?.kind === 'group'
   ? conditionChoicesFor('group', selected.value.id) : [])
 const listOptions = computed(() => groupConditionOptions.value.filter((question) => question.type === 'list' || question.type === 'repeat')
@@ -476,6 +494,7 @@ const addQuestion = (type: AdvancedQuestion['type']) => {
   target.questionIds.push(id)
   selectedQuestionId.value = id
   error.value = ''
+  if (type !== 'repeat') void selectQuestion(id)
 }
 const addFieldsForList = () => {
   const target = selected.value?.item
@@ -663,6 +682,12 @@ const toggleComputedSource = (id: string, checked: boolean) => {
     question.template = question.sourceIds[0] ? `{{${question.sourceIds[0]}}}` : '{{source}}'
   }
 }
+const insertComputedReference = (id: string) => {
+  const question = selectedQuestion.value
+  if (disabled.value || question?.type !== 'computed' || !question.sourceIds.includes(id)) return
+  const reference = `{{${id}}}`
+  question.template = question.template === '{{source}}' ? reference : `${question.template}${reference}`
+}
 const setDependency = (sourceId: string) => {
   const question = selectedQuestion.value
   if (question?.type !== 'select') return
@@ -681,6 +706,12 @@ const addBranch = (page: AdvancedSurvey['pages'][number]) => {
   if (!source) return
   page.branches.push({ when: { match: 'all', conditions: [{ questionId: source.id, operator: 'answered' }] },
     destination: { kind: 'end' } })
+}
+const moveBranch = (page: AdvancedSurvey['pages'][number], index: number, direction: -1 | 1) => {
+  const destination = index + direction
+  if (disabled.value || destination < 0 || destination >= page.branches.length) return
+  const branch = page.branches.splice(index, 1)[0]!
+  page.branches.splice(destination, 0, branch)
 }
 const setBranchCondition = (page: AdvancedSurvey['pages'][number], index: number, value: SurveyCondition | undefined) => {
   if (value) page.branches[index]!.when = value
@@ -818,7 +849,7 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
             <div class="designer-canvas space-y-6">
             <ExtensionAssessmentSchemaPageSection section-id="form-container-details"
               :title="selected.title || (selected.kind === 'page' ? tr('Untitled page', 'Page sans titre') : tr('Untitled section', 'Section sans titre'))">
-            <ExtensionAssessmentSchemaAccordionSection :key="selected.id" :title="selected.kind === 'page' ? tr('Page details', 'Détails de la page') : tr('Section details', 'Détails de la section')" :default-open="true">
+            <ExtensionAssessmentSchemaAccordionSection :key="selected.id" :title="selected.kind === 'page' ? tr('Page details', 'Détails de la page') : tr('Section details', 'Détails de la section')" :default-open="!selected.item.questionIds.length && !selected.item.groups.length">
             <div class="space-y-3">
               <div class="grid gap-3 sm:grid-cols-2">
                 <ExtensionFormField :label="tr('Heading · English', 'Titre · anglais')" name="groupTitleEn" required>
@@ -839,6 +870,7 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
                   :items="[{ value: 'none', label: tr('Do not repeat', 'Ne pas répéter') }, ...listOptions]"
                   @update:model-value="(selected.item as AdvancedGroup).repeatFor = String($event) === 'none' ? undefined : String($event)" />
               </ExtensionFormField>
+              <FormDesignHelp v-if="selected.kind === 'group'" topic="Repeats" />
               <div v-if="repeatSource" class="grid gap-3 sm:grid-cols-2">
                 <ExtensionFormField :label="tr('Set label · English', 'Libellé de la série · anglais')" name="repeatLabelEn" required>
                   <ExtensionInput v-model="repeatSource.label.en" name="repeatLabelEn" required :disabled="disabled" />
@@ -856,6 +888,7 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
               </div>
               <div v-if="selected.kind === 'group'">
                 <p class="text-sm font-medium">{{ tr('Show this group when', 'Afficher ce groupe lorsque') }}</p>
+                <FormDesignHelp topic="Visibility" />
                 <FormCondition v-model="(selected.item as AdvancedGroup).visibleWhen" :questions="groupConditionOptions" :locale="language" :disabled="disabled" />
               </div>
               <div class="flex flex-wrap gap-2 pt-2">
@@ -874,7 +907,7 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
               <p v-if="!areaQuestions.length" class="designer-empty">{{ selected.kind === 'group' && selected.repeatFor ? t('formEmptyRepeatSet') : tr('Start with a question. Select a type below to add it to this page.', 'Commencez par une question. Sélectionnez un type ci-dessous pour l’ajouter à cette page.') }}</p>
               <ol class="space-y-3">
                 <li v-for="(question, index) in areaQuestions" :key="question.id" class="relative">
-                  <button type="button" class="designer-question" :aria-current="selectedQuestionId === question.id ? 'true' : undefined" @click="selectedQuestionId = question.id">
+                  <button type="button" class="designer-question" :aria-current="selectedQuestionId === question.id ? 'true' : undefined" @click="selectQuestion(question.id)">
                     <span class="designer-question-number">{{ index + 1 }}</span>
                     <span class="designer-question-body">
                       <span class="designer-question-title">{{ question.label[language] || tr('Untitled question', 'Question sans titre') }} <span v-if="question.required" class="text-error">*</span></span>
@@ -896,7 +929,7 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
             </div>
             </ExtensionAssessmentSchemaPageSection>
             </div>
-            <div class="designer-inspector space-y-5">
+            <div ref="questionInspector" class="designer-inspector space-y-5">
             <ExtensionAssessmentSchemaPageSection v-if="selectedQuestion" section-id="form-question-settings" :title="tr('Question settings', 'Paramètres de la question')">
             <ExtensionAssessmentSchemaAccordionSection v-if="selectedQuestion" :key="selectedQuestion.id" :title="selectedQuestion.label[language] || tr('Question details', 'Détails de la question')" :default-open="true">
             <div v-if="selectedQuestion" class="space-y-4">
@@ -963,10 +996,13 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
                     :items="[{ value: 'none', label: tr('No dependency', 'Aucune dépendance') }, ...selectOptions.filter((item) => item.value !== selectedQuestion!.id)]"
                     @update:model-value="setDependency(String($event))" />
                 </ExtensionFormField>
+                <FormDesignHelp topic="Dependencies" />
+                <p v-if="!selectOptions.length" class="text-sm text-muted">{{ t('designNoChoiceSources') }}</p>
                 <div v-if="selectedQuestion.dependsOn" class="space-y-3">
                   <p class="text-sm text-muted">{{ tr('Choose which answers applicants can select for each answer to the earlier question.', 'Choisissez les réponses que les demandeurs pourront sélectionner pour chaque réponse à la question précédente.') }}</p>
                   <div v-for="source in sourceChoices" :key="source.value" class="rounded-md border border-default p-3">
                     <p class="mb-2 text-sm font-semibold">{{ tr('If the earlier answer is', 'Si la réponse précédente est') }} “{{ source.label[language] }}”</p>
+                    <p v-if="!selectedQuestion.dependsOn.optionsByValue[source.value]?.length" class="mb-2 text-sm text-warning">{{ t('designNoMappedChoices') }}</p>
                     <div class="grid gap-2">
                       <ExtensionCheckbox v-for="choice in selectedQuestion.options" :key="choice.value"
                         :label="choice.label[language]" :disabled="disabled"
@@ -1003,19 +1039,42 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
                 <ExtensionButton color="neutral" variant="outline" size="sm" :disabled="disabled || selectedQuestion.columns.length >= 20" @click="addColumn">{{ tr('Add column', 'Ajouter une colonne') }}</ExtensionButton>
               </template>
               <template v-if="selectedQuestion.type === 'computed'">
-                <ExtensionFormField :label="tr('Template — use {{field_id}} for values', 'Modèle — utilisez {{field_id}} pour les valeurs')" name="computedTemplate" required>
-                  <ExtensionInput v-model="selectedQuestion.template" name="computedTemplate" required :disabled="disabled" />
+                <FormDesignHelp topic="Computed" />
+                <p class="text-sm font-medium">{{ t('designFormatPreview') }}</p>
+                <p class="text-sm text-muted" data-computed-format>{{ computedFormatLabel }}</p>
+                <details class="text-sm">
+                  <summary class="text-primary">{{ t('designAdvancedTemplate') }}</summary>
+                <ExtensionFormField :label="t('designTemplateLabel')" name="computedTemplate" required>
+                  <ExtensionInput v-model="selectedQuestion.template" name="computedTemplate" required :disabled="disabled"
+                    aria-describedby="computed-template-help computed-template-validation"
+                    :aria-invalid="!computedTemplateReady(selectedQuestion.template, selectedQuestion.sourceIds)" />
+                  <p id="computed-template-help" class="text-sm text-muted">{{ t('designTemplateHelp') }}</p>
+                  <p id="computed-template-validation" class="text-sm text-warning" aria-live="polite">
+                    {{ computedTemplateReady(selectedQuestion.template, selectedQuestion.sourceIds) ? '' : t('designTemplateInvalid') }}
+                  </p>
                 </ExtensionFormField>
+                </details>
+                <p v-if="!computedTemplateReady(selectedQuestion.template, selectedQuestion.sourceIds)" class="text-sm text-warning">{{ t('designTemplateInvalid') }}</p>
                 <p id="computed-sources-label" class="text-sm font-medium">{{ t('computedSourcesRequired') }}</p>
                 <p id="computed-sources-help" class="text-sm">{{ t('computedSourcesHelp') }}</p>
                 <div role="group" aria-labelledby="computed-sources-label" aria-describedby="computed-sources-help" class="grid gap-2">
-                  <ExtensionCheckbox v-for="item in questionOptions.filter((item) => item.value !== selectedQuestion!.id)" :key="item.value"
+                  <ExtensionCheckbox v-for="item in computedSourceOptions" :key="item.value"
                     :label="item.label" :disabled="disabled" :model-value="selectedQuestion.sourceIds.includes(item.value)"
                     @update:model-value="toggleComputedSource(item.value, Boolean($event))" />
+                </div>
+                <p v-if="!computedSourceOptions.length" class="text-sm text-muted">{{ t('designNoSources') }}</p>
+                <div class="flex flex-wrap gap-2">
+                  <ExtensionButton v-for="item in computedSourceOptions.filter((source) => selectedQuestion?.type === 'computed' && selectedQuestion.sourceIds.includes(source.value))"
+                    :key="item.value" color="neutral" variant="outline" size="sm" :disabled="disabled" @click="insertComputedReference(item.value)">
+                    {{ t('designInsertReference', { label: item.label }) }}
+                  </ExtensionButton>
+                  <ExtensionButton color="neutral" variant="ghost" size="sm" :disabled="disabled || !selectedQuestion.sourceIds.length"
+                    @click="selectedQuestion.template += ' / '">{{ t('designAddSeparator') }}</ExtensionButton>
                 </div>
               </template>
               <div>
                 <p class="text-sm font-medium">{{ tr('Show this question when', 'Afficher cette question lorsque') }}</p>
+                <FormDesignHelp topic="Visibility" />
                 <FormCondition v-model="selectedQuestion.visibleWhen" :questions="questionConditionOptions" :locale="language" :disabled="disabled" />
               </div>
             </div>
@@ -1025,19 +1084,26 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
             <ExtensionAssessmentSchemaAccordionSection v-if="selected.kind === 'page'" :key="`${selected.id}:navigation`" :title="tr('Page navigation', 'Navigation entre les pages')">
             <div v-if="selected.kind === 'page'" class="space-y-3 border-t border-default pt-4">
               <p class="text-sm text-muted">{{ tr('Choose where applicants go next. The first matching rule wins; otherwise use the default destination.', 'Choisissez la page suivante. La première règle qui correspond s’applique; sinon, la destination par défaut est utilisée.') }}</p>
+              <FormDesignHelp topic="Branching" />
               <p v-if="!branchConditionOptions.length" class="text-sm text-muted">{{ tr('Add a question to this or an earlier page before creating a rule.', 'Ajoutez une question à cette page ou à une page précédente avant de créer une règle.') }}</p>
               <div v-for="(branch, index) in (selected.item as AdvancedSurvey['pages'][number]).branches" :key="index" class="space-y-2 border-l-2 border-primary/50 pl-4">
                 <p class="text-xs font-semibold uppercase tracking-wide text-muted">{{ tr('If rule', 'Si la règle') }} {{ index + 1 }}</p>
-                <FormCondition :model-value="branch.when" :questions="branchConditionOptions" :locale="language" :disabled="disabled"
+                <FormCondition purpose="branch" :model-value="branch.when" :questions="branchConditionOptions" :locale="language" :disabled="disabled"
                   @update:model-value="setBranchCondition(selected!.item as AdvancedSurvey['pages'][number], index, $event)" />
                 <ExtensionFormField :label="tr('Then go to', 'Aller à')" :name="`branchDestination${index}`">
                   <ExtensionSelect :model-value="branch.destination.kind === 'end' ? 'end' : branch.destination.pageId"
                     :name="`branchDestination${index}`" value-key="value" :disabled="disabled" :items="pageDestinations(selected.item as AdvancedSurvey['pages'][number])"
                     @update:model-value="setDestination(selected!.item as AdvancedSurvey['pages'][number], index, String($event))" />
                 </ExtensionFormField>
+                <div class="flex flex-wrap gap-2">
+                <ExtensionButton color="neutral" variant="outline" size="sm" :disabled="disabled || index === 0"
+                  @click="moveBranch(selected.item as AdvancedSurvey['pages'][number], index, -1)">{{ t('designMoveRouteUp') }}</ExtensionButton>
+                <ExtensionButton color="neutral" variant="outline" size="sm" :disabled="disabled || index === (selected.item as AdvancedSurvey['pages'][number]).branches.length - 1"
+                  @click="moveBranch(selected.item as AdvancedSurvey['pages'][number], index, 1)">{{ t('designMoveRouteDown') }}</ExtensionButton>
                 <ExtensionButton color="neutral" variant="ghost" size="sm" :disabled="disabled" @click="(selected.item as AdvancedSurvey['pages'][number]).branches.splice(index, 1)">
                   {{ tr('Remove branch', 'Retirer l’embranchement') }}
                 </ExtensionButton>
+                </div>
               </div>
               <ExtensionButton color="neutral" variant="outline" size="sm" :disabled="disabled || !branchConditionOptions.length" @click="addBranch(selected.item as AdvancedSurvey['pages'][number])">
                 {{ tr('Add an if rule', 'Ajouter une règle si') }}
@@ -1053,6 +1119,18 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
             </div>
             </div>
           </template>
+        <ExtensionAssessmentSchemaPageSection section-id="form-design-guide" :title="t('designGuideTitle')">
+          <ExtensionAssessmentSchemaAccordionSection :title="t('designGuideOpen')">
+          <div class="space-y-3 pt-3">
+            <p class="text-sm text-muted">{{ t('designGuideIntro') }}</p>
+            <FormDesignHelp v-for="topic in (['Basics', 'Visibility', 'Dependencies', 'Computed', 'Branching', 'Repeats'] as const)" :key="topic" :topic="topic" />
+            <div class="flex flex-wrap gap-2">
+              <ExtensionButton color="neutral" variant="outline" size="sm" @click="tab = 'flow'">{{ t('designGuideFlow') }}</ExtensionButton>
+              <ExtensionButton color="neutral" variant="outline" size="sm" @click="tab = 'test'">{{ t('designGuideTry') }}</ExtensionButton>
+            </div>
+          </div>
+          </ExtensionAssessmentSchemaAccordionSection>
+        </ExtensionAssessmentSchemaPageSection>
         </template>
         <FormFlowMap v-else-if="tab === 'flow'" :definition="definition" :locale="language" :selected-page-id="selected?.pageId" @select-page="openFlowPage" />
         <div v-else-if="tab === 'test'" class="space-y-4">

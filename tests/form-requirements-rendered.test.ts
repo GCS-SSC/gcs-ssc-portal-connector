@@ -132,6 +132,9 @@ import FormCreator from '../components/FormCreator.vue'
 import FormLibrary from '../components/FormLibrary.vue'
 import IntakeWorkspace from '../components/IntakeWorkspace.vue'
 import FormTest from '../components/FormTest.vue'
+import FormTestControl from '../components/FormTestControl.vue'
+import type { SurveyField } from '@gcs-ssc/survey/vue'
+import { ExtensionSelect } from '@gcs-ssc/extensions/ui'
 import { readFormDraft } from '../components/form-draft-session'
 import PortalConnection from '../components/PortalConnection.vue'
 import ProponentVerification from '../components/ProponentVerification.vue'
@@ -139,6 +142,7 @@ import ProponentVerification from '../components/ProponentVerification.vue'
 const button = (wrapper: ReturnType<typeof mount>, label: string) => wrapper.findAll('button').find(item => item.text() === label)!
 
 beforeEach(() => {
+  Element.prototype.scrollIntoView = vi.fn()
   window.sessionStorage.clear()
   state.locale = 'en'
   state.toastAdd.mockReset()
@@ -931,7 +935,8 @@ describe('connector form requirements', () => {
     await button(wrapper, 'Check').trigger('click')
     expect(wrapper.text()).toContain('Responses are valid.')
     await button(wrapper, 'Previous').trigger('click')
-    expect(wrapper.text()).toContain('Page 1 · First page')
+    expect(wrapper.get('h4').text()).toBe('First page')
+    expect(wrapper.text()).toContain('Page 1')
     expect(wrapper.text()).not.toContain('Responses are valid.')
   })
 
@@ -1096,7 +1101,7 @@ describe('connector form requirements', () => {
     await addType('Short answer').trigger('click')
     await addType('Calculated value').trigger('click')
     const sources = wrapper.get('[role="group"][aria-labelledby="computed-sources-label"]')
-    const secondId = sources.findAll('label')[1]!.text().match(/\((field_[a-z0-9]+)\)/)?.[1]
+    const secondId = readFormDraft('1')!.definition.questions[1]!.id
     expect(secondId).toBeTruthy()
     await sources.findAll('input[type="checkbox"]')[0]!.setValue(true)
     await sources.findAll('input[type="checkbox"]')[1]!.setValue(true)
@@ -1320,5 +1325,251 @@ describe('Proponent verification entry', () => {
     expect(post).toHaveBeenCalledWith('/agencies/2/proponents/7/verification', {
       organizationId: 'N-TWO', proponentId: '7', note: 'Confirmed.'
     })
+  })
+})
+
+
+describe('form design guidance and valid calculated sources', () => {
+  it('offers only earlier accessible sources and inserts exact references without changing required semantics', async () => {
+    const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
+    await flushPromises()
+    const addType = (label: string) => wrapper.findAll('.designer-type').find(item => item.text().includes(label))!
+    await addType('Short answer').trigger('click')
+    await wrapper.get('input[name="questionEn"]').setValue('Earlier source')
+    await addType('Calculated value').trigger('click')
+    await addType('Short answer').trigger('click')
+    await wrapper.get('input[name="questionEn"]').setValue('Later source')
+    await button(wrapper, 'Add repeating set').trigger('click')
+    await addType('Short answer').trigger('click')
+    await wrapper.get('input[name="questionEn"]').setValue('Repeated source')
+    await wrapper.findAll('.designer-outline-item')[0]!.trigger('click')
+    await wrapper.findAll('.designer-question')[1]!.trigger('click')
+    const sources = wrapper.get('[role="group"][aria-labelledby="computed-sources-label"]')
+    expect(sources.findAll('input[type="checkbox"]')).toHaveLength(1)
+    expect(sources.text()).toContain('Earlier source')
+    expect(sources.text()).not.toContain('Later source')
+    expect(sources.text()).not.toContain('Repeated source')
+    const template = wrapper.get('input[name="computedTemplate"]')
+    expect(template.attributes('required')).toBeDefined()
+    expect(template.attributes('aria-describedby')).toContain('computed-template-validation')
+    expect(template.attributes('aria-invalid')).toBe('true')
+    await sources.get('input[type="checkbox"]').setValue(true)
+    const reference = (template.element as HTMLInputElement).value
+    expect(reference).toMatch(/^\{\{field_[a-z0-9]+\}\}$/)
+    await template.setValue('')
+    await wrapper.findAll('button').find(item => item.text().startsWith('Insert reference:'))!.trigger('click')
+    expect((template.element as HTMLInputElement).value).toBe(reference)
+    expect(template.attributes('aria-invalid')).toBe('false')
+    await template.setValue('Total: ' + reference)
+    expect(template.attributes('aria-invalid')).toBe('true')
+    expect(wrapper.get('#computed-template-validation').text()).toContain('neutral symbols')
+    wrapper.unmount()
+  })
+
+  it('explains missing sources and keeps guidance available for read-only forms', async () => {
+    const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
+    await flushPromises()
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('Calculated value'))!.trigger('click')
+    expect(wrapper.text()).toContain('Add a source question before this question')
+    await wrapper.setProps({ disabled: true })
+    expect(wrapper.find('[data-design-help="Computed"] summary').exists()).toBe(true)
+    await button(wrapper, 'Test this form').trigger('click')
+    expect(wrapper.text()).toContain('Preview only')
+    expect(post).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+})
+
+describe('Test renderer hierarchy and validation', () => {
+  const repeatedDefinition = () => surveyV3Schema.parse({
+    schemaVersion: 3, title: { en: 'Team', fr: 'Équipe' },
+    questions: [
+      { id: 'people', type: 'repeat', label: { en: 'People', fr: 'Personnes' }, required: true, maxItems: 2 },
+      { id: 'name', type: 'text', label: { en: 'Name', fr: 'Nom' }, required: true, maxLength: 100 },
+      { id: 'contacts', type: 'repeat', label: { en: 'Contacts', fr: 'Contacts' }, required: false, maxItems: 2 },
+      { id: 'email', type: 'email', label: { en: 'Email', fr: 'Courriel' }, required: true }
+    ],
+    pages: [{ id: 'page', title: { en: 'People', fr: 'Personnes' }, questionIds: ['people'], branches: [],
+      groups: [{ id: 'person', title: { en: 'Person {{item}}', fr: 'Personne {{item}}' }, repeatFor: 'people',
+        questionIds: ['name', 'contacts'], groups: [{ id: 'contact', title: { en: 'Contact {{item}}', fr: 'Contact {{item}}' },
+          repeatFor: 'contacts', questionIds: ['email'], groups: [] }] }] }]
+  })
+
+  it('keeps nested entry fields and removal together, preserving other entries and their answers', async () => {
+    const wrapper = mount(FormTest, { props: { definition: repeatedDefinition(), locale: 'en' } })
+    const root = wrapper.get('[data-repeat-set]')
+    await button(wrapper, 'Add another').trigger('click')
+    const first = root.get('[data-repeat-entry]')
+    await first.get('input[name^="name@"] ').setValue('Alice')
+    await first.findAll('button').find(item => item.text() === 'Add another')!.trigger('click')
+    await button(wrapper, 'Check').trigger('click')
+    expect(wrapper.findAll('.preview-form a').some(item => item.text().includes('Person 1 · Contact 1 · Email'))).toBe(true)
+    await first.get('input[type="email"]').setValue('alice@example.ca')
+    // Root Add is below its entries; nested Add stays inside its parent entry.
+    await root.findAll('button').filter(item => item.text() === 'Add another').at(-1)!.trigger('click')
+    const entries = root.findAll('[data-repeat-entry]').filter(item => !item.element.parentElement?.closest('[data-repeat-entry]'))
+    expect(entries).toHaveLength(2)
+    await entries[1]!.get('input[name^="name@"] ').setValue('Bob')
+    await entries[0]!.findAll('button').find(item => item.attributes('aria-label') === 'Remove Person 1')!.trigger('click')
+    expect(wrapper.findAll('input[type="email"]')).toHaveLength(0)
+    expect((wrapper.get('input[name^="name@"] ').element as HTMLInputElement).value).toBe('Bob')
+    expect(root.text()).toContain('1 of 2 entries')
+    expect(wrapper.findAll('[data-repeat-entry]')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('associates localized errors with required inputs and recovers through validation', async () => {
+    const wrapper = mount(FormTest, { props: { definition: repeatedDefinition(), locale: 'fr' } })
+    expect(wrapper.text()).toContain('(obligatoire)')
+    await button(wrapper, 'Vérifier').trigger('click')
+    expect(wrapper.get('#people-repeat-error').text()).toBe('Saisissez une réponse.')
+    await button(wrapper, 'Ajouter un autre élément').trigger('click')
+    await button(wrapper, 'Vérifier').trigger('click')
+    expect(wrapper.text()).toContain('Vérifiez les réponses indiquées')
+    const input = wrapper.get('input[name^="name@"]')
+    expect(input.attributes('required')).toBeDefined()
+    expect(input.attributes('aria-invalid')).toBe('true')
+    expect(wrapper.findAll('[role="alert"]').some(item => item.text() === 'Saisissez une réponse.')).toBe(true)
+    await input.setValue('Alice')
+    await button(wrapper, 'Vérifier').trigger('click')
+    expect(wrapper.text()).toContain('Réponses valides.')
+    expect(wrapper.findAll('[role="alert"]')).toHaveLength(0)
+    expect(wrapper.findAll('input')).toHaveLength(0)
+    wrapper.unmount()
+  })
+})
+
+
+describe('Test answer controls', () => {
+  const fieldFor = (question: SurveyField['question'], value = ''): SurveyField => ({
+    id: question.id, question, label: question.label.en, hint: 'Help text', required: question.required,
+    disabled: false, value, error: undefined, options: question.type === 'select'
+      ? question.options.map(option => ({value: option.value, label: option.label.en})) : [], setValue: vi.fn()
+  })
+  const base = { id: 'field', label: { en: 'Field', fr: 'Champ' }, required: true }
+
+  it.each(['text', 'email', 'number', 'date'] as const)('renders %s input semantics and error recovery', async type => {
+    const field = fieldFor(type === 'text' ? { ...base, type, maxLength: 100 } : { ...base, type })
+    const wrapper = mount(FormTestControl, { props: {field, locale: 'en'} })
+    const input = wrapper.get('input')
+    expect(input.attributes('type')).toBe(type)
+    expect(input.attributes('required')).toBeDefined()
+    await input.setValue(type === 'date' ? '2026-09-29' : type === 'number' ? '12.5' : 'value')
+    expect(field.setValue).toHaveBeenCalled()
+    await wrapper.setProps({ field: { ...field, required: false, disabled: true, error: 'required' } })
+    expect(input.attributes('disabled')).toBeDefined()
+    expect(input.attributes('aria-invalid')).toBe('true')
+    expect(wrapper.get('[role="alert"]').text()).toBe('Enter a response.')
+    await wrapper.setProps({ field: { ...field, error: undefined, hint: '' } })
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('renders available dependent choices and read-only computed answers', async () => {
+    const field = fieldFor({ ...base, type: 'select', options: [{value: 'yes', label: {en:'Yes',fr:'Oui'}}] })
+    const wrapper = mount(FormTestControl, { props: {field,locale:'en'} })
+    await wrapper.get('select').setValue('yes')
+    expect(field.setValue).toHaveBeenCalledWith('yes')
+    wrapper.findComponent(ExtensionSelect).vm.$emit('update:modelValue', undefined)
+    expect(field.setValue).toHaveBeenLastCalledWith('')
+    await wrapper.setProps({ field: fieldFor({ ...base, type: 'computed', sourceIds: ['source'], template: '{{source}}' }, '12') })
+    expect(wrapper.text()).toContain('12')
+    expect(wrapper.find('input').exists()).toBe(false)
+    await wrapper.setProps({ field: fieldFor({ ...base, type: 'computed', sourceIds: ['source'], template: '{{source}}' }) })
+    expect(wrapper.text()).toContain('—')
+    wrapper.unmount()
+  })
+
+  it.each(['list','repeat'] as const)('adds and removes %s entries while honoring the maximum and disabled state', async type => {
+    const field = fieldFor({ ...base, type, maxItems: 1 })
+    const wrapper = mount(FormTestControl, { props: {field,locale:'en'} })
+    await wrapper.findAll('button').at(-1)!.trigger('click')
+    const added = JSON.parse((field.setValue as ReturnType<typeof vi.fn>).mock.calls[0]![0])
+    expect(added).toHaveLength(1)
+    await wrapper.setProps({field:{...field,value:JSON.stringify(added)}})
+    expect(wrapper.findAll('button').at(-1)!.attributes('disabled')).toBeDefined()
+    if (type === 'list') {
+      await wrapper.get('input').setValue('First')
+      expect(JSON.parse((field.setValue as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0])[0].value).toBe('First')
+    }
+    await wrapper.findAll('button')[0]!.trigger('click')
+    expect(field.setValue).toHaveBeenLastCalledWith('[]')
+    await wrapper.setProps({field:{...field,disabled:true,value:JSON.stringify(added)}})
+    expect(wrapper.findAll('button').every(item => item.attributes('disabled') !== undefined)).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('uses table column types, requirements and independent cell values', async () => {
+    const field = fieldFor({ ...base, type:'table', maxRows:1, columns:[
+      {id:'amount',label:{en:'Amount',fr:'Montant'},type:'number',required:true},
+      {id:'date',label:{en:'Date',fr:'Date'},type:'date',required:false},
+      {id:'note',label:{en:'Note',fr:'Note'},type:'text',required:false}
+    ] })
+    const wrapper = mount(FormTestControl, {props:{field,locale:'en'}})
+    await button(wrapper,'Add row').trigger('click')
+    const rows = JSON.parse((field.setValue as ReturnType<typeof vi.fn>).mock.calls[0]![0])
+    await wrapper.setProps({field:{...field,value:JSON.stringify(rows)}})
+    expect(wrapper.findAll('input').map(input => input.attributes('type'))).toEqual(['number','date','text'])
+    expect(wrapper.findAll('input').map(input => input.attributes('required') !== undefined)).toEqual([true,false,false])
+    await wrapper.get('input[type="number"]').setValue('12.5')
+    expect(JSON.parse((field.setValue as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0])[0].cells.amount).toBe('12.5')
+    await button(wrapper,'Remove row').trigger('click')
+    expect(field.setValue).toHaveBeenLastCalledWith('[]')
+    wrapper.unmount()
+  })
+})
+
+describe('business authoring interactions', () => {
+  it('shows readable source labels and an answer format while keeping raw references advanced', async () => {
+    const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
+    await flushPromises()
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('Short answer'))!.trigger('click')
+    await wrapper.get('input[name="questionEn"]').setValue('Project name')
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('Calculated value'))!.trigger('click')
+    const sources = wrapper.get('[aria-labelledby="computed-sources-label"]')
+    expect(sources.text()).toBe('Project name')
+    await sources.get('input[type="checkbox"]').setValue(true)
+    expect(wrapper.get('[data-computed-format]').text()).toBe('Project name')
+    const rawInput = wrapper.get('input[name="computedTemplate"]')
+    expect(rawInput.element.closest('details')?.open).toBe(false)
+    await button(wrapper, 'Add separator /').trigger('click')
+    await button(wrapper, 'Insert reference: Project name').trigger('click')
+    expect(wrapper.get('[data-computed-format]').text()).toBe('Project name / Project name')
+    wrapper.unmount()
+  })
+
+  it('makes route precedence editable without changing the conditions', async () => {
+    const wrapper = mount(FormCreator, { props: {agencyId:'1'} })
+    await flushPromises()
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('Short answer'))!.trigger('click')
+    await button(wrapper,'Add an if rule').trigger('click')
+    await wrapper.get('select[name="conditionOperator0"]').setValue('equals')
+    await wrapper.get('input[name="conditionValue0"]').setValue('first')
+    await button(wrapper,'Add an if rule').trigger('click')
+    expect(wrapper.findAll('button').filter(item => item.text() === 'Move route up')[0]!.attributes('disabled')).toBeDefined()
+    await wrapper.findAll('button').filter(item => item.text() === 'Move route up')[1]!.trigger('click')
+    expect(readFormDraft('1')!.definition.pages[0]!.branches[0]!.when.conditions[0]!.operator).toBe('answered')
+    expect(readFormDraft('1')!.definition.pages[0]!.branches[1]!.when.conditions[0]).toMatchObject({operator:'equals',value:'first'})
+    wrapper.unmount()
+  })
+
+  it('renders ordinary nested sections and preserves list-backed repeat groups', async () => {
+    const definition = surveyV3Schema.parse({schemaVersion:3,title:{en:'Project',fr:'Projet'}, questions:[
+      {id:'items',type:'list',label:{en:'Locations',fr:'Lieux'},required:false,maxItems:3},
+      {id:'name',type:'text',label:{en:'Name',fr:'Nom'},required:false,maxLength:100},
+      {id:'detail',type:'text',label:{en:'Details',fr:'Détails'},required:false,maxLength:100}
+    ],pages:[{id:'page',title:{en:'Project',fr:'Projet'},questionIds:['items'],branches:[],groups:[
+      {id:'overview',title:{en:'Overview',fr:'Aperçu'},description:{en:'Project details',fr:'Détails du projet'},questionIds:['detail'],groups:[
+        {id:'location',title:{en:'Location {{item}}',fr:'Lieu {{item}}'},repeatFor:'items',questionIds:['name'],groups:[]}
+      ]}
+    ]}]})
+    const wrapper = mount(FormTest,{props:{definition,locale:'en'}})
+    expect(wrapper.get('h5').text()).toBe('Overview')
+    await button(wrapper,'Add item').trigger('click')
+    await wrapper.get('input[name^="items-"]').setValue('Ottawa')
+    expect(wrapper.get('h6').text()).toBe('Location Ottawa')
+    expect(wrapper.find('[data-repeat-set]').exists()).toBe(false)
+    expect(wrapper.findAll('input')).toHaveLength(3)
+    wrapper.unmount()
   })
 })
