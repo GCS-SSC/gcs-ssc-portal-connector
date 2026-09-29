@@ -433,7 +433,7 @@ describe('connector form requirements', () => {
     await wrapper.get('input[name="formTitleEn"]').setValue('Title')
     await wrapper.get('input[name="formTitleFr"]').setValue('Titre')
     await button(wrapper, 'Edit').trigger('click')
-    await wrapper.findAll('.designer-type').find(item => item.text().includes(({ text: 'Short answer', list: 'Repeating list', table: 'Table' } as Record<string, string>)[type]!))!.trigger('click')
+    await wrapper.findAll('.designer-type').find(item => item.text().includes(({ text: 'Short answer', list: 'List of items', table: 'Table' } as Record<string, string>)[type]!))!.trigger('click')
     const limit = wrapper.get(`input[name="${name}"]`)
     expect(limit.attributes('required')).toBeDefined()
     await limit.setValue('')
@@ -786,11 +786,57 @@ describe('connector form requirements', () => {
     expect(wrapper.text()).toContain('Rules and dependencies using it were updated')
   })
 
+  it('adds questions directly to repeating sets and nests another repeating set', async () => {
+    const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
+    await flushPromises()
+    await button(wrapper, 'Add repeating set').trigger('click')
+    expect(wrapper.findAll('.designer-outline-item')).toHaveLength(2)
+    expect(wrapper.findAll('.designer-outline-item')[1]!.attributes('aria-current')).toBe('location')
+    expect(wrapper.text()).toContain('ADD A QUESTION TO THIS SET')
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('Short answer'))!.trigger('click')
+    const outer = readFormDraft('1')!.definition
+    const outerSet = outer.pages[0]!.groups[0]!
+    expect(outerSet.questionIds).toHaveLength(1)
+    expect(outer.pages[0]!.questionIds).toContain(outerSet.repeatFor)
+
+    await button(wrapper, 'Add nested repeating set').trigger('click')
+    expect(wrapper.findAll('.designer-outline-item')).toHaveLength(3)
+    expect(wrapper.findAll('.designer-outline-item')[2]!.attributes('aria-current')).toBe('location')
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('Number'))!.trigger('click')
+    const nested = readFormDraft('1')!.definition
+    const nestedSet = nested.pages[0]!.groups[0]!.groups[0]!
+    expect(nestedSet.questionIds).toHaveLength(1)
+    expect(nested.pages[0]!.groups[0]!.questionIds).toContain(nestedSet.repeatFor)
+    const complete = structuredClone(nested)
+    complete.title = { en: 'Repeating sets', fr: 'Séries répétables' }
+    complete.description = { en: 'Instructions', fr: 'Instructions' }
+    const fillDescriptions = (groups: typeof complete.pages[number]['groups']) => {
+      for (const group of groups) {
+        group.description = { en: 'Instructions', fr: 'Instructions' }
+        fillDescriptions(group.groups)
+      }
+    }
+    for (const page of complete.pages) {
+      page.description = { en: 'Instructions', fr: 'Instructions' }
+      fillDescriptions(page.groups)
+    }
+    for (const question of complete.questions) question.hint = { en: 'Help', fr: 'Aide' }
+    const parsed = surveyV3Schema.safeParse(complete)
+    expect(parsed.success, parsed.error?.message).toBe(true)
+    if (!parsed.success) throw parsed.error
+    const resolved = resolveAdvancedSurvey(parsed.data, {
+      [outerSet.repeatFor!]: JSON.stringify([{ id: 'r_outer_1', value: 'First item' }]),
+      [instanceKey(nestedSet.repeatFor!, ['r_outer_1'])]: JSON.stringify([{ id: 'r_nested_1', value: 'Nested item' }])
+    })
+    expect(resolved.pages[0]!.groups[0]!.instanceId).toBe('r_outer_1')
+    expect(resolved.pages[0]!.groups[0]!.groups[0]!.instanceId).toBe('r_nested_1')
+  })
+
   it('adds fields to list items, nests another list, and removes the populated repeat set', async () => {
     const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
     await flushPromises()
     await button(wrapper, 'Edit').trigger('click')
-    await wrapper.findAll('.designer-type').find(item => item.text().includes('Repeating list'))!.trigger('click')
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('List of items'))!.trigger('click')
     const outerListId = readFormDraft('1')!.definition.questions[0]!.id
     await button(wrapper, 'Add fields for each item').trigger('click')
     expect((wrapper.get('select[name="repeatFor"]').element as HTMLSelectElement).value).toBe(outerListId)
@@ -800,7 +846,7 @@ describe('connector form requirements', () => {
     expect(readFormDraft('1')!.definition.questions).toHaveLength(1)
     await wrapper.findAll('.designer-outline-item')[1]!.trigger('click')
     await wrapper.findAll('.designer-type').find(item => item.text().includes('Short answer'))!.trigger('click')
-    await button(wrapper, 'Add nested repeating list').trigger('click')
+    await button(wrapper, 'Add nested repeating set').trigger('click')
     const nestedListId = readFormDraft('1')!.definition.questions.find(item => item.type === 'list' && item.id !== outerListId)!.id
     expect(wrapper.findAll('.designer-outline-item')).toHaveLength(3)
     await wrapper.findAll('.designer-outline-item')[2]!.trigger('click')
@@ -872,10 +918,11 @@ describe('connector form requirements', () => {
     const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
     await flushPromises()
     await button(wrapper, 'Modifier').trigger('click')
-    await wrapper.findAll('.designer-type').find(item => item.text().includes('Liste répétable'))!.trigger('click')
+    expect(button(wrapper, 'Ajouter une série répétable')).toBeDefined()
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('Liste d’éléments'))!.trigger('click')
     expect(button(wrapper, 'Ajouter des champs pour chaque élément')).toBeDefined()
     await button(wrapper, 'Ajouter des champs pour chaque élément').trigger('click')
-    expect(button(wrapper, 'Ajouter une liste répétable imbriquée')).toBeDefined()
+    expect(button(wrapper, 'Ajouter une série répétable imbriquée')).toBeDefined()
     expect(button(wrapper, 'Retirer la section et son contenu')).toBeDefined()
     await wrapper.findAll('.designer-type').find(item => item.text().includes('Réponse courte'))!.trigger('click')
     const confirm = vi.fn().mockReturnValue(false)
@@ -891,7 +938,7 @@ describe('connector form requirements', () => {
     await flushPromises()
     await button(wrapper, 'Edit').trigger('click')
     await button(wrapper, 'Add nested section').trigger('click')
-    await wrapper.findAll('.designer-type').find(item => item.text().includes('Repeating list'))!.trigger('click')
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('List of items'))!.trigger('click')
     const listId = readFormDraft('1')!.definition.questions[0]!.id
     await wrapper.findAll('.designer-outline-item')[0]!.trigger('click')
     await button(wrapper, 'Add nested section').trigger('click')

@@ -108,7 +108,7 @@ const questionTypes = computed(() => [
   { value: 'number', label: tr('Number', 'Nombre'), glyph: '#' },
   { value: 'date', label: tr('Date', 'Date'), glyph: '▦' },
   { value: 'select', label: tr('Choice', 'Choix'), glyph: '◉' },
-  { value: 'list', label: tr('Repeating list', 'Liste répétable'), glyph: '☷' },
+  { value: 'list', label: t('formListQuestionType'), glyph: '☷' },
   { value: 'table', label: tr('Table', 'Tableau'), glyph: '▤' },
   { value: 'computed', label: tr('Calculated value', 'Valeur calculée'), glyph: '∑' }
 ] as const)
@@ -361,15 +361,15 @@ const addFieldsForList = () => {
   if (!target || question?.type !== 'list') return
   addRepeatGroup(target, question.id)
 }
-const addNestedRepeatList = () => {
+const addRepeatingSet = () => {
   const target = selected.value?.item
-  if (!target || selected.value?.kind !== 'group' || !selected.value.repeatFor) return
-  const parentId = selected.value.id
+  if (!target) return
+  const setNumber = nodes.value.filter((node) => node.repeatFor).length + 1
   addQuestion('list')
   const listId = selectedQuestionId.value
+  const list = definition.value.questions.find((question) => question.id === listId)
+  if (list) list.label = { en: `Items in set ${setNumber}`, fr: `Éléments de la série ${setNumber}` }
   addRepeatGroup(target, listId)
-  selectedContainerId.value = parentId
-  selectedQuestionId.value = listId
 }
 const removeQuestionById = (id: string) => {
   if (!id) return
@@ -683,7 +683,7 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
               </div>
               <div class="flex flex-wrap gap-2 pt-2">
                 <ExtensionButton color="neutral" variant="outline" size="sm" :disabled="disabled" @click="addGroup">{{ tr('Add nested section', 'Ajouter une section imbriquée') }}</ExtensionButton>
-                <ExtensionButton v-if="selected.kind === 'group' && selected.repeatFor" color="neutral" variant="outline" size="sm" :disabled="disabled" @click="addNestedRepeatList">{{ t('formAddNestedList') }}</ExtensionButton>
+                <ExtensionButton color="neutral" variant="outline" size="sm" :disabled="disabled" @click="addRepeatingSet">{{ selected.kind === 'page' ? t('formAddRepeatSet') : t('formAddNestedRepeatSet') }}</ExtensionButton>
                 <ExtensionButton color="neutral" variant="ghost" size="sm" :disabled="disabled || (selected.kind === 'page' && definition.pages.length === 1)" @click="removeContainer">
                   {{ selected.kind === 'group' ? t('formRemoveSet') : tr('Remove empty group or page', 'Retirer le groupe ou la page vide') }}
                 </ExtensionButton>
@@ -691,7 +691,8 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
             </div>
             <div class="designer-question-stack">
               <p class="designer-eyebrow">{{ tr('QUESTIONS', 'QUESTIONS') }} · {{ areaQuestions.length }}</p>
-              <p v-if="!areaQuestions.length" class="designer-empty">{{ tr('Start with a question. Select a type below to add it to this page.', 'Commencez par une question. Sélectionnez un type ci-dessous pour l’ajouter à cette page.') }}</p>
+              <p v-if="selected.kind === 'group' && selected.repeatFor" class="text-sm text-muted">{{ t('formRepeatSetHelp') }}</p>
+              <p v-if="!areaQuestions.length" class="designer-empty">{{ selected.kind === 'group' && selected.repeatFor ? t('formEmptyRepeatSet') : tr('Start with a question. Select a type below to add it to this page.', 'Commencez par une question. Sélectionnez un type ci-dessous pour l’ajouter à cette page.') }}</p>
               <ol class="space-y-3">
                 <li v-for="(question, index) in areaQuestions" :key="question.id" class="relative">
                   <button type="button" class="designer-question" :aria-current="selectedQuestionId === question.id ? 'true' : undefined" @click="selectedQuestionId = question.id">
@@ -712,7 +713,7 @@ watch(() => props.agencyId, () => { resetForm(); surveys.value = []; programs.va
                 </li>
               </ol>
               <div class="designer-add">
-                <p class="designer-eyebrow">{{ tr('ADD A QUESTION', 'AJOUTER UNE QUESTION') }}</p>
+                <p class="designer-eyebrow">{{ selected.kind === 'group' && selected.repeatFor ? t('formAddQuestionToSet') : tr('ADD A QUESTION', 'AJOUTER UNE QUESTION') }}</p>
                 <div class="designer-type-grid">
                   <button v-for="type in questionTypes" :key="type.value" type="button" :disabled="disabled" class="designer-type" @click="addQuestion(type.value)"><span aria-hidden="true">{{ type.glyph }}</span>{{ type.label }}</button>
                 </div>
