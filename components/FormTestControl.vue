@@ -20,7 +20,7 @@ const updateTable = (items: TableRow[]) => props.field.setValue(JSON.stringify(i
       <p class="font-medium">{{ field.label }}{{ field.required ? ' *' : '' }}</p>
       <p v-if="field.hint" class="text-sm text-muted">{{ field.hint }}</p>
       <div v-for="(row, index) in rows()" :key="row.id" class="flex items-center gap-2">
-        <span>{{ field.label }} {{ index + 1 }}</span>
+        <span>{{ tr('Entry', 'Entrée') }} {{ index + 1 }}</span>
         <ExtensionButton color="neutral" variant="outline" @click="updateList(rows().filter((item) => item.id !== row.id))">{{ tr('Remove', 'Retirer') }}</ExtensionButton>
       </div>
       <ExtensionButton :disabled="rows().length >= field.question.maxItems" @click="updateList([...rows(), { id: id(), value: '' }])">

@@ -99,8 +99,12 @@ const nodes = computed<Node[]>(() => {
 })
 const selected = computed(() => nodes.value.find((node) => node.id === selectedContainerId.value) ?? nodes.value[0])
 const selectedQuestion = computed(() => definition.value.questions.find((question) => question.id === selectedQuestionId.value))
-const repeatSource = computed(() => selected.value?.kind === 'group' && selected.value.repeatFor
-  ? definition.value.questions.find((question) => question.id === selected.value.repeatFor && question.type === 'repeat') as Extract<AdvancedQuestion, { type: 'repeat' }> | undefined : undefined)
+const repeatSource = computed(() => {
+  const node = selected.value
+  return node?.kind === 'group' && node.repeatFor
+    ? definition.value.questions.find((question) => question.id === node.repeatFor && question.type === 'repeat') as Extract<AdvancedQuestion, { type: 'repeat' }> | undefined
+    : undefined
+})
 const areaQuestions = computed(() => selected.value?.item.questionIds
   .map((id) => definition.value.questions.find((question) => question.id === id))
   .filter((question): question is AdvancedQuestion => question !== undefined && question.type !== 'repeat') ?? [])

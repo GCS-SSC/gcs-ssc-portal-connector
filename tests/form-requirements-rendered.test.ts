@@ -918,7 +918,7 @@ describe('connector form requirements', () => {
     await wrapper.get('select[name="repeatFor"]').setValue(listId)
     await wrapper.findAll('.designer-outline-item')[1]!.trigger('click')
     await button(wrapper, 'Remove section and its contents').trigger('click')
-    expect(wrapper.text()).toContain('Remove the repeating section that uses a list')
+    expect(wrapper.text()).toContain('Remove the repeating set that depends on a field')
     expect(readFormDraft('1')!.definition.pages[0]!.groups).toHaveLength(2)
   })
 
