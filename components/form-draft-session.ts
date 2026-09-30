@@ -1,4 +1,4 @@
-import { surveyV3Schema, type AdvancedSurvey } from '@gcs-ssc/survey'
+import { designerSurveySchema, type AdvancedSurvey } from '@gcs-ssc/survey'
 import { z } from 'zod'
 
 // A draft may be incomplete and fail publication validation, but it must still be safe to render.
@@ -10,10 +10,21 @@ const group: z.ZodType<unknown> = z.lazy(() => z.object({
   id: z.string(), title: bilingual, description: bilingual.optional(), questionIds: z.array(z.string()),
   groups: z.array(group), visibleWhen: condition.optional(), repeatFor: z.string().optional()
 }))
+const draftOption = z.object({ id: z.string(), label: bilingual, gcsId: z.string().optional() })
+const draftSource = z.object({ mode: z.enum(['custom', 'stream']), agencyId: z.string().optional(), streamId: z.string().optional(), capturedAt: z.string().optional() })
+const draftBudget = z.object({ source: draftSource, maxRows: z.number(), currencies: z.array(z.string()),
+  categories: z.array(draftOption), fiscalYears: z.array(draftOption),
+  costItems: z.array(draftOption.extend({ categoryId: z.string(), costSharingRatio: z.number().nullable().optional(), calculation: z.object({
+    mode: z.enum(['manual', 'category', 'all_other']), sourceCategoryId: z.string().nullable(), percentage: z.number().nullable(), allowOverride: z.boolean()
+  }) })), fundingTypes: z.array(draftOption.extend({ stacking: z.boolean(), costSharing: z.boolean() })),
+  fundingSubtypes: z.array(draftOption.extend({ typeId: z.string() })) })
+const draftActivities = z.object({ source: draftSource, maxRows: z.number(), outcomes: z.array(draftOption), responsibleParties: z.array(draftOption),
+  requireOutcomes: z.boolean(), requireResponsibleParties: z.boolean(), bilingual: z.boolean() })
 const questionBase = z.object({ id: z.string(), label: bilingual, hint: bilingual.optional(),
   required: z.boolean(), visibleWhen: condition.optional() })
 const question = z.discriminatedUnion('type', [
   questionBase.extend({ type: z.literal('text'), maxLength: z.number() }),
+  questionBase.extend({ type: z.literal('textarea'), maxLength: z.number() }),
   questionBase.extend({ type: z.literal('email') }),
   questionBase.extend({ type: z.literal('number') }),
   questionBase.extend({ type: z.literal('date') }),
@@ -21,15 +32,18 @@ const question = z.discriminatedUnion('type', [
     dependsOn: z.object({ questionId: z.string(), optionsByValue: z.record(z.string(), z.array(z.object({
       value: z.string(), label: bilingual
     }))) }).optional() }),
+  ...(['checkboxes', 'multiselect'] as const).map(type => questionBase.extend({ type: z.literal(type), options: z.array(z.object({ value: z.string(), label: bilingual })) })),
   questionBase.extend({ type: z.literal('list'), maxItems: z.number() }),
   questionBase.extend({ type: z.literal('repeat'), maxItems: z.number() }),
-  questionBase.extend({ type: z.literal('table'), maxRows: z.number(), columns: z.array(z.object({
+  questionBase.extend({ type: z.literal('table'), totals: z.enum(['none', 'rows', 'columns', 'both']).optional(), maxRows: z.number(), columns: z.array(z.object({
     id: z.string(), label: bilingual, type: z.enum(['text', 'number', 'date']), required: z.boolean()
   })) }),
-  questionBase.extend({ type: z.literal('computed'), template: z.string(), sourceIds: z.array(z.string()) })
+  questionBase.extend({ type: z.literal('computed'), template: z.string(), sourceIds: z.array(z.string()) }),
+  questionBase.extend({ type: z.literal('budget'), config: draftBudget }),
+  questionBase.extend({ type: z.literal('activities'), config: draftActivities })
 ])
 const editableSurvey = z.object({
-  schemaVersion: z.literal(3), title: bilingual, description: bilingual.optional(),
+  schemaVersion: z.union([z.literal(3), z.literal(4)]), title: bilingual, description: bilingual.optional(),
   questions: z.array(question), pages: z.array(z.object({
     id: z.string(), title: bilingual, description: bilingual.optional(), questionIds: z.array(z.string()),
     groups: z.array(group), branches: z.array(z.object({ when: condition, destination: z.discriminatedUnion('kind', [
@@ -92,7 +106,7 @@ export const readFormDraft = (agencyId: string): FormDraftSession | null => {
       || !draftTab.safeParse(record.tab).success || !draftScope.safeParse(record.publicationScope).success) return null
     // Complete saved forms use the authoritative schema. Partially edited drafts use a
     // structural subset that preserves empty fields while rejecting malformed nested data.
-    if (!surveyV3Schema.safeParse(record.definition).success && !editableSurvey.safeParse(record.definition).success) return null
+    if (!designerSurveySchema.safeParse(record.definition).success && !editableSurvey.safeParse(record.definition).success) return null
     return record as FormDraftSession
   } catch { return null }
 }

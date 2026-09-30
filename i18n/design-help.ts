@@ -25,7 +25,7 @@ export const designHelpMessages = {
     designBasicsTitle: 'Build and test a form',
     designBasicsIntro: 'Organize questions into pages, then add interactions after the source questions exist.',
     designBasicsStep1: 'Add pages for separate steps and sections to group related questions. Questions directly on a page appear before its sections.',
-    designBasicsStep2: 'Enter headings, question labels, choices, and help text in English and French. Select a question to edit it in Question settings.',
+    designBasicsStep2: 'Enter headings, question labels, choices, and help text in English and French. Open a question to edit its settings in place.',
     designBasicsStep3: 'Add source questions before questions that use their answers. Sources in a repeating set are available only within that set and its nested sets.',
     designBasicsExample: 'Example: ask for an organization type first, then show questions relevant to that type.',
     designBasicsTest: 'Use Flow to check page routes. In Test, try every route in both languages, including empty answers and changing an earlier answer. Save a revision before publishing.',

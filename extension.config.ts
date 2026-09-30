@@ -75,6 +75,16 @@ export default defineGcsExtension({
   ],
   serverHandlers: [
     {
+      route: '/agencies/[agencyId]/form-options', method: 'get',
+      rbac: { subject: 'agency', action: 'read', agency: { param: 'agencyId' } },
+      path: './server/api/form-options.get.ts'
+    },
+    {
+      route: '/agencies/[agencyId]/form-options/[streamId]', method: 'get',
+      rbac: { subject: 'agency', action: 'read', agency: { param: 'agencyId' } },
+      path: './server/api/form-stream-options.get.ts'
+    },
+    {
       route: '/agencies/[agencyId]/intakes', method: 'get',
       rbac: { subject: 'agency', action: 'read', agency: { param: 'agencyId' } },
       path: './server/api/intakes.get.ts'

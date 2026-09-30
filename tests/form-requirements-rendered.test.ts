@@ -1,3 +1,4 @@
+import { reactive } from 'vue'
 // @vitest-environment jsdom
 import { FetchResponseError, translateGcsExtensionMessage, type GcsExtensionMessages } from '@gcs-ssc/extensions'
 import { instanceKey, resolveAdvancedSurvey, surveyV3Schema } from '@gcs-ssc/survey'
@@ -115,10 +116,10 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
     }),
     useExtensionToast: () => ({ add: state.toastAdd }),
     useExtensionApi: () => ({ get, post, put }), useHostApi: () => ({ get: hostGet, patch: vi.fn() }),
-    ExtensionFormField: field, ExtensionInput: input, ExtensionSelect: select,
+    ExtensionFormField: field, ExtensionInput: input, ExtensionSelect: select, ExtensionSelectMenu: select,
     ExtensionCheckbox: checkbox, ExtensionButton: button, ExtensionSaveButton: button,
     ExtensionIcon: defineComponent({ setup() { return () => h('span') } }),
-    ExtensionTextarea: textarea, ExtensionModal: modal, ExtensionResourceLayoutCard: resourceTable,
+    ExtensionTable: resourceTable, ExtensionTextarea: textarea, ExtensionModal: modal, ExtensionResourceLayoutCard: resourceTable,
     ExtensionAssessmentSchemaPageSection: pageSection, ExtensionAssessmentSchemaAccordionSection: accordionSection,
     ExtensionEntityEditorWorkspace: workspace, ExtensionEntityHero: hero, ExtensionRouteTabs: routeTabs,
     ExtensionBadge: defineComponent({ setup(_, { slots }) { return () => h('span', slots.default?.()) } }),
@@ -128,6 +129,7 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
   }
 })
 
+import FormChoiceEditor from '../components/FormChoiceEditor.vue'
 import FormCreator from '../components/FormCreator.vue'
 import FormLibrary from '../components/FormLibrary.vue'
 import IntakeWorkspace from '../components/IntakeWorkspace.vue'
@@ -898,8 +900,10 @@ describe('connector form requirements', () => {
     const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
     await flushPromises()
     await button(wrapper, 'Edit').trigger('click')
-    await wrapper.findAll('.designer-type').find(item => item.text().includes('Choice'))!.trigger('click')
-    await wrapper.get('input[name="choiceEn0"]').setValue('Yes')
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('Dropdown'))!.trigger('click')
+    await wrapper.findAll('button').find(item => item.attributes('aria-label')?.startsWith('Edit choice:'))!.trigger('click')
+    await wrapper.get('input[name="choiceEn"]').setValue('Yes')
+    await button(wrapper, 'Save choice').trigger('click')
     await wrapper.get('.designer-outline-add').trigger('click')
     await button(wrapper, 'Add an if rule').trigger('click')
     await button(wrapper, 'Flow').trigger('click')
@@ -944,14 +948,15 @@ describe('connector form requirements', () => {
     const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
     await flushPromises()
     await button(wrapper, 'Edit').trigger('click')
-    const choice = () => wrapper.findAll('.designer-type').find(item => item.text().includes('Choice'))!
+    const choice = () => wrapper.findAll('.designer-type').find(item => item.text().includes('Dropdown'))!
     await choice().trigger('click')
     await choice().trigger('click')
     const sourceId = wrapper.get('select[name="choiceDependency"]').findAll('option')[1]!.attributes('value')!
     await wrapper.get('select[name="choiceDependency"]').setValue(sourceId)
     expect(button(wrapper, 'Move up').attributes('disabled')).toBeDefined()
     await wrapper.findAll('.designer-question')[0]!.trigger('click')
-    await button(wrapper, 'Remove question').trigger('click')
+    await button(wrapper, 'Delete question').trigger('click')
+    await wrapper.get('[role=dialog]').findAll('button').find(item => item.text() === 'Delete question')!.trigger('click')
     await wrapper.get('.designer-question').trigger('click')
     expect((wrapper.get('select[name="choiceDependency"]').element as HTMLSelectElement).value).toBe('none')
     expect(wrapper.text()).toContain('Rules and dependencies using it were updated')
@@ -1051,8 +1056,13 @@ describe('connector form requirements', () => {
     await flushPromises()
     await button(wrapper, 'Edit').trigger('click')
     await wrapper.findAll('.designer-type').find(item => item.text().includes('Short answer'))!.trigger('click')
-    expect(wrapper.get('button[aria-label="Remove field: New question"]').attributes('aria-label')).toBe('Remove field: New question')
-    await wrapper.get('button[aria-label="Remove field: New question"]').trigger('click')
+    expect(wrapper.find('button[aria-label="Remove field: New question"]').exists()).toBe(false)
+    await button(wrapper, 'Delete question').trigger('click')
+    expect(wrapper.findAll('.designer-question')).toHaveLength(1)
+    await wrapper.get('[role=dialog]').findAll('button').find(item => item.text() === 'Cancel')!.trigger('click')
+    expect(wrapper.findAll('.designer-question')).toHaveLength(1)
+    await button(wrapper, 'Delete question').trigger('click')
+    await wrapper.get('[role=dialog]').findAll('button').find(item => item.text() === 'Delete question')!.trigger('click')
     expect(wrapper.findAll('.designer-question')).toHaveLength(0)
     expect(readFormDraft('1')).toBeNull()
   })
@@ -1106,7 +1116,8 @@ describe('connector form requirements', () => {
     await sources.findAll('input[type="checkbox"]')[0]!.setValue(true)
     await sources.findAll('input[type="checkbox"]')[1]!.setValue(true)
     await wrapper.findAll('.designer-question')[0]!.trigger('click')
-    await button(wrapper, 'Remove question').trigger('click')
+    await button(wrapper, 'Delete question').trigger('click')
+    await wrapper.get('[role=dialog]').findAll('button').find(item => item.text() === 'Delete question')!.trigger('click')
     await wrapper.findAll('.designer-question')[1]!.trigger('click')
     expect((wrapper.get('input[name="computedTemplate"]').element as HTMLInputElement).value).toBe(`{{${secondId}}}`)
   })
@@ -1571,5 +1582,277 @@ describe('business authoring interactions', () => {
     expect(wrapper.find('[data-repeat-set]').exists()).toBe(false)
     expect(wrapper.findAll('input')).toHaveLength(3)
     wrapper.unmount()
+  })
+})
+
+import FormGrantElement from '../components/FormGrantElement.vue'
+import FormGrantDesigner from '../components/FormGrantDesigner.vue'
+import { budgetConfig, activityConfig, budgetEntry, activityEntry, grantForm } from './fixtures/grant-forms'
+import { readBudgetAnswer, readActivityAnswer, validateAnswers, designerSurveySchema } from '@gcs-ssc/survey'
+import type { AdvancedQuestion } from '@gcs-ssc/survey'
+
+describe('structured budget and activity controls', () => {
+  const grantField = (type: 'budget' | 'activities', value = ''): SurveyField => ({
+    id: type, question: grantForm().questions.find(question => question.type === type)!, label: type,
+    hint: '', required: true, disabled: false, value, error: undefined, options: [], setValue: vi.fn()
+  })
+  const render = (field: SurveyField) => {
+    const wrapper = mount(FormGrantElement, { props: { field, locale: 'en' } })
+    field.setValue = (value: string) => { field.value = value; void wrapper.setProps({ field: { ...field } }) }
+    return wrapper
+  }
+  it('adds budget rows with native required controls and readable choices; removing preserves sibling data', async () => {
+    const field = grantField('budget', JSON.stringify({ version: 1, rows: [budgetEntry('r_one'), budgetEntry('r_two')] }))
+    const wrapper = render(field)
+    const name = 'budget-r_one-totalCost'
+    expect(wrapper.get(`input[name="${name}"]`).attributes('required')).toBeDefined()
+    expect(wrapper.text()).toContain('Staff / Salaries')
+    await wrapper.findAll('button').find(button => button.text() === 'Remove entry')!.trigger('click')
+    await flushPromises()
+    expect(readBudgetAnswer(field.value)!.rows.map(row => row.id)).toEqual(['r_two'])
+    expect(readBudgetAnswer(field.value)!.rows[0]!.programFunding).toBe('1000.00')
+    wrapper.unmount()
+  })
+  it('calculates funding, updates exact summary, and retains independent other-source rows', async () => {
+    const field = grantField('budget', JSON.stringify({ version: 1, rows: [budgetEntry()] }))
+    const wrapper = render(field)
+    await wrapper.findAll('button').find(button => button.text() === 'Add a funding source')!.trigger('click')
+    await flushPromises()
+    const source = readBudgetAnswer(field.value)!.rows[0]!.otherFunding[0]!
+    await wrapper.get(`select[name="budget-${source.id}-subtypeId"]`).setValue('province')
+    await wrapper.get(`input[name="budget-${source.id}-amount"]`).setValue('500.00')
+    await flushPromises()
+    expect(wrapper.text()).toContain('1500.00')
+    expect(wrapper.text()).toContain('Other funding included in stacking')
+    expect(readBudgetAnswer(field.value)!.rows[0]!.otherFunding[0]!.amount).toBe('500.00')
+    await wrapper.findAll('button').find(button => button.text() === 'Add a cost')!.trigger('click')
+    await flushPromises()
+    const charge = readBudgetAnswer(field.value)!.rows[1]!
+    await wrapper.get(`select[name="budget-${charge.id}-costItemId"]`).setValue('admin')
+    await flushPromises()
+    expect(readBudgetAnswer(field.value)!.rows[1]!.programFunding).toBe('100.00')
+    expect(wrapper.get(`input[name="budget-${charge.id}-programFunding"]`).attributes('readonly')).toBeDefined()
+    wrapper.unmount()
+  })
+  it('renders field-local money and coverage errors, and switches preview language', async () => {
+    const input = budgetEntry(); input.programFunding = '1600'
+    const field = grantField('budget', JSON.stringify({ version: 1, rows: [input] })); field.error = 'choice'
+    const wrapper = render(field)
+    expect(wrapper.text()).toContain('exceeds total cost')
+    await wrapper.setProps({ locale: 'fr' })
+    expect(wrapper.text()).toContain('dépassent le coût total')
+    expect(wrapper.text()).toContain('(obligatoire)')
+    expect(wrapper.text()).not.toContain('(required)')
+    wrapper.unmount()
+  })
+  it('does not require every checkbox in an activity selection group and retains bilingual answers', async () => {
+    const field = grantField('activities', JSON.stringify({ version: 1, rows: [activityEntry()] }))
+    const wrapper = render(field)
+    expect(wrapper.get('input[type="checkbox"]').attributes('required')).toBeUndefined()
+    expect(wrapper.text()).toContain('Select at least one')
+    await wrapper.get('input[name="activities-r_activity-name-en"]').setValue('New title')
+    await flushPromises()
+    expect(readActivityAnswer(field.value)!.rows[0]!.name.en).toBe('New title')
+    await wrapper.setProps({ locale: 'fr' })
+    expect(wrapper.get('input[name="activities-r_activity-name-fr"]').attributes('required')).toBeUndefined()
+    expect(wrapper.text()).toContain('Résultats')
+    wrapper.unmount()
+  })
+  it('respects disabled state and row limits, with every action inside the form remaining a button', async () => {
+    const field = grantField('budget', JSON.stringify({ version: 1, rows: [budgetEntry()] })); field.disabled = true
+    const wrapper = render(field)
+    expect(wrapper.findAll('button').every(button => button.attributes('disabled') !== undefined)).toBe(true)
+    expect(wrapper.findAll('button').every(button => button.attributes('type') === 'button')).toBe(true)
+    expect(wrapper.findAll('input').every(input => input.attributes('disabled') !== undefined)).toBe(true)
+    wrapper.unmount()
+  })
+  it('validates v4 forms in Test and local draft storage without changing v3 archives', async () => {
+    const definition = grantForm()
+    expect(designerSurveySchema.safeParse(definition).success).toBe(true)
+    expect(validateAnswers(definition, { budget: JSON.stringify({ version: 1, rows: [budgetEntry()] }),
+      activities: JSON.stringify({ version: 1, rows: [activityEntry()] }) })).toEqual({})
+  })
+  it('loads and synchronizes stream snapshots while preserving activity choices and settings', async () => {
+    const question = grantForm().questions.find(question => question.type === 'activities')! as Extract<AdvancedQuestion, { type: 'activities' }>
+    get.mockImplementation(async (url: string) => url.endsWith('/form-options')
+      ? { streams: [{ id: '10', label: { en: 'Delivery stream', fr: 'Volet de prestation' } }] }
+      : { budget: budgetConfig(), activities: { ...activityConfig(), source: { mode: 'stream', agencyId: '1', streamId: '10', capturedAt: '2028-01-01T00:00:00.000Z' }, outcomes: [{ id: 'new_outcome', label: { en: 'New outcome', fr: 'Nouveau résultat' }, gcsId: '100' }] } })
+    const wrapper = mount(FormGrantDesigner, { props: { agencyId: '1', question, disabled: false, streamId: '10' } })
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Copy current stream settings')!.trigger('click')
+    await flushPromises()
+    const config = wrapper.emitted('configure')![0]![0] as ReturnType<typeof activityConfig>
+    expect(config.outcomes[0]!.gcsId).toBe('100')
+    expect(config.responsibleParties).toEqual(question.config.responsibleParties)
+    expect(config.bilingual).toBe(false)
+    expect(question.config.outcomes[0]!.id).toBe('training')
+    wrapper.unmount()
+  })
+})
+
+describe('stream synchronization lifecycle', () => {
+  it('ignores a snapshot that arrives after the selected inspector unmounts', async () => {
+    let finish!: (value: unknown) => void
+    get.mockImplementation((url: string) => url.endsWith('/form-options') ? Promise.resolve({ streams: [] })
+      : new Promise(resolve => { finish = resolve }))
+    const question = grantForm().questions.find(question => question.type === 'budget')!
+    const wrapper = mount(FormGrantDesigner, { props: { agencyId: '1', question, disabled: false, streamId: '10' } })
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Copy current stream settings')!.trigger('click')
+    wrapper.unmount()
+    finish({ budget: budgetConfig(), activities: activityConfig() })
+    await flushPromises()
+    expect(wrapper.emitted('configure')).toBeUndefined()
+  })
+})
+
+describe('inline question authoring', () => {
+  it('keeps settings inside the selected question disclosure and adds a long-answer textarea', async () => {
+    const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
+    await flushPromises()
+    await button(wrapper, 'Edit').trigger('click')
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('Long answer'))!.trigger('click')
+    const question = wrapper.get('.designer-question')
+    expect(question.find('input[name="questionEn"]').exists()).toBe(true)
+    expect(wrapper.findAll('h2').map(heading => heading.text())).not.toContain('Question settings')
+    expect(question.text()).toContain('Delete question')
+    await question.get('input[name="questionEn"]').setValue('Project rationale')
+    await question.get('input[name="maxLength"]').setValue('2000')
+    await button(wrapper, 'Test').trigger('click')
+    const control = wrapper.get('textarea')
+    expect(control.attributes('rows')).toBe('5')
+    expect(control.attributes('maxlength')).toBe('2000')
+    wrapper.unmount()
+  })
+})
+
+describe('choice and table authoring', () => {
+  it('offers dropdowns, checkboxes and multi select with options edited in place', async () => {
+    const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
+    await flushPromises(); await button(wrapper, 'Edit').trigger('click')
+    for (const type of ['Dropdown', 'Checkboxes', 'Multi select']) {
+      await wrapper.findAll('.designer-type').find(item => item.text().includes(type))!.trigger('click')
+      expect(wrapper.findComponent({ name: 'FormChoiceEditor' }).exists()).toBe(true)
+      await wrapper.findAll('button').find(item => item.attributes('aria-label')?.startsWith('Edit choice:'))!.trigger('click')
+      await wrapper.get('input[name="choiceEn"]').setValue('Option')
+      await button(wrapper, 'Save choice').trigger('click')
+      await button(wrapper, 'Add choice').trigger('click')
+      await wrapper.get('input[name="choiceEn"]').setValue('Another option')
+      await wrapper.get('input[name="choiceFr"]').setValue('Autre choix')
+      await button(wrapper, 'Save choice').trigger('click')
+      expect(wrapper.findComponent({ name: 'FormChoiceEditor' }).props('options')).toHaveLength(2)
+      expect(wrapper.find('select[name="choiceDependency"]').exists()).toBe(type === 'Dropdown')
+    }
+    await wrapper.findAll('.designer-type').find(item => item.text().includes('Table'))!.trigger('click')
+    expect(wrapper.get('select[name="tableTotals"]').element.value).toBe('none')
+    await wrapper.get('select[name="tableTotals"]').setValue('both')
+    await wrapper.get('select[name="columnType0"]').setValue('number')
+    await button(wrapper, 'Test').trigger('click')
+    await wrapper.findAll('button').find(item => item.text() === 'Add row')!.trigger('click')
+    await wrapper.findAll('input[type="number"]').at(-1)!.setValue('0.3')
+    expect(wrapper.findAll('output').map(item => item.text())).toEqual(['0.3', '0.3'])
+    wrapper.unmount()
+  })
+  it('marks the checkbox group without requiring each option and preserves stable IDs', async () => {
+    const question = { id: 'choices', type: 'checkboxes' as const, label: { en: 'Service areas', fr: 'Domaines' }, required: true, options: [{ value: 'a', label: { en: 'Training', fr: 'Formation' } }, { value: 'b', label: { en: 'Research', fr: 'Recherche' } }] }
+    const field = reactive({ question, id: 'choices', label: 'Service areas', hint: '', required: true, disabled: false, value: '[]', error: 'required' as const, options: question.options.map(option => ({ value: option.value, label: option.label.en })), setValue(value: string) { this.value = value } })
+    const wrapper = mount(FormTestControl, { props: { field, locale: 'en' } })
+    expect(wrapper.get('legend').text()).toContain('(required)')
+    expect(wrapper.findAll('input[type="checkbox"]').every(input => input.attributes('required') === undefined)).toBe(true)
+    expect(wrapper.get('input[type="checkbox"]').attributes('aria-describedby')).toContain('choices-error')
+    await wrapper.get('input[type="checkbox"]').setValue(true)
+    expect(field.value).toBe('["a"]')
+    await wrapper.setProps({ locale: 'fr' })
+    expect(wrapper.get('legend').text()).toContain('(obligatoire)')
+    wrapper.unmount()
+  })
+})
+
+describe('custom grant catalogs', () => {
+  it('protects referenced choices and initializes complete custom calculation and funding settings', async () => {
+    get.mockResolvedValue({ streams: [] })
+    const question = reactive(grantForm().questions.find(question => question.type === 'budget')!) as Extract<AdvancedQuestion, { type: 'budget' }>
+    const wrapper = mount(FormGrantDesigner, { props: { agencyId: '1', question, disabled: false, streamId: '10' } }); await flushPromises()
+    const catalogs = () => wrapper.findAllComponents({ name: 'GrantOptionEditor' })
+    expect(catalogs()).toHaveLength(5)
+    catalogs()[0]!.vm.$emit('remove', question.config.categories[0]!.id); await flushPromises()
+    expect(question.config.categories).toHaveLength(2); expect(wrapper.find('[role="alert"]').exists()).toBe(true)
+    catalogs()[3]!.vm.$emit('remove', question.config.fundingTypes[0]!.id); await flushPromises()
+    expect(question.config.fundingTypes).toHaveLength(1)
+    for (const catalog of catalogs()) { catalog.vm.$emit('add'); await flushPromises() }
+    expect(question.config.categories).toHaveLength(3); expect(question.config.fiscalYears).toHaveLength(2)
+    const added = question.config.costItems.at(-1)!
+    expect(added.calculation.mode).toBe('manual')
+    await wrapper.get(`select[name="budget-${added.id}-category"]`).setValue(question.config.categories[1]!.id)
+    await wrapper.get(`select[name="budget-${added.id}-mode"]`).setValue('category')
+    expect(added.calculation.sourceCategoryId).toBe(question.config.categories[0]!.id)
+    await wrapper.get(`input[name="budget-${added.id}-ratio"]`).setValue('-20.5')
+    expect(added.costSharingRatio).toBe(-20.5)
+    await wrapper.get(`input[name="budget-${added.id}-ratio"]`).setValue(''); expect(added.costSharingRatio).toBeNull()
+    await wrapper.get(`input[name="budget-${added.id}-percentage"]`).setValue('12.5'); expect(added.calculation.percentage).toBe(12.5)
+    await wrapper.get(`input[name="budget-${added.id}-percentage"]`).setValue(''); expect(added.calculation.percentage).toBeNull()
+    await wrapper.get(`select[name="budget-${added.id}-source"]`).setValue(question.config.categories[0]!.id)
+    await wrapper.get(`select[name="budget-${added.id}-mode"]`).setValue('all_other'); expect(added.calculation.sourceCategoryId).toBeNull()
+    await wrapper.get(`select[name="budget-${added.id}-mode"]`).setValue('manual'); expect(added.calculation.percentage).toBeNull()
+    const source = question.config.fundingSubtypes.at(-1)!, fundingType = question.config.fundingTypes.at(-1)!
+    await wrapper.get(`select[name="budget-${source.id}-type"]`).setValue(fundingType.id); expect(source.typeId).toBe(fundingType.id)
+    catalogs()[4]!.vm.$emit('remove', source.id); catalogs()[3]!.vm.$emit('remove', fundingType.id); catalogs()[2]!.vm.$emit('remove', added.id); await flushPromises()
+    expect(question.config.costItems).toHaveLength(2)
+    const year = question.config.fiscalYears.at(-1)!.id; catalogs()[1]!.vm.$emit('remove', year); await flushPromises(); expect(question.config.fiscalYears).toHaveLength(1)
+    const category = question.config.categories.at(-1)!.id; catalogs()[0]!.vm.$emit('remove', category); await flushPromises(); expect(question.config.categories).toHaveLength(2)
+    await wrapper.get('input[name="budget-maxRows"]').setValue('10'); expect(question.config.maxRows).toBe(10)
+    await wrapper.setProps({ disabled: true }); catalogs()[0]!.vm.$emit('add'); await flushPromises(); expect(question.config.categories).toHaveLength(2)
+    wrapper.unmount()
+  })
+  it('keeps stream catalogs locked until customized and reports failed synchronization', async () => {
+    const question = reactive(grantForm().questions.find(question => question.type === 'activities')!) as Extract<AdvancedQuestion, { type: 'activities' }>
+    question.config.source = { mode: 'stream', agencyId: '1', streamId: '10', capturedAt: '2028-01-01T00:00:00.000Z' }
+    get.mockRejectedValue(new Error('offline'))
+    const wrapper = mount(FormGrantDesigner, { props: { agencyId: '1', question, disabled: false, streamId: '10' } }); await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('Could not')
+    const catalog = wrapper.findAllComponents({ name: 'GrantOptionEditor' })[0]!
+    catalog.vm.$emit('add'); await flushPromises(); expect(question.config.outcomes).toHaveLength(1)
+    await wrapper.findAll('button').find(button => button.text().toLowerCase().includes('custom'))!.trigger('click'); await flushPromises()
+    catalog.vm.$emit('add'); await flushPromises(); expect(question.config.outcomes).toHaveLength(2)
+    catalog.vm.$emit('remove', question.config.outcomes.at(-1)!.id); await flushPromises(); expect(question.config.outcomes).toHaveLength(1)
+    await wrapper.findAll('button').find(button => button.text() === 'Copy current stream settings')!.trigger('click'); await flushPromises()
+    expect(wrapper.get('[role="alert"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+})
+
+describe('choice table dialogs', () => {
+  it('stages bilingual edits, preserves IDs and leaves cancellation unchanged', async () => {
+    const options = [{ value: 'training', label: { en: 'Training', fr: 'Formation' } }, { value: 'research', label: { en: 'Research', fr: 'Recherche' } }]
+    const wrapper = mount(FormChoiceEditor, { props: { options, disabled: false, questionId: 'question' } })
+    await wrapper.get('button[aria-label="Edit choice: Training"]').trigger('click')
+    expect(wrapper.get('input[name="choiceEn"]').attributes('required')).toBeDefined()
+    expect(wrapper.get('input[name="choiceFr"]').attributes('required')).toBeDefined()
+    await wrapper.get('input[name="choiceEn"]').setValue('Updated')
+    await button(wrapper, 'Cancel').trigger('click'); expect(options[0]!.label.en).toBe('Training'); expect(wrapper.emitted('update:options')).toBeUndefined()
+    await wrapper.get('button[aria-label="Edit choice: Training"]').trigger('click'); await wrapper.get('input[name="choiceEn"]').setValue('Updated')
+    await button(wrapper, 'Save choice').trigger('click')
+    expect(wrapper.emitted('update:options')![0]![0]).toEqual([{ value: 'training', label: { en: 'Updated', fr: 'Formation' } }, options[1]])
+    await button(wrapper, 'Add choice').trigger('click'); expect(button(wrapper, 'Save choice').attributes('disabled')).toBeDefined()
+    await wrapper.get('input[name="choiceEn"]').setValue('New'); expect(button(wrapper, 'Save choice').attributes('disabled')).toBeDefined()
+    await wrapper.get('input[name="choiceFr"]').setValue('Nouveau'); await button(wrapper, 'Save choice').trigger('click')
+    expect((wrapper.emitted('update:options')![1]![0] as typeof options)).toHaveLength(3)
+    wrapper.unmount()
+  })
+  it('confirms removal and closes staged dialogs when the selected question changes', async () => {
+    const options = [{ value: 'a', label: { en: 'First', fr: 'Premier' } }, { value: 'b', label: { en: 'Second', fr: 'Deuxième' } }]
+    const wrapper = mount(FormChoiceEditor, { props: { options, disabled: false, questionId: 'question' } })
+    await wrapper.get('button[aria-label="Delete choice: First"]').trigger('click')
+    expect(wrapper.get('[role="dialog"]').text()).toContain('dependent mappings')
+    await button(wrapper, 'Cancel').trigger('click'); expect(wrapper.emitted('update:options')).toBeUndefined()
+    await wrapper.get('button[aria-label="Delete choice: First"]').trigger('click'); await button(wrapper, 'Delete choice').trigger('click')
+    expect(wrapper.emitted('update:options')![0]![0]).toEqual([options[1]])
+    await button(wrapper, 'Add choice').trigger('click'); await wrapper.setProps({ questionId: 'other' }); expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    wrapper.unmount()
+    state.locale = 'fr'
+    const french = mount(FormChoiceEditor, { props: { options, disabled: false, questionId: 'french' } })
+    await button(french, 'Ajouter un choix').trigger('click'); expect(french.get('[role="dialog"]').text()).toContain('Anglais'); expect(french.get('[role="dialog"]').text()).toContain('Français')
+    await french.setProps({ disabled: true }); expect(button(french, 'Enregistrer le choix').attributes('disabled')).toBeDefined()
+    french.unmount()
   })
 })

@@ -1,5 +1,5 @@
 import { sql } from 'kysely'
-import { surveyV3Schema } from '@gcs-ssc/survey'
+import { designerSurveySchema } from '@gcs-ssc/survey'
 import { readPortalCredentialFromDb } from './connection.ts'
 import { asConnectorDb, type ConnectorDb } from './db.ts'
 import { enabledPortalAgency } from './enablement.ts'
@@ -22,7 +22,7 @@ const connectionFor = async (db: ConnectorDb, agencyId: string): Promise<PortalC
 const deliverForm = async (db: ConnectorDb, operation: Operation, connection: PortalConnection) => {
   const form = await db.selectFrom('extensions.gcs_portal_form').selectAll()
     .where('agency_id', '=', operation.agency_id).where('id', '=', operation.form_id!).executeTakeFirstOrThrow()
-  const definition = surveyV3Schema.parse(form.definition)
+  const definition = designerSurveySchema.parse(form.definition)
   const client = createPortalClient(connection)
   const survey = form.portal_id
     ? form.revision > (form.portal_revision ?? 0)

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { randomBytes } from 'node:crypto'
-import { surveyV3Schema, upgradeToAdvancedSurvey } from '@gcs-ssc/survey'
+import { designerSurveySchema, upgradeToAdvancedSurvey } from '@gcs-ssc/survey'
 import type { GcsExtensionRouteContext } from '@gcs-ssc/extensions/server'
 import { agencyIdFromContext, authorizedWrite } from './authorization.ts'
 import { asConnectorDb } from './db.ts'
@@ -25,7 +25,7 @@ const input = z.discriminatedUnion('action', [
   z.object({ action: z.literal('createDraft'), title: draftTitle, introduction: draftIntroduction.optional() }).strict(),
   z.object({ action: z.literal('save'), surveyId: formCode.optional(), expectedRevision: z.number().int().nonnegative().optional(),
     intakeId: portalCode.optional(),
-    definition: surveyV3Schema }).strict(),
+    definition: designerSurveySchema }).strict(),
   z.object({ action: z.literal('attachIntakeForm'), intakeId: portalCode, surveyId: formCode,
     revision: z.number().int().positive() }).strict(),
   z.object({ action: z.literal('publishAgreement'), surveyId: formCode, revision: z.number().int().positive(),
@@ -114,7 +114,7 @@ export const listForms = async (context: GcsExtensionRouteContext) => {
     .where('agency_id', '=', agencyId).execute()
   const localSurveys = local.map(form => ({ id: form.id, revision: form.revision,
     title: form.revision === 0 ? z.object({ title: draftTitle }).parse(form.definition).title
-      : surveyV3Schema.parse(form.definition).title, updatedAt: new Date(form.updated_at).toISOString(),
+      : designerSurveySchema.parse(form.definition).title, updatedAt: new Date(form.updated_at).toISOString(),
     synced: Boolean(form.portal_id && form.portal_revision === form.revision) }))
   type Client = Awaited<ReturnType<typeof clientForAgency>>['client']
   let remote: Awaited<ReturnType<Client['surveys']>> | null = null

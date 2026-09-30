@@ -30,6 +30,9 @@ export const formPublicationIssues = (survey: AdvancedSurvey): string[] => {
   for (const question of survey.questions) {
     if (!complete(question.label)) issues.push('Question label')
     if (!completeIfProvided(question.hint)) issues.push('Question help text')
+    if (question.type === 'budget' && (!question.config.costItems.length || !question.config.fiscalYears.length)) issues.push('Budget cost items and fiscal years')
+    if (question.type === 'activities' && ((question.config.requireOutcomes && !question.config.outcomes.length)
+      || (question.config.requireResponsibleParties && !question.config.responsibleParties.length))) issues.push('Activity selection options')
     if (question.type === 'select') {
       for (const option of question.options) if (!complete(option.label)) issues.push('Choice label')
     } else if (question.type === 'table') {

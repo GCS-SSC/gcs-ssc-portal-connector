@@ -1,9 +1,28 @@
-import { previewMessages } from './preview'
-import { designHelpMessages } from './design-help'
+import { grantMessages } from './grants.ts'
+import { previewMessages } from './preview.ts'
+import { designHelpMessages } from './design-help.ts'
 import { defineGcsExtensionMessages } from '@gcs-ssc/extensions'
 
 export const messages = defineGcsExtensionMessages({
   en: {
+    formChoiceEnglish: 'English',
+    formChoiceFrench: 'French',
+    formChoiceActions: 'Actions',
+    formChoiceAdd: 'Add choice',
+    formChoiceEdit: 'Edit choice',
+    formChoiceDelete: 'Delete choice',
+    formChoiceSave: 'Save choice',
+    formChoiceDeleteConfirm: 'Delete “{choice}”? This also removes dependent mappings and rules referring to this choice.',
+    formQuestionPosition: 'Position and limits',
+    formQuestionHelp: 'Help text',
+    formQuestionChoices: 'Choices',
+    formQuestionDependencies: 'Dependencies',
+    formQuestionVisibility: 'Show or hide',
+    formQuestionTable: 'Table settings',
+    formTableColumnTitle: 'Column {number}',
+    formQuestionCalculation: 'Calculation',
+    formQuestionGrant: 'Grant settings',
+    ...grantMessages.en,
     ...designHelpMessages.en,
     ...previewMessages.en,
     successNotice: 'Success',
@@ -19,6 +38,8 @@ export const messages = defineGcsExtensionMessages({
     formDetailsCreateAction: 'Create form', formDetailsCreated: 'Form created. Add questions to save a Portal revision.',
     formDetailsCreateFailed: 'The form could not be created. Try again.',
     formDetailsHelp: 'Enter the form name and introduction in both languages. Add questions and save a revision in the designer.',
+    formLongAnswer: 'Long answer', formDeleteQuestion: 'Delete question', formDeleteQuestionTitle: 'Delete this question?',
+    formDeleteQuestionConfirm: 'Delete “{question}”? Its visibility rules and dependencies will also be updated. This change takes effect when you save the form.',
     formDetailsEdit: 'Edit details', formDetailsCancel: 'Cancel',
     formDetailsContinue: 'Continue to designer', formDetailsApply: 'Apply details',
     formTitleEnglish: 'Form name · English', formTitleFrench: 'Form name · French',
@@ -181,6 +202,24 @@ export const messages = defineGcsExtensionMessages({
     queuedState: 'Queued', sendingState: 'Sending', deliveredState: 'Delivered', cancelledState: 'Cancelled'
   },
   fr: {
+    formChoiceEnglish: 'Anglais',
+    formChoiceFrench: 'Français',
+    formChoiceActions: 'Actions',
+    formChoiceAdd: 'Ajouter un choix',
+    formChoiceEdit: 'Modifier le choix',
+    formChoiceDelete: 'Supprimer le choix',
+    formChoiceSave: 'Enregistrer le choix',
+    formChoiceDeleteConfirm: 'Supprimer « {choice} »? Les correspondances et règles dépendantes qui utilisent ce choix seront aussi retirées.',
+    formQuestionPosition: 'Position et limites',
+    formQuestionHelp: 'Texte d’aide',
+    formQuestionChoices: 'Choix',
+    formQuestionDependencies: 'Dépendances',
+    formQuestionVisibility: 'Afficher ou masquer',
+    formQuestionTable: 'Paramètres du tableau',
+    formTableColumnTitle: 'Colonne {number}',
+    formQuestionCalculation: 'Calcul',
+    formQuestionGrant: 'Paramètres de financement',
+    ...grantMessages.fr,
     ...designHelpMessages.fr,
     ...previewMessages.fr,
     successNotice: 'Succès',
@@ -196,6 +235,8 @@ export const messages = defineGcsExtensionMessages({
     formDetailsCreateAction: 'Créer le formulaire', formDetailsCreated: 'Formulaire créé. Ajoutez des questions pour enregistrer une version destinée au portail.',
     formDetailsCreateFailed: 'Impossible de créer le formulaire. Réessayez.',
     formDetailsHelp: 'Saisissez le nom et l’introduction du formulaire dans les deux langues. Ajoutez des questions et enregistrez une version dans le concepteur.',
+    formLongAnswer: 'Réponse longue', formDeleteQuestion: 'Supprimer la question', formDeleteQuestionTitle: 'Supprimer cette question?',
+    formDeleteQuestionConfirm: 'Supprimer « {question} »? Ses règles de visibilité et dépendances seront aussi mises à jour. Ce changement prend effet à l’enregistrement du formulaire.',
     formDetailsEdit: 'Modifier les détails', formDetailsCancel: 'Annuler',
     formDetailsContinue: 'Continuer vers le concepteur', formDetailsApply: 'Appliquer les détails',
     formTitleEnglish: 'Nom du formulaire · anglais', formTitleFrench: 'Nom du formulaire · français',

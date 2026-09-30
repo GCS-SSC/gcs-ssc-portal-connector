@@ -4,7 +4,7 @@ import { authorizedWrite } from './authorization.ts'
 import { clientForAgency } from './portal-context.ts'
 import { formPublicationIssues } from './form-readiness.ts'
 import { upgradeToAdvancedSurvey } from '@gcs-ssc/survey'
-import { surveyV3Schema } from '@gcs-ssc/survey'
+import { designerSurveySchema } from '@gcs-ssc/survey'
 
 const portalCode = z.string().regex(/^V-[A-HJKMNP-Z2-9]{5,}$/)
 const isOpportunityCall = (call: { sourceSystem: string; foreignSystemId: string | null }, opportunityId: string) =>
@@ -17,7 +17,7 @@ const commandSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('publish') }).strict(),
   z.object({ action: z.literal('withdraw') }).strict(),
   z.object({ action: z.literal('saveForm'), surveyId: portalCode.optional(),
-    expectedRevision: z.number().int().positive().optional(), definition: surveyV3Schema }).strict()
+    expectedRevision: z.number().int().positive().optional(), definition: designerSurveySchema }).strict()
 ])
 
 const callForOpportunity = async (context: GcsExtensionRouteContext) => {

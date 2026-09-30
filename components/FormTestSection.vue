@@ -73,7 +73,7 @@ const remove = (field: SurveyField, instanceId?: string) => {
               {{ group.title[locale] }}
             </component>
             <ExtensionButton
-              type="button" color="neutral" variant="ghost" size="sm" :disabled="section.source.disabled"
+              type="button" color="neutral" variant="ghost" :disabled="section.source.disabled"
               :aria-label="t('previewRemoveEntry', { label: group.title[locale] })" @click="remove(section.source, group.instanceId)">
               {{ t('previewRemove') }}
             </ExtensionButton>
