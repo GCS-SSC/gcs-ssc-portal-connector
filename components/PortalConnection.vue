@@ -6,10 +6,13 @@ import {
   ExtensionModal, ExtensionResourceLayoutCard, ExtensionSelect, ExtensionTextarea,
   useExtensionApi, useExtensionI18n, useExtensionToast, useHostApi
 } from '@gcs-ssc/extensions/ui'
+import { readImportDiagnostic } from '../shared/import-diagnostics'
 import { messages } from '../i18n/messages'
 import FormCreator from './FormCreator.vue'
 import FormLibrary from './FormLibrary.vue'
 import IntakeWorkspace from './IntakeWorkspace.vue'
+import ReceiptEvidence from './ReceiptEvidence.vue'
+import IntakeImportSettings from './IntakeImportSettings.vue'
 
 interface Connection {
   portalUrl: string
@@ -19,6 +22,9 @@ interface Connection {
 interface Receipt {
   id: string
   kind: string
+  submission_id: string
+  organization_id: string | null
+  form_title: { en: string; fr: string } | null
   state: string
   gcs_entity_id: string | null
   created_at: string
@@ -67,18 +73,31 @@ const api = useExtensionApi('gcs-ssc-portal-connector')
 const hostApi = useHostApi()
 const connection: Ref<Connection | null> = ref(null)
 const receipts: Ref<Receipt[]> = ref([])
+const selectedReceipt: Ref<Receipt | null> = ref(null)
+const receiptEvidenceOpen = ref(false)
+const receiptSource: Ref<unknown> = ref(null)
+const openReceipt = async (receipt: Receipt) => {
+  try {
+    const result = await api.get<{ receipt: { source_export: unknown } }>(`${endpoint.value}/receipts/${receipt.id}`)
+    selectedReceipt.value = receipt
+    receiptSource.value = result.receipt.source_export
+    receiptEvidenceOpen.value = true
+  } catch { showError(t('loadFailed')) }
+}
 const receiptSearch = ref('')
 const receiptPagination = ref({ pageIndex: 0, pageSize: 10 })
 const receiptColumns = computed(() => [
+  { id: 'submission', accessorKey: 'submission_id', header: t('submission') },
   { id: 'kind', accessorKey: 'kind', header: t('kind') },
   { id: 'record', accessorKey: 'gcs_entity_id', header: t('gcsRecord') },
-  { id: 'state', accessorKey: 'state', header: t('organizationState') }
+  { id: 'state', accessorKey: 'state', header: t('organizationState') },
+  { id: 'actions', header: t('actions') }
 ])
 const filteredReceipts = computed(() => {
   const search = receiptSearch.value.trim().toLocaleLowerCase(locale.value)
   if (!search) return receipts.value
-  return receipts.value.filter(item => [receiptKind(item.kind), item.gcs_entity_id,
-    item.state === 'imported' ? t('imported') : t('unsupported'), new Date(item.created_at).toLocaleString(locale.value)]
+  return receipts.value.filter(item => [receiptKind(item.kind), item.submission_id, item.form_title?.[locale.value === 'fr' ? 'fr' : 'en'], item.gcs_entity_id,
+    queueState(item.state), new Date(item.created_at).toLocaleString(locale.value)]
     .some(value => value?.toLocaleLowerCase(locale.value).includes(search)))
 })
 const visibleReceipts = computed(() => filteredReceipts.value.slice(
@@ -187,7 +206,7 @@ const inboundColumns = computed(() => [
 const filteredInbound = computed(() => {
   const search = inboundSearch.value.trim().toLocaleLowerCase(locale.value)
   if (!search) return inbound.value
-  return inbound.value.filter(item => [item.submissionId, receiptKind(item.kind), queueState(item.state), item.lastError]
+  return inbound.value.filter(item => [item.submissionId, receiptKind(item.kind), queueState(item.state), item.lastError ? diagnosticMessage(item.lastError) : null]
     .some(value => value?.toLocaleLowerCase(locale.value).includes(search)))
 })
 const visibleInbound = computed(() => filteredInbound.value.slice(
@@ -210,7 +229,7 @@ const outcomeColumns = computed(() => [
 const filteredOutcomeBacklog = computed(() => {
   const search = outcomeSearch.value.trim().toLocaleLowerCase(locale.value)
   if (!search) return outcomeBacklog.value
-  return outcomeBacklog.value.filter(item => [item.submissionId, receiptKind(item.kind), queueState(item.state), item.lastError]
+  return outcomeBacklog.value.filter(item => [item.submissionId, receiptKind(item.kind), queueState(item.state), item.lastError ? diagnosticMessage(item.lastError) : null]
     .some(value => value?.toLocaleLowerCase(locale.value).includes(search)))
 })
 const visibleOutcomeBacklog = computed(() => filteredOutcomeBacklog.value.slice(
@@ -258,17 +277,24 @@ const error = ref('')
 const pending = ref<Array<{ eventId: string; reason: string; code?: 'forecastPending' | 'documentationPending' | 'unsupportedPending'; submissionId?: string; organizationId?: string }>>([])
 const receiptKind = (kind: string) => kind === 'claim' ? t('claimKind')
   : kind === 'forecast' ? t('forecastKind')
-    : kind === 'organization_detail' ? t('documentationKind') : kind
+    : kind === 'funding_application' ? t('fundingApplicationKind')
+      : kind === 'other_form' ? t('otherFormKind')
+        : kind === 'organization_detail' ? t('documentationKind') : kind
 const queueState = (state: string) => state === 'delivered' ? t('deliveredState')
   : state === 'cancelled' ? t('cancelledState')
   : state === 'leased' ? t('sendingState')
     : state === 'imported' ? t('imported')
-      : state === 'unsupported' ? t('unsupported') : t('queuedState')
-const queueColor = (state: string) => state === 'delivered' || state === 'imported' ? 'success'
+      : state === 'received' ? t('received')
+        : state === 'unsupported' ? t('unsupported') : t('queuedState')
+const queueColor = (state: string) => state === 'delivered' || state === 'imported' || state === 'received' ? 'success'
   : state === 'leased' ? 'warning' : state === 'failed' ? 'error' : 'neutral'
+const diagnosticMessage = (reason: string) => {
+  const diagnostic = readImportDiagnostic(reason)
+  return diagnostic ? t(diagnostic.code, diagnostic.params) : reason
+}
 const pendingMessage = (item: typeof pending.value[number]) => item.code
   ? t(item.code, { submission: item.submissionId ?? '', organization: item.organizationId ?? '' })
-  : item.reason
+  : diagnosticMessage(item.reason)
 const locked = computed(() => props.enabled === false || props.disabled === true || props.readOnly === true)
 const connectionValidationError = () => {
   const { portalUrl, portalAgencyId, portalKey } = form.value
@@ -641,6 +667,7 @@ watch(() => props.agencyId, searchProponents)
       <ExtensionSaveButton :label="t('saveSettings')" :disabled="locked || busy || !connection" :loading="busy" @click="saveSettings" />
     </section>
     <section v-if="section === 'delivery'" class="space-y-6">
+      <IntakeImportSettings :agency-id="agencyId" :read-only="readOnly" :disabled="locked" />
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div class="min-w-0 flex-1">
           <h3 class="text-lg font-semibold text-highlighted">{{ t('inboundBacklog') }}</h3>
@@ -662,7 +689,7 @@ watch(() => props.agencyId, searchProponents)
         <template #kind-cell="{ row }">{{ receiptKind(row.original.kind) }}</template>
         <template #state-cell="{ row }">
           <ExtensionBadge :color="queueColor(row.original.state)" variant="subtle">{{ queueState(row.original.state) }}</ExtensionBadge>
-          <span v-if="row.original.lastError" class="mt-1 block text-sm text-error">{{ row.original.lastError }}</span>
+          <span v-if="row.original.lastError" class="mt-1 block text-sm text-error">{{ diagnosticMessage(row.original.lastError) }}</span>
         </template>
         <template #empty>{{ t('noMatchingInbound') }}</template>
       </ExtensionResourceLayoutCard>
@@ -672,16 +699,28 @@ watch(() => props.agencyId, searchProponents)
         <ExtensionResourceLayoutCard v-else v-model:search="receiptSearch" v-model:pagination="receiptPagination"
           :data="visibleReceipts" :columns="receiptColumns" :total-records="filteredReceipts.length"
           :show-button="false" :show-column-toggle="false" :search-placeholder="t('searchReceipts')">
+          <template #submission-cell="{ row }"><span class="font-medium">{{ row.original.submission_id }}</span>
+            <span v-if="row.original.form_title" class="block text-sm text-muted">{{ row.original.form_title[locale === 'fr' ? 'fr' : 'en'] }}</span></template>
           <template #kind-cell="{ row }"><span class="font-medium">{{ receiptKind(row.original.kind) }}</span></template>
-          <template #record-cell="{ row }">{{ row.original.gcs_entity_id ? `#${row.original.gcs_entity_id}` : '—' }}</template>
+          <template #record-cell="{ row }">{{ row.original.gcs_entity_id ? `#${row.original.gcs_entity_id}` : row.original.state === 'received' ? `portal-receipt:${row.original.id}` : '—' }}</template>
           <template #state-cell="{ row }">
-            <ExtensionBadge :color="queueColor(row.original.state)" variant="subtle">{{ row.original.state === 'imported' ? t('imported') : t('unsupported') }}</ExtensionBadge>
+            <ExtensionBadge :color="queueColor(row.original.state)" variant="subtle">{{ queueState(row.original.state) }}</ExtensionBadge>
             <time class="mt-1 block text-xs text-muted" :datetime="row.original.created_at">{{ new Date(row.original.created_at).toLocaleString(locale) }}</time>
+          </template>
+          <template #actions-cell="{ row }">
+            <div class="flex justify-end"><ExtensionButton v-if="row.original.kind === 'other_form' || row.original.kind === 'funding_application'"
+              icon="i-lucide-eye" color="neutral" variant="ghost" :aria-label="t('viewReceipt')"
+              @click="openReceipt(row.original)" /></div>
           </template>
           <template #empty>{{ t('noMatchingReceipts') }}</template>
         </ExtensionResourceLayoutCard>
       </div>
     </section>
+    <ExtensionModal v-model:open="receiptEvidenceOpen" :title="t('receiptEvidence')" :description="t('receiptEvidenceDescription')" :ui="{ content: 'sm:max-w-2xl' }">
+      <template #body><div v-if="selectedReceipt" class="space-y-6">
+        <p class="text-sm text-muted">{{ t('submission') }}: {{ selectedReceipt.submission_id }} · {{ t('portalOrganization') }}: {{ selectedReceipt.organization_id }}</p>
+        <ReceiptEvidence :source="receiptSource" :agency-id="agencyId" :receipt-id="selectedReceipt.id" /></div></template>
+    </ExtensionModal>
     <section v-if="section === 'queue'" class="space-y-6">
       <div>
         <h3 class="text-lg font-semibold text-highlighted">{{ t('portalOperations') }}</h3>
@@ -724,7 +763,7 @@ watch(() => props.agencyId, searchProponents)
         <template #state-cell="{ row }">
           <ExtensionBadge :color="queueColor(row.original.state)" variant="subtle">{{ queueState(row.original.state) }}</ExtensionBadge>
           <span class="mt-1 block text-xs text-muted">{{ t('attempts') }}: {{ row.original.attempts }}<template v-if="row.original.state !== 'delivered' && row.original.state !== 'cancelled'"> · {{ t('nextAttempt') }}: {{ new Date(row.original.nextAttemptAt).toLocaleString(locale) }}</template></span>
-          <span v-if="row.original.lastError" class="mt-1 block text-sm text-error">{{ row.original.lastError }}</span>
+          <span v-if="row.original.lastError" class="mt-1 block text-sm text-error">{{ diagnosticMessage(row.original.lastError) }}</span>
         </template>
         <template #actions-cell="{ row }">
           <div class="flex justify-end">
@@ -793,7 +832,7 @@ watch(() => props.agencyId, searchProponents)
           <template #state-cell="{ row }">
             <ExtensionBadge :color="queueColor(row.original.state)" variant="subtle">{{ queueState(row.original.state) }}</ExtensionBadge>
             <span class="mt-1 block text-xs text-muted">{{ t('attempts') }}: {{ row.original.attempts }}</span>
-            <span v-if="row.original.lastError" class="mt-1 block text-sm text-error">{{ row.original.lastError }}</span>
+            <span v-if="row.original.lastError" class="mt-1 block text-sm text-error">{{ diagnosticMessage(row.original.lastError) }}</span>
           </template>
           <template #empty>{{ t('noMatchingOutcomeBacklog') }}</template>
         </ExtensionResourceLayoutCard>

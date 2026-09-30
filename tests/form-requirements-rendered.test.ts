@@ -50,7 +50,7 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
   const textarea = defineComponent({
     props: ['modelValue', 'name', 'required', 'disabled'], emits: ['update:modelValue'],
     setup(props, { attrs, emit }) {
-      return () => h('textarea', { ...attrs, name: props.name, required: props.required, disabled: props.disabled,
+      return () => h('textarea', { ...attrs, id: props.name, name: props.name, required: props.required, disabled: props.disabled,
         value: props.modelValue, onInput: (event: Event) => emit('update:modelValue', (event.target as HTMLTextAreaElement).value) })
     }
   })
@@ -136,7 +136,7 @@ import IntakeWorkspace from '../components/IntakeWorkspace.vue'
 import FormTest from '../components/FormTest.vue'
 import FormTestControl from '../components/FormTestControl.vue'
 import type { SurveyField } from '@gcs-ssc/survey/vue'
-import { ExtensionSelect } from '@gcs-ssc/extensions/ui'
+import { ExtensionSelect, ExtensionModal } from '@gcs-ssc/extensions/ui'
 import { readFormDraft } from '../components/form-draft-session'
 import PortalConnection from '../components/PortalConnection.vue'
 import ProponentVerification from '../components/ProponentVerification.vue'
@@ -150,6 +150,7 @@ beforeEach(() => {
   state.toastAdd.mockReset()
   get.mockReset().mockImplementation(async (path: string) => {
     if (path.endsWith('/forms')) return { surveys: [], streams: [], agreements: [], calls: [] }
+    if (path.endsWith('/intake-group-settings')) return { groups: [], intakeGroupId: null, ready: false }
     if (path.endsWith('/connection')) return { connection: { portalUrl: 'https://portal.example/', portalAgencyId: 'G-ABCDE', hasCredential: true } }
     if (path.endsWith('/verification')) return { verifications: [] }
     if (path.endsWith('/receipts')) return { receipts: [] }
@@ -181,6 +182,77 @@ describe('connector form requirements', () => {
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+
+  it.each(['en', 'fr'] as const)('associates optional designer instructions and question help with visible labels in %s', async locale => {
+    state.locale = locale
+    const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
+    await flushPromises()
+    await wrapper.get('input[name="formTitleEn"]').setValue('Designer controls')
+    await wrapper.get('input[name="formTitleFr"]').setValue('Contrôles du concepteur')
+    await button(wrapper, locale === 'en' ? 'Continue to designer' : 'Continuer vers le concepteur').trigger('click')
+    await wrapper.findAll('.designer-type').find(item => item.text().includes(locale === 'en' ? 'Short answer' : 'Réponse courte'))!.trigger('click')
+    for (const name of ['groupDescriptionEn', 'groupDescriptionFr', 'questionHintEn', 'questionHintFr']) {
+      const control = wrapper.get(`textarea[name="${name}"]`)
+      expect(control.attributes('id')).toBe(name)
+      expect(wrapper.get(`label[for="${name}"]`).text()).toMatch(locale === 'en' ? /Instructions|Help text/ : /Instructions|Texte d’aide/)
+      expect(control.attributes('required')).toBeUndefined()
+      await control.setValue('')
+      expect(control.element).toHaveProperty('value', '')
+    }
+    wrapper.unmount()
+  })
+
+  it.each(['en', 'fr'] as const)('requires both instruction languages only while instructions are supplied in %s', async locale => {
+    state.locale = locale
+    const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
+    await flushPromises()
+    await wrapper.get('input[name="formTitleEn"]').setValue('Instruction contract')
+    await wrapper.get('input[name="formTitleFr"]').setValue('Contrat des instructions')
+    await button(wrapper, locale === 'en' ? 'Continue to designer' : 'Continuer vers le concepteur').trigger('click')
+    await wrapper.findAll('.designer-type').find(item => item.text().includes(locale === 'en' ? 'Short answer' : 'Réponse courte'))!.trigger('click')
+    const en = wrapper.get('textarea[name="groupDescriptionEn"]')
+    const fr = wrapper.get('textarea[name="groupDescriptionFr"]')
+    expect(en.attributes('required')).toBeUndefined()
+    expect(fr.attributes('required')).toBeUndefined()
+    await en.setValue('Instructions')
+    expect(en.attributes('required')).toBeDefined()
+    expect(fr.attributes('required')).toBeDefined()
+    expect(wrapper.get('[data-field="groupDescriptionFr"] label').text()).toContain('(required)')
+    expect(wrapper.get('[data-field="groupDescriptionFr"] [role="alert"]').text()).toContain(locale === 'en' ? 'both English and French' : 'en anglais et en français')
+    await button(wrapper, locale === 'en' ? 'Save revision' : 'Enregistrer la version').trigger('click')
+    expect(post).not.toHaveBeenCalled()
+    await fr.setValue('Consignes')
+    await button(wrapper, locale === 'en' ? 'Save revision' : 'Enregistrer la version').trigger('click')
+    await flushPromises()
+    expect(post).toHaveBeenCalledWith('/agencies/1/forms', expect.objectContaining({ definition: expect.objectContaining({ pages: expect.arrayContaining([expect.objectContaining({ description: { en: 'Instructions', fr: 'Consignes' } })]) }) }))
+    await en.setValue('')
+    await fr.setValue('')
+    expect(en.attributes('required')).toBeUndefined()
+    expect(fr.attributes('required')).toBeUndefined()
+    expect(wrapper.find('[data-field="groupDescriptionFr"] [role="alert"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it.each(['en', 'fr'] as const)('identifies invalid calculated question settings in %s and recovers after fixing sources', async locale => {
+    state.locale = locale
+    const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
+    await flushPromises()
+    await wrapper.get('input[name="formTitleEn"]').setValue('Designer controls')
+    await wrapper.get('input[name="formTitleFr"]').setValue('Contrôles du concepteur')
+    await button(wrapper, locale === 'en' ? 'Continue to designer' : 'Continuer vers le concepteur').trigger('click')
+    for (const title of locale === 'en' ? ['Short answer', 'Calculated value'] : ['Réponse courte', 'Valeur calculée']) {
+      await wrapper.findAll('.designer-type').find(item => item.text().includes(title))!.trigger('click')
+    }
+    await button(wrapper, locale === 'en' ? 'Save revision' : 'Enregistrer la version').trigger('click')
+    expect(wrapper.text()).toContain(locale === 'en' ? 'Question 2: New question (Calculation)' : 'Question 2 : Nouvelle question (Calcul)')
+    expect(wrapper.text()).not.toContain('Too small:')
+    expect(post).not.toHaveBeenCalled()
+    await wrapper.get('[role="group"][aria-labelledby="computed-sources-label"] input[type="checkbox"]').setValue(true)
+    await button(wrapper, locale === 'en' ? 'Save revision' : 'Enregistrer la version').trigger('click')
+    await flushPromises()
+    expect(post).toHaveBeenCalledWith('/agencies/1/forms', expect.objectContaining({ action: 'save' }))
+    wrapper.unmount()
   })
 
   it('keeps intake request keys valid without randomUUID on a LAN HTTP origin', async () => {
@@ -1744,7 +1816,7 @@ describe('choice and table authoring', () => {
       expect(wrapper.find('select[name="choiceDependency"]').exists()).toBe(type === 'Dropdown')
     }
     await wrapper.findAll('.designer-type').find(item => item.text().includes('Table'))!.trigger('click')
-    expect(wrapper.get('select[name="tableTotals"]').element.value).toBe('none')
+    expect((wrapper.get('select[name="tableTotals"]').element as HTMLSelectElement).value).toBe('none')
     await wrapper.get('select[name="tableTotals"]').setValue('both')
     await wrapper.get('select[name="columnType0"]').setValue('number')
     await button(wrapper, 'Test').trigger('click')
@@ -1816,7 +1888,7 @@ describe('custom grant catalogs', () => {
     catalog.vm.$emit('add'); await flushPromises(); expect(question.config.outcomes).toHaveLength(2)
     catalog.vm.$emit('remove', question.config.outcomes.at(-1)!.id); await flushPromises(); expect(question.config.outcomes).toHaveLength(1)
     await wrapper.findAll('button').find(button => button.text() === 'Copy current stream settings')!.trigger('click'); await flushPromises()
-    expect(wrapper.get('[role="alert"]').exists()).toBe(true)
+    expect(wrapper.find('[role="alert"]').exists()).toBe(true)
     wrapper.unmount()
   })
 })
@@ -1855,4 +1927,142 @@ describe('choice table dialogs', () => {
     await french.setProps({ disabled: true }); expect(button(french, 'Enregistrer le choix').attributes('disabled')).toBeDefined()
     french.unmount()
   })
+})
+
+describe('received immutable form evidence', () => {
+  it.each(['en', 'fr'] as const)('lists only immutable ready attachment evidence with external download in %s', async language => {
+    state.locale = language
+    const ReceiptEvidence = (await import('../components/ReceiptEvidence.vue')).default
+    const source = { attachments: [
+      { id: 'X-ABCDE', filename: 'community-health-evidence.txt', size: 91, sha256: 'a'.repeat(64), status: 'ready' },
+      { id: 'X-PENDING', filename: 'pending.txt', size: 1, sha256: 'b'.repeat(64), status: 'uploading' }
+    ], items: [] }
+    const original = JSON.stringify(source)
+    const wrapper = mount(ReceiptEvidence, { props: { source, agencyId: '1', receiptId: '106' } })
+    expect(wrapper.text()).toContain(language === 'en' ? 'Original attachments' : 'Pièces jointes originales')
+    expect(wrapper.text()).toContain(`community-health-evidence.txt · 91 ${language === 'en' ? 'bytes' : 'octets'}`)
+    expect(wrapper.text()).not.toContain('pending.txt')
+    const download = button(wrapper, language === 'en' ? 'Download' : 'Télécharger')
+    expect(download.attributes('href')).toBe('/api/extensions/gcs-ssc-portal-connector/agencies/1/receipts/106/attachments/X-ABCDE')
+    expect(download.attributes('external')).toBeDefined()
+    expect(JSON.stringify(source)).toBe(original)
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['en', 'full'], ['fr', 'full'], ['en', 'summary'], ['fr', 'summary']
+  ] as const)('navigates the saved %s %s route while primitive, table, repeat and grant edits remain immutable', async (language, pathway) => {
+    state.locale = language
+    const ReceiptEvidence = (await import('../components/ReceiptEvidence.vue')).default
+    const FormTestSection = (await import('../components/FormTestSection.vue')).default
+    const { complexCommunityHealthForm, complexCommunityHealthAnswers } = await import('./fixtures/complex-community-health')
+    const answers = complexCommunityHealthAnswers()
+    answers.pathway = pathway
+    if (pathway === 'summary') answers.delivery_region = 'remote'
+    const source = { items: [{ kind: 'survey', itemSubmissionId: 'K-ABCDE-Y-ABCDE', definition: complexCommunityHealthForm(), answers }] }
+    const original = JSON.stringify(source)
+    const wrapper = mount(ReceiptEvidence, { props: { source } })
+    await flushPromises()
+    const headings = pathway === 'full'
+      ? (language === 'en' ? ['Your project', 'Partners and locations', 'Activities and funding', 'Confirm your information'] : ['Votre projet', 'Partenaires et lieux', 'Activités et financement', 'Confirmez vos renseignements'])
+      : (language === 'en' ? ['Your project', 'Confirm your information'] : ['Votre projet', 'Confirmez vos renseignements'])
+    for (const [index, heading] of headings.entries()) {
+      expect(wrapper.get('h4').text()).toBe(heading)
+      const fields = wrapper.findAllComponents(FormTestSection)[0]!.props('fields') as SurveyField[]
+      expect(fields.every(field => field.disabled)).toBe(true)
+      for (const field of fields) field.setValue('Attempted edit')
+      expect(JSON.stringify(source)).toBe(original)
+      expect(wrapper.findAll('input, textarea, select').every(control => (control.element as HTMLInputElement).disabled)).toBe(true)
+      if (index < headings.length - 1) await button(wrapper, language === 'fr' ? 'Suivant' : 'Next').trigger('click')
+    }
+    for (const heading of headings.slice(0, -1).reverse()) {
+      await button(wrapper, language === 'fr' ? 'Précédent' : 'Previous').trigger('click')
+      expect(wrapper.get('h4').text()).toBe(heading)
+    }
+    expect(JSON.stringify(source)).toBe(original)
+    wrapper.unmount()
+  })
+
+  for (const language of ['en', 'fr'] as const) {
+    it(`renders saved bilingual ${language} answers with disabled provider controls`, async () => {
+      state.locale = language
+      const ReceiptEvidence = (await import('../components/ReceiptEvidence.vue')).default
+      const source = { items: [{ kind: 'survey', itemSubmissionId: 'K-ABCDE-Y-ABCDE',
+        answers: { project_title: 'Northern health', participants: '0' }, definition: {
+          schemaVersion: 3, title: { en: 'Application evidence', fr: 'Preuve de demande' },
+          questions: [
+            { id: 'project_title', type: 'text', label: { en: 'Project title', fr: 'Titre du projet' }, required: true, maxLength: 500 },
+            { id: 'participants', type: 'number', label: { en: 'Participants', fr: 'Participants' }, required: true }
+          ], pages: [
+            { id: 'page_1', title: { en: 'Project', fr: 'Projet' }, questionIds: ['project_title'], groups: [], branches: [] },
+            { id: 'page_2', title: { en: 'Delivery', fr: 'Prestation' }, questionIds: ['participants'], groups: [], branches: [] }
+          ]
+        } }] }
+      const wrapper = mount(ReceiptEvidence, { props: { source } })
+      await flushPromises()
+      expect(wrapper.text()).toContain(language === 'fr' ? 'Preuve de demande' : 'Application evidence')
+      expect(wrapper.text()).toContain(language === 'fr' ? 'Titre du projet' : 'Project title')
+      const input = wrapper.findAll('input').find(item => item.element.type === 'text')!
+      expect((input.element as HTMLInputElement).value).toBe('Northern health')
+      expect((input.element as HTMLInputElement).disabled).toBe(true)
+      expect(wrapper.findAll('input').every(item => item.element.disabled)).toBe(true)
+      expect(wrapper.find('button[type="submit"]').exists()).toBe(false)
+      // Synthetic updates cannot mutate the immutable export even if a control emits.
+      await input.setValue('Attempted edit')
+      expect(source.items[0]!.answers.project_title).toBe('Northern health')
+      await button(wrapper, language === 'fr' ? 'Suivant' : 'Next').trigger('click')
+      expect(wrapper.text()).toContain(language === 'fr' ? 'Prestation' : 'Delivery')
+      const number = wrapper.get('input[type="number"]')
+      expect(number.element).toHaveProperty('value', '0')
+      expect(number.element).toHaveProperty('disabled', true)
+      await button(wrapper, language === 'fr' ? 'Précédent' : 'Previous').trigger('click')
+      expect(wrapper.get('input[type="text"]').element).toHaveProperty('value', 'Northern health')
+      wrapper.unmount()
+    })
+  }
+})
+
+
+describe('receipt modal accessibility description', () => {
+  for (const language of ['en', 'fr'] as const) {
+    it(`supplies an extension-owned ${language} modal description`, async () => {
+      state.locale = language
+      const wrapper = mount(PortalConnection, { props: { agencyId: '1', section: 'delivery', enabled: true } })
+      await flushPromises()
+      const title = language === 'fr' ? 'Réponses du formulaire soumis' : 'Submitted form responses'
+      const modal = wrapper.findAllComponents(ExtensionModal).find(item => (item.props() as { title: string }).title === title)!
+      expect((modal.props() as { description: string }).description).toBe(language === 'fr'
+        ? 'Réponses originales soumises par l’organisme, présentées en lecture seule.'
+        : 'Original responses submitted by the organization, shown read-only.')
+      wrapper.unmount()
+    })
+  }
+})
+
+describe('owning import diagnostics in live delivery UI', () => {
+  for (const language of ['en', 'fr'] as const) {
+    it(`renders current pending and persisted inbox diagnostics in ${language} while retaining unknown raw errors`, async () => {
+      state.locale=language
+      const { PortalImportDiagnostic }=await import('../shared/import-diagnostics.ts')
+      const { importDiagnosticsMessages }=await import('../i18n/import-diagnostics.ts')
+      const reason=new PortalImportDiagnostic('importMissingGroup').message
+      const raw='Existing transport diagnosis'
+      const defaultGet=get.getMockImplementation()!
+      get.mockImplementation(async(path:string)=>path.endsWith('/backlog') ? {backlog:[],outcomes:[],inbound:[
+        {eventId:'known',submissionId:'K-ABCDE',kind:'submission_item',state:'queued',lastError:reason},
+        {eventId:'old',submissionId:'K-BCDEF',kind:'submission_item',state:'queued',lastError:raw}
+      ]}:defaultGet(path))
+      post.mockResolvedValue({imported:[],pending:[{eventId:'known',reason}],hasMore:false})
+      const wrapper=mount(PortalConnection,{props:{agencyId:'1',section:'delivery',enabled:true}})
+      await flushPromises()
+      const translated=translateGcsExtensionMessage(importDiagnosticsMessages,language,'importMissingGroup')
+      expect(wrapper.text()).toContain(translated)
+      expect(wrapper.text()).toContain(raw)
+      expect(wrapper.text()).not.toContain('GCS_PORTAL_IMPORT:')
+      await button(wrapper,language==='fr'?'Vérifier les mises à jour du portail':'Check for portal updates').trigger('click')
+      await flushPromises()
+      expect(wrapper.text().split(translated)).toHaveLength(3)
+      wrapper.unmount()
+    })
+  }
 })

@@ -127,4 +127,27 @@ describe('portal Claim receipt transaction', () => {
     expect(portal.publishItemReference).not.toHaveBeenCalled()
     expect(portal.consume).not.toHaveBeenCalled()
   })
+  it('retries a failed other-form outcome acknowledgement without duplicating durable evidence', async () => {
+    portal.submission = { schemaVersion: 1, submissionId: 'submission-1', organizationId: 'organization-1',
+      agreementReference: null, sourceSystem: 'gcs-ssc-form', application: null,
+      items: [{ kind: 'survey', itemSubmissionId: 'item-1', answers: { title: 'Submitted project' },
+        survey: { id: 'form', kind: 'survey', surveyId: 'V-ABCDE', surveyRevision: 1 },
+        definition: { schemaVersion: 3, title: { en: 'Project', fr: 'Projet' },
+          questions: [{ id: 'title', type: 'text', label: { en: 'Title', fr: 'Titre' }, required: true, maxLength: 500 }],
+          pages: [{ id: 'page_1', title: { en: 'Details', fr: 'Détails' }, questionIds: ['title'], groups: [], branches: [] }] }
+      }] }
+    portal.publishItemReference.mockRejectedValueOnce(new Error('Ambiguous network response'))
+    const { syncPortal } = await import('../server/sync.ts')
+    const first = await syncPortal(context(db, createClaim) as never)
+    expect(first.imported).toEqual([])
+    expect(first.pending).toEqual([expect.objectContaining({ eventId: '12', reason: 'Ambiguous network response' })])
+    expect(portal.consume).not.toHaveBeenCalled()
+    expect((await sql`SELECT state FROM extensions.gcs_portal_receipt`.execute(db)).rows).toEqual([{ state: 'received' }])
+    const retry = await syncPortal(context(db, createClaim) as never)
+    expect(retry.imported).toEqual([{ itemSubmissionId: 'item-1', kind: 'other_form', entityId: 'portal-receipt:1' }])
+    expect((await sql`SELECT count(*)::int AS count FROM extensions.gcs_portal_receipt`.execute(db)).rows).toEqual([{ count: 1 }])
+    expect(portal.consume).toHaveBeenCalledWith('12', 'portal-receipt:1')
+    expect(createClaim).not.toHaveBeenCalled()
+  })
+
 })

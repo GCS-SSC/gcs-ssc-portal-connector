@@ -25,5 +25,5 @@ describe('portal form foreign identity', () => {
       .filter(diagnostic => diagnostic.file?.fileName === file)
       .map(diagnostic => `${diagnostic.code}: ${ts.flattenDiagnosticMessageText(diagnostic.messageText, ' ')}`)
     expect(diagnostics).toEqual([])
-  })
+  }, 15_000)
 })

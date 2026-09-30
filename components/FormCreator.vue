@@ -236,6 +236,7 @@ const toggleNode = (node: Node) => {
 const selected = computed(() => nodes.value.find((node) => node.id === selectedContainerId.value) ?? nodes.value[0])
 const pendingDeleteId = ref<string | null>(null)
 const pendingDeleteQuestion = computed(() => definition.value.questions.find(question => question.id === pendingDeleteId.value))
+const instructionsRequired = computed(() => Boolean(selected.value?.item.description?.en.trim() || selected.value?.item.description?.fr.trim()))
 const selectedQuestion = computed(() => definition.value.questions.find((question) => question.id === selectedQuestionId.value))
 const selectQuestion = async (id: string) => {
   if (selectedQuestionId.value === id) return
@@ -484,7 +485,20 @@ const save = async () => {
   if (disabled.value) return
   const parsed = designerSurveySchema.safeParse(forSaving(definition.value))
   if (!parsed.success) {
-    error.value = parsed.error.issues.map((issue) => issue.message).slice(0, 4).join(' · ')
+    const fields = [...new Set(parsed.error.issues.map((issue) => {
+      if (issue.path[0] === 'title') return t('formInvalidName')
+      if (issue.path[0] === 'description') return t('formInvalidIntroduction')
+      if (issue.path[0] === 'questions' && typeof issue.path[1] === 'number') {
+        const question = definition.value.questions[issue.path[1]]
+        const section = question?.type === 'computed' ? t('formQuestionCalculation')
+          : question?.type === 'table' ? t('formQuestionTable')
+            : ['select', 'checkboxes', 'multiselect'].includes(question?.type ?? '') ? t('formQuestionChoices')
+              : t('formInvalidQuestionSettings')
+        return t('formInvalidQuestion', { number: issue.path[1] + 1, title: question?.label[language.value] || t('formUntitled'), section })
+      }
+      return t('formInvalidStructure')
+    }))].slice(0, 4)
+    error.value = t('formInvalidDefinition', { fields: fields.join(' · ') })
     if (parsed.error.issues.some((issue) => issue.path[0] === 'title' || issue.path[0] === 'description')) openDetails()
     else tab.value = 'edit'
     return
@@ -1112,11 +1126,15 @@ watch(() => props.agencyId, () => {
                           <ExtensionFormField :label="tr('Heading · French', 'Titre · français')" name="groupTitleFr" required>
                             <ExtensionInput v-model="selected.item.title.fr" name="groupTitleFr" required :disabled="disabled" />
                           </ExtensionFormField>
-                          <ExtensionFormField :label="tr('Instructions · English', 'Instructions · anglais')" name="groupDescriptionEn">
-                            <textarea v-model="selected.item.description!.en" name="groupDescriptionEn" class="designer-textarea" :disabled="disabled" />
+                          <ExtensionFormField :label="tr('Instructions · English', 'Instructions · anglais')" name="groupDescriptionEn" :required="instructionsRequired"
+                            :description="t('formInstructionsHelp')"
+                            :error="instructionsRequired && !selected.item.description!.en.trim() ? t('formInstructionsPairRequired') : undefined">
+                            <ExtensionTextarea v-model="selected.item.description!.en" name="groupDescriptionEn" class="w-full" :rows="3" :required="instructionsRequired" :disabled="disabled" />
                           </ExtensionFormField>
-                          <ExtensionFormField :label="tr('Instructions · French', 'Instructions · français')" name="groupDescriptionFr">
-                            <textarea v-model="selected.item.description!.fr" name="groupDescriptionFr" class="designer-textarea" :disabled="disabled" />
+                          <ExtensionFormField :label="tr('Instructions · French', 'Instructions · français')" name="groupDescriptionFr" :required="instructionsRequired"
+                            :description="t('formInstructionsHelp')"
+                            :error="instructionsRequired && !selected.item.description!.fr.trim() ? t('formInstructionsPairRequired') : undefined">
+                            <ExtensionTextarea v-model="selected.item.description!.fr" name="groupDescriptionFr" class="w-full" :rows="3" :required="instructionsRequired" :disabled="disabled" />
                           </ExtensionFormField>
                         </div>
                         <ExtensionFormField v-if="selected.kind === 'group'" :label="tr('Repeat this group for each item in', 'Répéter ce groupe pour chaque élément de')" name="repeatFor">
@@ -1241,10 +1259,10 @@ watch(() => props.agencyId, () => {
                                 </ExtensionAssessmentSchemaAccordionSection>
                                 <ExtensionAssessmentSchemaAccordionSection :title="t('formQuestionHelp')" level="sub"><div class="grid gap-4 md:grid-cols-2">
                                   <ExtensionFormField :label="tr('Help text · English', 'Texte d’aide · anglais')" name="questionHintEn">
-                                    <textarea v-model="selectedQuestion.hint!.en" name="questionHintEn" class="designer-textarea" :disabled="disabled" />
+                                    <ExtensionTextarea v-model="selectedQuestion.hint!.en" name="questionHintEn" class="w-full" :rows="3" :required="false" :disabled="disabled" />
                                   </ExtensionFormField>
                                   <ExtensionFormField :label="tr('Help text · French', 'Texte d’aide · français')" name="questionHintFr">
-                                    <textarea v-model="selectedQuestion.hint!.fr" name="questionHintFr" class="designer-textarea" :disabled="disabled" />
+                                    <ExtensionTextarea v-model="selectedQuestion.hint!.fr" name="questionHintFr" class="w-full" :rows="3" :required="false" :disabled="disabled" />
                                   </ExtensionFormField>
                                 </div></ExtensionAssessmentSchemaAccordionSection>
 <div v-if="selectedQuestion.type === 'list'" class="space-y-2 border-t border-default pt-4">
@@ -1681,8 +1699,6 @@ button.designer-sidebar-disclosure:hover { color: var(--ui-primary, #008cca); }
 .designer-form-details { padding: 1.25rem; border: 1px solid var(--ui-border, #33343a); border-radius: .65rem; }
 .designer-workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2rem; align-items: start; }
 .designer-canvas, .designer-inspector { min-width: 0; }
-.designer-textarea { width: 100%; min-height: 5rem; resize: vertical; border: 1px solid var(--ui-border, #42434a); border-radius: .4rem; background: var(--ui-bg, #1e1e22); color: var(--ui-text, #fff); padding: .6rem .7rem; font: inherit; font-size: .875rem; }
-.designer-textarea:focus { outline: 2px solid var(--ui-primary, #008cca); outline-offset: 1px; }
 .designer-question-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; }
 .designer-empty { margin: 1.5rem 0; color: var(--ui-text-muted, #a2a3ab); font-size: .875rem; }
 .designer-add { margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px dashed var(--ui-border, #42434a); }

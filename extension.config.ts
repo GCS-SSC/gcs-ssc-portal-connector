@@ -14,7 +14,7 @@ export default defineGcsExtension({
     'agency-only-configuration', 'configuration-access', 'server-handlers',
     'server-handler-rbac', 'migrations', 'extension-secrets', 'audit-ownership',
     'agency-config', 'extension-ui', 'extension-api-client', 'host-api-client',
-    'scheduled-agreement-import', 'extension-lifecycle-hooks', 'agency-workspace', 'entity-tabs'
+    'scheduled-agreement-import', 'scheduled-intake-import', 'extension-lifecycle-hooks', 'agency-workspace', 'entity-tabs'
   ],
   admin: {
     agency: { path: './components/PortalConnection.vue' },
@@ -71,7 +71,8 @@ export default defineGcsExtension({
     { path: './server/migrations/0008_entity_status_settings.ts' },
     { path: './server/migrations/0009_delivery_payload.ts' },
     { path: './server/migrations/0010_portal_operations.ts' },
-    { path: './server/migrations/0011_terminal_call_conflicts.ts' }
+    { path: './server/migrations/0011_terminal_call_conflicts.ts' },
+    { path: './server/migrations/0012_intake_outcomes.ts' }
   ],
   serverHandlers: [
     {
@@ -145,6 +146,11 @@ export default defineGcsExtension({
       path: './server/api/sync.post.ts'
     },
     {
+      route: '/agencies/[agencyId]/receipts/[receiptId]/attachments/[attachmentId]', method: 'get',
+      rbac: { subject: 'agency', action: 'read', agency: { param: 'agencyId' } },
+      path: './server/api/receipt-attachment.get.ts'
+    },
+    {
       route: '/agencies/[agencyId]/backlog', method: 'get',
       rbac: { subject: 'agency', action: 'read', agency: { param: 'agencyId' } },
       path: './server/api/backlog.get.ts'
@@ -180,6 +186,16 @@ export default defineGcsExtension({
       path: './server/api/organization-sync.post.ts'
     },
     {
+      route: '/agencies/[agencyId]/intake-group-settings', method: 'get',
+      rbac: { subject: 'agency', action: 'read', agency: { param: 'agencyId' } },
+      path: './server/api/intake-group-settings.get.ts'
+    },
+    {
+      route: '/agencies/[agencyId]/intake-group-settings', method: 'put',
+      rbac: { subject: 'agency', action: 'delete', agency: { param: 'agencyId' } },
+      path: './server/api/intake-group-settings.put.ts'
+    },
+    {
       route: '/agencies/[agencyId]/settings', method: 'get',
       rbac: { subject: 'agency', action: 'read', agency: { param: 'agencyId' } },
       path: './server/api/settings.get.ts'
@@ -203,6 +219,11 @@ export default defineGcsExtension({
       route: '/agencies/[agencyId]/publish-agreement', method: 'post',
       rbac: { subject: 'agency', action: 'delete', agency: { param: 'agencyId' } },
       path: './server/api/publish-agreement.post.ts'
+    },
+    {
+      route: '/agencies/[agencyId]/receipts/[receiptId]', method: 'get',
+      rbac: { subject: 'agency', action: 'read', agency: { param: 'agencyId' } },
+      path: './server/api/receipt.get.ts'
     },
     {
       route: '/agencies/[agencyId]/receipts', method: 'get',

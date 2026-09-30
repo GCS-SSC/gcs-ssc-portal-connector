@@ -1,3 +1,5 @@
+import { receiptAttachmentMessages } from './receipt-attachments.ts'
+import { importDiagnosticsMessages } from './import-diagnostics.ts'
 import { grantMessages } from './grants.ts'
 import { previewMessages } from './preview.ts'
 import { designHelpMessages } from './design-help.ts'
@@ -5,6 +7,17 @@ import { defineGcsExtensionMessages } from '@gcs-ssc/extensions'
 
 export const messages = defineGcsExtensionMessages({
   en: {
+    ...importDiagnosticsMessages.en,
+    ...receiptAttachmentMessages.en,
+    formInstructionsHelp: 'Instructions are optional. If you enter instructions in either language, provide both English and French.',
+    formInstructionsPairRequired: 'Provide instructions in both English and French, or clear both fields.',
+    formInvalidDefinition: 'Complete these form settings before saving: {fields}.',
+    formInvalidName: 'Bilingual form name',
+    formInvalidIntroduction: 'Bilingual introduction',
+    formInvalidQuestion: 'Question {number}: {title} ({section})',
+    formInvalidQuestionSettings: 'Question settings',
+    formInvalidStructure: 'Page, section or navigation settings',
+
     formChoiceEnglish: 'English',
     formChoiceFrench: 'French',
     formChoiceActions: 'Actions',
@@ -138,6 +151,7 @@ export const messages = defineGcsExtensionMessages({
     syncDone: 'Items imported: {count}. Items still pending: {pending}.', syncFailed: 'Portal updates could not be checked.',
     deliveryRefreshFailed: 'Portal updates were checked, but the delivery lists could not be refreshed.',
     pending: 'Items needing attention', receipts: 'Recent deliveries', none: 'No deliveries yet.',
+    received: 'Received', viewReceipt: 'View submitted form', receiptEvidence: 'Submitted form responses', receiptEvidenceDescription: 'Original responses submitted by the organization, shown read-only.', yes: 'Yes', no: 'No',
     imported: 'Imported', unsupported: 'Waiting for GCS support',
     claimKind: 'Claim', forecastKind: 'Forecast', agreementKind: 'Agreement', fundingApplicationKind: 'Funding application', otherFormKind: 'Other forms', documentationKind: 'Additional documentation',
     forecastPending: 'Forecast submission {submission} from organization {organization} is waiting for GCS forecast import support.',
@@ -202,6 +216,17 @@ export const messages = defineGcsExtensionMessages({
     queuedState: 'Queued', sendingState: 'Sending', deliveredState: 'Delivered', cancelledState: 'Cancelled'
   },
   fr: {
+    ...importDiagnosticsMessages.fr,
+    ...receiptAttachmentMessages.fr,
+    formInstructionsHelp: 'Les instructions sont facultatives. Si vous en saisissez dans une langue, fournissez les versions anglaise et française.',
+    formInstructionsPairRequired: 'Fournissez les instructions en anglais et en français, ou effacez les deux champs.',
+    formInvalidDefinition: 'Complétez ces paramètres du formulaire avant d’enregistrer : {fields}.',
+    formInvalidName: 'Nom bilingue du formulaire',
+    formInvalidIntroduction: 'Introduction bilingue',
+    formInvalidQuestion: 'Question {number} : {title} ({section})',
+    formInvalidQuestionSettings: 'Paramètres de la question',
+    formInvalidStructure: 'Paramètres des pages, sections ou de navigation',
+
     formChoiceEnglish: 'Anglais',
     formChoiceFrench: 'Français',
     formChoiceActions: 'Actions',
@@ -335,6 +360,7 @@ export const messages = defineGcsExtensionMessages({
     syncDone: 'Éléments importés : {count}. Éléments encore en attente : {pending}.', syncFailed: 'Impossible de vérifier les mises à jour du portail.',
     deliveryRefreshFailed: 'Les mises à jour du portail ont été vérifiées, mais les listes de livraison n’ont pas pu être actualisées.',
     pending: 'Éléments nécessitant une intervention', receipts: 'Livraisons récentes', none: 'Aucune livraison pour le moment.',
+    received: 'Reçu', viewReceipt: 'Voir le formulaire soumis', receiptEvidence: 'Réponses du formulaire soumis', receiptEvidenceDescription: 'Réponses originales soumises par l’organisme, présentées en lecture seule.', yes: 'Oui', no: 'Non',
     imported: 'Importé', unsupported: 'En attente de prise en charge par GCS',
     claimKind: 'Réclamation', forecastKind: 'Prévision', agreementKind: 'Entente', fundingApplicationKind: 'Demande de financement', otherFormKind: 'Autres formulaires', documentationKind: 'Documents supplémentaires',
     forecastPending: 'La prévision {submission} de l’organisme {organization} attend la prise en charge de son importation dans GCS.',

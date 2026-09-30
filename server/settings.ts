@@ -65,14 +65,16 @@ export const saveSettings = async (context: GcsExtensionRouteContext) => {
     if (JSON.stringify(connection.entity_status_ids) !== JSON.stringify(nextEntityIds)) {
       await sql`
       INSERT INTO extensions.gcs_portal_outcome_outbox (agency_id,receipt_id,status_id)
-      SELECT receipt.agency_id,receipt.id,COALESCE(claim.egcs_fc_status,forecast.egcs_fc_status)
+      SELECT receipt.agency_id,receipt.id,COALESCE(claim.egcs_fc_status,forecast.egcs_fc_status,intake.egcs_fi_status)
       FROM extensions.gcs_portal_receipt receipt
       LEFT JOIN "Funding_Case_Agreement_Claim" claim
         ON receipt.gcs_entity_type='fundingcaseagreementclaim' AND claim.id=receipt.gcs_entity_id
       LEFT JOIN "Funding_Case_Agreement_Forecast" forecast
         ON receipt.gcs_entity_type='fundingcaseforecast' AND forecast.id=receipt.gcs_entity_id
+      LEFT JOIN "Funding_Case_Intake_Profile" intake
+        ON receipt.gcs_entity_type='fundingcaseintake' AND intake.id=receipt.gcs_entity_id
       WHERE receipt.agency_id=${agencyId}::bigint AND receipt.state='imported'
-        AND COALESCE(claim.egcs_fc_status,forecast.egcs_fc_status) IS NOT NULL
+        AND COALESCE(claim.egcs_fc_status,forecast.egcs_fc_status,intake.egcs_fi_status) IS NOT NULL
       `.execute(transaction)
     }
   })

@@ -47,13 +47,16 @@ export const drainOutcomeOutbox = async (db: ConnectorDb, limit: number, agencyI
           ON receipt.gcs_entity_type='fundingcaseagreementclaim' AND claim.id=receipt.gcs_entity_id
         LEFT JOIN "Funding_Case_Agreement_Forecast" forecast
           ON receipt.gcs_entity_type='fundingcaseforecast' AND forecast.id=receipt.gcs_entity_id
+        LEFT JOIN "Funding_Case_Intake_Profile" intake
+          ON receipt.gcs_entity_type='fundingcaseintake' AND intake.id=receipt.gcs_entity_id
         LEFT JOIN "Common_Status" status
-          ON status.id=COALESCE(claim.egcs_fc_status,forecast.egcs_fc_status) AND status._deleted=false
+          ON status.id=COALESCE(claim.egcs_fc_status,forecast.egcs_fc_status,intake.egcs_fi_status) AND status._deleted=false
         WHERE receipt.id=${row.receipt_id}::bigint AND receipt.state='imported'
       `.execute(db)).rows[0]
       if (!source?.gcs_entity_id) throw new Error('The imported GCS item is unavailable.')
       const selectedIds = source.gcs_entity_type === 'fundingcaseagreementclaim'
-        ? source.entity_status_ids.claim : source.entity_status_ids.forecast
+        ? source.entity_status_ids.claim : source.gcs_entity_type === 'fundingcaseintake'
+          ? source.entity_status_ids.funding_application : source.entity_status_ids.forecast
       const visible = source.status_id && selectedIds.includes(source.status_id)
         && source.status_en && source.status_fr && source.status_colour
         && /^#[0-9a-fA-F]{6}$/.test(source.status_colour)

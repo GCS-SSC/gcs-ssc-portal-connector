@@ -1,0 +1,5 @@
+import { defineGcsExtensionMessages } from '@gcs-ssc/extensions'
+export const receiptAttachmentMessages = defineGcsExtensionMessages({
+  en: { receiptAttachments: 'Original attachments', receiptAttachmentsHelp: 'Files submitted with this delivery remain in the Portal. Download retrieves and verifies the original file.', receiptAttachmentBytes: 'bytes', receiptAttachmentDownload: 'Download', receiptAttachmentUnavailable: 'This original attachment is unavailable for this delivery.', receiptAttachmentDownloadFailed: 'The original attachment could not be verified. Try again later or contact the Portal administrator.' },
+  fr: { receiptAttachments: 'Pièces jointes originales', receiptAttachmentsHelp: 'Les fichiers soumis avec cette livraison restent dans le portail. Le téléchargement récupère et vérifie le fichier original.', receiptAttachmentBytes: 'octets', receiptAttachmentDownload: 'Télécharger', receiptAttachmentUnavailable: 'Cette pièce jointe originale est indisponible pour cette livraison.', receiptAttachmentDownloadFailed: 'La pièce jointe originale n’a pas pu être vérifiée. Réessayez plus tard ou contactez l’administrateur du portail.' }
+})
