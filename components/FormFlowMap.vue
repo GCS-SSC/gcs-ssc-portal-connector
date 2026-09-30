@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } fro
 import type { AdvancedSurvey, SurveyCondition } from '@gcs-ssc/survey'
 import { ExtensionAssessmentSchemaPageSection, ExtensionIcon, useExtensionI18n } from '@gcs-ssc/extensions/ui'
 import { messages } from '../i18n/messages'
+import { flowConnectionPath, flowLaneSpacing } from './form-flow-path'
 
 const props = defineProps<{
   definition: AdvancedSurvey
@@ -45,6 +46,11 @@ const conditionPart = (row: SurveyCondition['conditions'][number]) => {
 const conditionLabel = (condition: SurveyCondition) => condition.conditions.length
   ? condition.conditions.map(conditionPart).join(condition.match === 'all' ? t('formFlowAnd') : t('formFlowOr'))
   : t('formFlowConditionUnset')
+const routedCount = computed(() => pages.value.reduce((count, page, index) => {
+  const adjacentId = pages.value[index + 1]?.id ?? 'end'
+  return count + page.branches.filter(branch => (branch.destination.kind === 'page' ? branch.destination.pageId : 'end') !== adjacentId).length
+    + (defaultDestinationId(index) !== adjacentId ? 1 : 0)
+}, 0))
 const canvas = ref<HTMLElement | null>(null)
 const flowSize = ref({ width: 0, height: 0 })
 type FlowEdgeKind = 'direct' | 'conditional' | 'default'
@@ -57,25 +63,33 @@ const updateEdges = () => {
   if (!root) return
   const bounds = root.getBoundingClientRect()
   if (!bounds.width || !bounds.height) { flowEdges.value = []; return }
-  const vertical = (root.parentElement?.clientWidth ?? root.clientWidth) < 704
+  const track = root.querySelector<HTMLElement>('.flow-track')
+  if (!track) return
+  const vertical = getComputedStyle(track).flexDirection === 'column'
   const destinations = new Map<string, HTMLElement>(Array.from(root.querySelectorAll<HTMLElement>('[data-flow-node]'))
     .map(node => [node.dataset.flowNode!, node] as const))
+  const routes = Array.from(root.querySelectorAll<HTMLElement>('[data-flow-destination]'))
+  const obstacles = [...destinations.values(), ...routes].map(node => node.getBoundingClientRect())
+  const boundary = vertical ? Math.max(...obstacles.map(rect => rect.right - bounds.left))
+    : Math.max(...obstacles.map(rect => rect.bottom - bounds.top))
   const edges: Array<{ path: string; kind: FlowEdgeKind }> = []
-  for (const route of root.querySelectorAll<HTMLElement>('[data-flow-destination]')) {
+  let lane = 0
+  for (const route of routes) {
     const target = destinations.get(route.dataset.flowDestination ?? '')
     if (!target) continue
     const from = route.getBoundingClientRect()
     const to = target.getBoundingClientRect()
-    const startX = vertical ? from.left + from.width / 2 - bounds.left : from.right - bounds.left + 2
-    const startY = vertical ? from.bottom - bounds.top + 2 : from.top + from.height / 2 - bounds.top
-    const endX = vertical ? to.left + to.width / 2 - bounds.left : to.left - bounds.left - 8
-    const endY = vertical ? to.top - bounds.top - 8 : to.top + to.height / 2 - bounds.top
-    const span = Math.max(28, Math.abs(vertical ? endY - startY : endX - startX) * .35)
-    const direction = (vertical ? endY >= startY : endX >= startX) ? 1 : -1
-    const path = vertical
-      ? `M ${startX} ${startY} C ${startX} ${startY + direction * span}, ${endX} ${endY - direction * span}, ${endX} ${endY}`
-      : `M ${startX} ${startY} C ${startX + direction * span} ${startY}, ${endX - direction * span} ${endY}, ${endX} ${endY}`
     const kind = route.dataset.flowKind
+    const sourceStep = route.closest('.flow-step')
+    const adjacent = sourceStep?.nextElementSibling?.contains(target) ?? false
+    const routed = !adjacent
+    const path = flowConnectionPath({
+      from: { left: from.left - bounds.left, top: from.top - bounds.top, width: from.width, height: from.height },
+      to: { left: to.left - bounds.left, top: to.top - bounds.top, width: to.width, height: to.height },
+      vertical, routed,
+      lane: routed ? lane++ : 0,
+      boundary, laneSpacing: flowLaneSpacing(routedCount.value, vertical)
+    })
     edges.push({ path, kind: kind === 'conditional' || kind === 'default' ? kind : 'direct' })
   }
   flowSize.value = { width: root.scrollWidth, height: root.scrollHeight }
@@ -92,6 +106,7 @@ onMounted(async () => {
   if (typeof ResizeObserver !== 'undefined' && canvas.value) {
     resizeObserver = new ResizeObserver(scheduleEdges)
     resizeObserver.observe(canvas.value)
+    if (canvas.value.parentElement) resizeObserver.observe(canvas.value.parentElement)
   }
 })
 onBeforeUnmount(() => {
@@ -122,14 +137,14 @@ watch(() => [props.definition.pages, props.definition.questions, props.locale], 
     <p class="flow-order-label">{{ t('formFlowPagesInOrder') }}</p>
     <div class="flow-scroll" tabindex="0"
       :aria-label="t('formFlowOverview')">
-      <div ref="canvas" class="flow-canvas">
+      <div ref="canvas" class="flow-canvas" :style="{ '--flow-lanes': routedCount }">
       <svg v-if="flowEdges.length" class="flow-connections" :viewBox="`0 0 ${flowSize.width} ${flowSize.height}`" aria-hidden="true">
         <defs>
-          <marker :id="markerId" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-            <path d="M 0 0 L 6 3 L 0 6 z" class="flow-marker--conditional" />
+          <marker :id="markerId" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto">
+            <path d="M 0 0 L 8 4 L 0 8 z" class="flow-marker--conditional" />
           </marker>
-          <marker :id="`${markerId}-default`" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-            <path d="M 0 0 L 6 3 L 0 6 z" class="flow-marker--default" />
+          <marker :id="`${markerId}-default`" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto">
+            <path d="M 0 0 L 8 4 L 0 8 z" class="flow-marker--default" />
           </marker>
         </defs>
         <path v-for="(edge, index) in flowEdges" :key="index" :d="edge.path"
@@ -194,11 +209,11 @@ watch(() => [props.definition.pages, props.definition.questions, props.locale], 
 .flow-connections { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; color: var(--ui-primary, #008cca); }
 .flow-marker--conditional { fill: var(--ui-primary, #008cca); }
 .flow-marker--default { fill: var(--ui-text-muted, #a2a3ab); }
-.flow-connection { fill: none; stroke-width: 1.5; stroke-linecap: round; }
+.flow-connection { fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .flow-connection--direct { stroke: var(--ui-primary, #008cca); stroke-width: 2; opacity: .85; }
 .flow-connection--conditional { stroke: var(--ui-primary, #008cca); opacity: .65; }
 .flow-connection--default { stroke: var(--ui-text-muted, #a2a3ab); stroke-dasharray: 4 4; opacity: .55; }
-.flow-track { display: flex; width: max-content; min-width: 100%; align-items: flex-start; gap: 3rem; margin: 0; padding: .5rem 0; list-style: none; }
+.flow-track { display: flex; width: max-content; min-width: 100%; align-items: flex-start; gap: 3rem; margin: 0; padding: .5rem 0 calc(min(var(--flow-lanes) * 16px, 160px) + 1.5rem); list-style: none; }
 .flow-step { position: relative; flex: none; }
 .flow-page { width: 16.5rem; }
 .flow-terminal { width: 6.5rem; }
@@ -224,8 +239,9 @@ watch(() => [props.definition.pages, props.definition.questions, props.locale], 
 .flow-hint { display: flex; align-items: center; gap: .4rem; margin-top: .5rem; color: var(--ui-text-muted, #a2a3ab); font-size: .75rem; }
 @container (max-width: 44rem) {
   .flow-scroll { overflow-x: visible; }
-  .flow-track { width: 100%; min-width: 0; flex-direction: column; gap: 3rem; }
+  .flow-canvas { width: 100%; min-width: 0; }
+  .flow-track { width: 100%; min-width: 0; flex-direction: column; gap: 3rem; padding: .5rem calc(min(var(--flow-lanes) * 16px, 64px) + 2rem) .5rem 0; }
   .flow-step { width: 100%; }
-  .flow-terminal-node { width: 6.5rem; }
+  .flow-terminal-node { width: 6.5rem; margin-inline: auto; }
 }
 </style>

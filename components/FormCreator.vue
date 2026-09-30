@@ -157,11 +157,11 @@ const heroActions = computed(() => props.disabled
       { label: tr('Save revision', 'Enregistrer la version'), icon: 'i-lucide-save',
         disabled: disabled.value, loading: busy.value, onClick: () => { void save() } }
     ])
-const heroBadges = computed(() => formId.value
+const heroBadges = computed(() => [...(formId.value
   ? revision.value > 0
     ? [{ variant: 'code', label: String(revision.value), prefixLabel: t('formLibraryRevision') }]
     : [{ enumName: 'publication_state', status: 'draft', label: t('formLibraryDraft') }]
-  : [])
+  : []), ...(dirty.value ? [{ variant: 'code', label: t('formUnsavedChanges') }] : [])])
 const saved = ref(JSON.stringify(definition.value))
 const dirty = computed(() => JSON.stringify(definition.value) !== saved.value)
 const disabled = computed(() => props.disabled || busy.value)
@@ -1014,33 +1014,17 @@ watch(() => props.agencyId, () => {
 
 <template>
   <section class="designer space-y-5" :aria-label="tr('Form designer', 'Concepteur de formulaires')">
+    <button v-if="!standalone" type="button" class="designer-back" @click="closeDesigner">
+      ← {{ props.opportunityId ? tr('Back to opportunity', 'Retour à l’occasion') : props.intakeId ? tr('Back to intake', 'Retour à l’appel') : tr('All forms', 'Tous les formulaires') }}
+    </button>
     <ExtensionEntityHero
-      v-if="standalone" icon="i-lucide-list" :title="definition.title[language] || t('formUntitled')"
+      icon="i-lucide-list" :title="definition.title[language] || t('formUntitled')"
       :description="definition.description?.[language] || undefined" :badges="heroBadges" :actions="heroActions" />
-    <div v-if="!standalone" class="designer-header">
-      <div>
-        <button type="button" class="designer-back" @click="closeDesigner">
-          ← {{ props.opportunityId ? tr('Back to opportunity', 'Retour à l’occasion') : props.intakeId ? tr('Back to intake', 'Retour à l’appel') : tr('All forms', 'Tous les formulaires') }}
-        </button>
-        <h3 class="designer-heading">
-          {{ definition.title[language] || t('formUntitled') }}
-        </h3>
-        <p class="designer-subtitle">
-          {{ formId ? revision > 0 ? `${tr('Revision', 'Version')} ${revision}` : t('formLibraryDraft') : tr('New form', 'Nouveau formulaire') }}<span v-if="dirty"> · {{ tr('Unsaved changes', 'Modifications non enregistrées') }}</span>
-        </p>
-      </div>
-      <div class="flex flex-wrap gap-2">
-        <ExtensionButton v-if="!props.disabled" color="neutral" variant="outline" icon="i-lucide-edit-3" @click="openDetails">
-          {{ t('formDetailsEdit') }}
-        </ExtensionButton>
-        <ExtensionSaveButton :label="tr('Save revision', 'Enregistrer la version')" :disabled="disabled" :loading="busy" @click="save" />
-      </div>
-    </div>
     <p v-if="loading" role="status">
       {{ tr('Loading forms…', 'Chargement des formulaires…') }}
     </p>
-    <component :is="standalone ? ExtensionEntityEditorWorkspace : 'div'" content-test-id="form-detail-content">
-      <template v-if="standalone" #sidebar>
+    <ExtensionEntityEditorWorkspace content-test-id="form-detail-content">
+      <template #sidebar>
         <ExtensionRouteTabs
           v-model="tab" :items="workflowTabs" :priority-values="['edit', 'flow', 'test', 'publish']" orientation="vertical"
           :ui="{ root: 'w-full', list: 'w-full flex-col items-stretch p-0', trigger: 'w-full justify-start' }" />
@@ -1076,39 +1060,12 @@ watch(() => props.agencyId, () => {
           </ul>
           <ExtensionButton
             color="neutral" variant="ghost" icon="i-lucide-plus"
-            class="mt-2 w-full justify-start" :disabled="disabled" @click="tab = 'edit'; addPage()">
+            class="designer-outline-add mt-2 w-full justify-start" :disabled="disabled" @click="tab = 'edit'; addPage()">
             {{ tr('Add page', 'Ajouter une page') }}
           </ExtensionButton>
         </nav>
       </template>
-      <div v-if="!standalone" class="designer-tabs" role="tablist" :aria-label="tr('Form workflow', 'Étapes du formulaire')">
-        <button
-          v-for="item in (props.intakeId || props.opportunityId ? ['edit', 'flow', 'test'] : ['edit', 'flow', 'test', 'publish']) as Array<'edit' | 'flow' | 'test' | 'publish'>" :key="item" type="button" role="tab" class="designer-tab"
-          :aria-selected="tab === item" :disabled="item === 'test' && !definition.questions.length"
-          @click="tab = item">
-          {{ item === 'edit' ? t('formEditTab') : item === 'flow' ? t('formFlowTab') : item === 'test' ? t('formTestTab') : t('formPublishTab') }}
-        </button>
-      </div>
-      <div :class="tab === 'edit' && !standalone ? 'designer-edit-layout' : ''">
-        <nav v-if="tab === 'edit' && !standalone" class="designer-outline" :aria-label="tr('Form pages', 'Pages du formulaire')">
-          <h4 class="designer-eyebrow">
-            {{ tr('PAGES & SECTIONS', 'PAGES ET SECTIONS') }}
-          </h4>
-          <ul class="space-y-1 text-sm">
-            <li v-for="node in nodes" :key="node.id">
-              <button
-                type="button" class="designer-outline-item"
-                :style="{ paddingInlineStart: `${8 + node.depth * 14}px` }"
-                :aria-current="selectedContainerId === node.id ? 'location' : undefined"
-                @click="selectedContainerId = node.id; selectedQuestionId = ''">
-                <span aria-hidden="true">{{ node.kind === 'page' ? '▤' : node.repeatFor ? '↻' : '⌞' }}</span> {{ node.title || node.id }}
-              </button>
-            </li>
-          </ul>
-          <ExtensionButton type="button" class="designer-outline-add" color="neutral" variant="outline" icon="i-lucide-plus" :disabled="disabled" @click="addPage">
-            {{ tr('Add page', 'Ajouter une page') }}
-          </ExtensionButton>
-        </nav>
+      <div>
         <div class="designer-content min-w-0 space-y-5">
           <template v-if="tab === 'edit'">
             <template v-if="selected">
@@ -1604,7 +1561,7 @@ watch(() => props.agencyId, () => {
       <ExtensionButton v-if="attachmentPending" :disabled="disabled || busy" :loading="busy" @click="retryAttachment">
         {{ t('intakeAttachRetry') }}
       </ExtensionButton>
-    </component>
+    </ExtensionEntityEditorWorkspace>
     <ExtensionModal :open="Boolean(pendingDeleteQuestion)" :title="t('formDeleteQuestionTitle')" @update:open="!$event && (pendingDeleteId = null)">
       <template #body>
         <p>{{ t('formDeleteQuestionConfirm', { question: pendingDeleteQuestion?.label[language] ?? '' }) }}</p>
@@ -1657,27 +1614,13 @@ watch(() => props.agencyId, () => {
 .question-settings-disclosures { padding-inline-start: 1rem; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; min-width: 0; }
 @media (max-width: 640px) { .question-settings-disclosures { padding-inline-start: .5rem; } }
 .designer { color: var(--ui-text, #e8e8ec); container-type: inline-size; }
-.designer-header { display: flex; align-items: end; justify-content: space-between; gap: 1.25rem; padding-bottom: 1rem; border-bottom: 1px solid var(--ui-border, #33343a); }
 .designer-back { display: inline-flex; align-items: center; gap: .4rem; margin-bottom: .7rem; color: var(--ui-text-muted, #a2a3ab); font-size: .875rem; }
 .designer-back:hover { color: var(--ui-text, #fff); text-decoration: underline; }
-.designer-heading { font-size: clamp(1.5rem, 2vw, 2rem); font-weight: 700; line-height: 1.2; letter-spacing: -.025em; }
-.designer-subtitle { margin-top: .35rem; color: var(--ui-text-muted, #a2a3ab); font-size: .875rem; }
-.designer-tabs { display: flex; gap: 1.5rem; border-bottom: 1px solid var(--ui-border, #33343a); }
-.designer-tab { position: relative; padding: .7rem .1rem .8rem; font-size: .875rem; font-weight: 600; color: var(--ui-text-muted, #a2a3ab); }
-.designer-tab[aria-selected="true"] { color: var(--ui-text, #fff); }
-.designer-tab[aria-selected="true"]::after { position: absolute; content: ''; height: 2px; bottom: -1px; inset-inline: 0; background: var(--ui-primary, #008cca); }
-.designer-tab:disabled { opacity: .45; cursor: not-allowed; }
 .designer-language { padding: .35rem .6rem; border: 1px solid var(--ui-border, #33343a); border-radius: .35rem; font-weight: 600; }
 .designer-language[aria-pressed="true"] { border-color: var(--ui-primary, #008cca); color: var(--ui-primary, #008cca); }
-.designer-edit-layout { display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: flex-start; }
 .designer-content { flex: 10 1 50rem; container-type: inline-size; }
-.designer-outline { border-inline-end: 1px solid var(--ui-border, #33343a); padding: .5rem 1rem .5rem 0; }
-.designer-edit-layout .designer-outline { flex: 1 0 12rem; }
 .designer-sidebar-outline { margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid var(--ui-border, #33343a); }
 .designer-eyebrow { color: var(--ui-text-muted, #a2a3ab); font-size: .68rem; letter-spacing: .11em; font-weight: 750; line-height: 1.4; }
-.designer-outline-item { display: block; width: 100%; padding-block: .6rem; border-radius: .4rem; color: var(--ui-text-muted, #a2a3ab); text-align: start; line-height: 1.35; }
-.designer-outline-item:hover { color: var(--ui-text, #fff); background: var(--ui-bg-elevated, #28282e); }
-.designer-outline-item[aria-current="location"] { color: var(--ui-text, #fff); background: var(--ui-bg-elevated, #28282e); font-weight: 650; }
 .designer-sidebar-row { display: flex; min-width: 0; align-items: center; border-radius: .4rem; color: var(--ui-text-muted, #a2a3ab); }
 .designer-sidebar-row:hover { color: var(--ui-text, #fff); background: var(--ui-bg-elevated, #28282e); }
 .designer-sidebar-row--active { color: var(--ui-primary, #008cca); background: color-mix(in srgb, var(--ui-primary, #008cca) 12%, transparent); }
@@ -1707,5 +1650,5 @@ button.designer-sidebar-disclosure:hover { color: var(--ui-primary, #008cca); }
 .designer-type span { display: grid; width: 1.2rem; place-items: center; color: var(--ui-primary, #008cca); font-size: .95rem; font-weight: 700; }
 .designer-type:hover:not(:disabled) { border-color: var(--ui-primary, #008cca); background: var(--ui-bg-elevated, #28282d); }
 .designer-type:disabled { opacity: .5; cursor: not-allowed; }
-@media (max-width: 700px) { .designer-header { align-items: start; flex-direction: column; } .designer-outline { border-inline-end: 0; border-bottom: 1px solid var(--ui-border, #33343a); padding: 0 0 1rem; } .designer-type-grid { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .designer-type-grid { grid-template-columns: 1fr; } }
 </style>

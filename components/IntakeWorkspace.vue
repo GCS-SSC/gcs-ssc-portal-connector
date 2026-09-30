@@ -48,6 +48,7 @@ const load = async () => {
     if (sequence !== loadSequence) return
     intakes.value = result.intakes
     streams.value = result.streams
+    if (selected.value?.published) editingForm.value = false
     if (selectedId.value && !result.intakes.some((item) => item.id === selectedId.value)) selectedId.value = null
   } catch {
     if (sequence === loadSequence) error.value = t('intakeLoadFailed')
@@ -224,7 +225,7 @@ const returnToList = () => {
 
     <template v-else-if="selected">
       <button v-if="!editingForm" type="button" class="text-sm text-primary hover:underline" @click="returnToList">← {{ t('intakeBack') }}</button>
-      <div class="flex flex-wrap items-start justify-between gap-4">
+      <div v-if="!editingForm" class="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h3 class="text-xl font-semibold text-highlighted">{{ localized(selected) }}</h3>
           <p class="mt-1 text-sm text-muted">{{ selected.published ? t('intakePublished') : t('intakeDraft') }} · {{ selected.startDate }} — {{ selected.endDate }}</p>
@@ -233,7 +234,7 @@ const returnToList = () => {
         <ExtensionButton v-if="!selected.published && !editingForm" :disabled="disabled || busy" @click="openDetails">{{ t('intakeEdit') }}</ExtensionButton>
       </div>
       <p v-if="selected.published" class="text-sm text-muted">{{ t('intakeFormPinned') }}</p>
-      <section class="space-y-3 border-t border-default pt-4">
+      <section v-if="!editingForm" class="space-y-3 border-t border-default pt-4">
         <h4 class="font-semibold text-highlighted">{{ t('intakeForm') }}</h4>
         <p v-if="selected.surveyId && selected.surveyRevision" class="text-sm text-muted">{{ t('intakeFormRevision', { revision: selected.surveyRevision }) }}</p>
         <p v-else class="text-sm text-muted">{{ t('intakeFormMissing') }}</p>

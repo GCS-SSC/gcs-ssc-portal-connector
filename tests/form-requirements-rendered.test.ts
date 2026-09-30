@@ -80,9 +80,10 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
     setup(props, { slots }) { return () => h('section', [h('h3', String(props.title)), slots.default?.()]) }
   })
   const hero = defineComponent({
-    props: ['title', 'description', 'actions'],
+    props: ['title', 'description', 'actions', 'badges'],
     setup(props) { return () => h('header', { 'data-form-hero': '' }, [
       h('h1', String(props.title)), h('p', String(props.description ?? '')),
+      ...(props.badges as Array<{label?: string}> ?? []).map(badge => h('span', badge.label)),
       ...(props.actions as Array<{ label: string; onClick: () => void }> ?? [])
         .map(action => h('button', { onClick: action.onClick }, action.label))
     ]) }
@@ -133,10 +134,11 @@ import FormChoiceEditor from '../components/FormChoiceEditor.vue'
 import FormCreator from '../components/FormCreator.vue'
 import FormLibrary from '../components/FormLibrary.vue'
 import IntakeWorkspace from '../components/IntakeWorkspace.vue'
+import OpportunityForms from '../components/OpportunityForms.vue'
 import FormTest from '../components/FormTest.vue'
 import FormTestControl from '../components/FormTestControl.vue'
 import type { SurveyField } from '@gcs-ssc/survey/vue'
-import { ExtensionSelect, ExtensionModal } from '@gcs-ssc/extensions/ui'
+import { ExtensionSelect, ExtensionModal, ExtensionResourceLayoutCard } from '@gcs-ssc/extensions/ui'
 import { readFormDraft } from '../components/form-draft-session'
 import PortalConnection from '../components/PortalConnection.vue'
 import ProponentVerification from '../components/ProponentVerification.vue'
@@ -169,6 +171,48 @@ beforeEach(() => {
 })
 
 describe('connector form requirements', () => {
+  it('restores intake navigation when a refreshed intake has been published by another editor', async () => {
+    const item = { id: 'D-ABCDE', revision: 1, published: false, surveyId: null, surveyRevision: null,
+      streamId: '1', nameEn: 'Application', nameFr: 'Demande', startDate: '2026-01-01', endDate: '2026-12-31' }
+    get.mockImplementation(async (path: string) => path.endsWith('/intakes') ? { intakes: [{ ...item }], streams: [] }
+      : { surveys: [], streams: [], agreements: [], organizations: [] })
+    const wrapper = mount(IntakeWorkspace, { props: { agencyId: '1' } })
+    await flushPromises()
+    await button(wrapper, 'Application').trigger('click')
+    await button(wrapper, 'Create application form').trigger('click')
+    expect(wrapper.findComponent(FormCreator).exists()).toBe(true)
+    item.published = true
+    wrapper.findComponent(FormCreator).vm.$emit('saved', 'V-ABCDE')
+    await flushPromises()
+    expect(wrapper.findComponent(FormCreator).exists()).toBe(false)
+    expect(button(wrapper, '← All intake opportunities').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it.each(['en', 'fr'] as const)('shares the agency editor shell with intake and opportunity forms in %s', async locale => {
+    state.locale = locale
+    for (const scope of [{ standalone: true }, { intakeId: 'D-ABCDE' }, { opportunityId: '7' }]) {
+      window.sessionStorage.clear()
+      const wrapper = mount(FormCreator, { props: { agencyId: '1', ...scope } })
+      await flushPromises()
+      expect(wrapper.find('[data-form-hero]').exists()).toBe(true)
+      expect(wrapper.find('[data-form-workspace]').exists()).toBe(true)
+      expect(wrapper.find('.designer-tabs').exists()).toBe(false)
+      expect(wrapper.find('.designer-outline').exists()).toBe(false)
+      expect(wrapper.find('.designer-back').exists()).toBe(!('standalone' in scope))
+      const nav = wrapper.get('[data-form-workspace] nav')
+      expect(nav.findAll('[role="tab"]')).toHaveLength('standalone' in scope ? 4 : 3)
+      await nav.findAll('[role="tab"]')[1]!.trigger('click')
+      expect(wrapper.find('.flow-map').exists()).toBe(true)
+      await wrapper.get('.designer-sidebar-item').trigger('click')
+      expect(nav.findAll('[role="tab"]')[0]!.attributes('aria-selected')).toBe('true')
+      await button(wrapper, locale === 'fr' ? 'Ajouter une page' : 'Add page').trigger('click')
+      expect(wrapper.findAll('.designer-sidebar-item')).toHaveLength(2)
+      expect(wrapper.get('[data-form-hero]').text()).toContain(locale === 'fr' ? 'Modifications non enregistrées' : 'Unsaved changes')
+      wrapper.unmount()
+    }
+  })
+
   it('creates form pages and questions without randomUUID on a LAN HTTP origin', async () => {
     const browserCrypto = globalThis.crypto
     vi.stubGlobal('crypto', { getRandomValues: browserCrypto.getRandomValues.bind(browserCrypto) })
@@ -176,7 +220,7 @@ describe('connector form requirements', () => {
       const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
       await flushPromises()
       await wrapper.get('.designer-outline-add').trigger('click')
-      expect(wrapper.findAll('.designer-outline-item')).toHaveLength(2)
+      expect(wrapper.findAll('.designer-sidebar-item')).toHaveLength(2)
       await wrapper.findAll('.designer-type').find(item => item.text().includes('Short answer'))!.trigger('click')
       expect(wrapper.text()).toContain('Questions · 1')
     } finally {
@@ -990,7 +1034,7 @@ describe('connector form requirements', () => {
     expect(destinations).toEqual(['End form'])
     await wrapper.get('select[name="conditionOperator0"]').setValue('equals')
     expect(wrapper.get('select[name="conditionValue0"]').findAll('option').map(item => item.text())).toEqual(['Yes'])
-    await wrapper.findAll('.designer-outline-item')[0]!.trigger('click')
+    await wrapper.findAll('.designer-sidebar-item')[0]!.trigger('click')
     expect(wrapper.get('select[name="pageNext"]').findAll('option').map(item => item.text()))
       .toEqual(['Next page in order', 'Page 2', 'End form'])
   })
@@ -1038,8 +1082,8 @@ describe('connector form requirements', () => {
     const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
     await flushPromises()
     await button(wrapper, 'Add repeating set').trigger('click')
-    expect(wrapper.findAll('.designer-outline-item')).toHaveLength(2)
-    expect(wrapper.findAll('.designer-outline-item')[1]!.attributes('aria-current')).toBe('location')
+    expect(wrapper.findAll('.designer-sidebar-item')).toHaveLength(2)
+    expect(wrapper.findAll('.designer-sidebar-item')[1]!.attributes('aria-current')).toBe('location')
     expect(wrapper.text()).toContain('ADD A QUESTION TO THIS SET')
     await wrapper.findAll('.designer-type').find(item => item.text().includes('Short answer'))!.trigger('click')
     const outer = readFormDraft('1')!.definition
@@ -1049,8 +1093,8 @@ describe('connector form requirements', () => {
     expect(outer.pages[0]!.questionIds).toContain(outerSet.repeatFor)
 
     await button(wrapper, 'Add nested repeating set').trigger('click')
-    expect(wrapper.findAll('.designer-outline-item')).toHaveLength(3)
-    expect(wrapper.findAll('.designer-outline-item')[2]!.attributes('aria-current')).toBe('location')
+    expect(wrapper.findAll('.designer-sidebar-item')).toHaveLength(3)
+    expect(wrapper.findAll('.designer-sidebar-item')[2]!.attributes('aria-current')).toBe('location')
     await wrapper.findAll('.designer-type').find(item => item.text().includes('Number'))!.trigger('click')
     const nested = readFormDraft('1')!.definition
     const nestedSet = nested.pages[0]!.groups[0]!.groups[0]!
@@ -1165,10 +1209,10 @@ describe('connector form requirements', () => {
     await button(wrapper, 'Add nested section').trigger('click')
     await button(wrapper, 'Add nested repeating set').trigger('click')
     const listId = readFormDraft('1')!.definition.questions[0]!.id
-    await wrapper.findAll('.designer-outline-item')[0]!.trigger('click')
+    await wrapper.findAll('.designer-sidebar-item')[0]!.trigger('click')
     await button(wrapper, 'Add nested section').trigger('click')
     await wrapper.get('select[name="repeatFor"]').setValue(listId)
-    await wrapper.findAll('.designer-outline-item')[1]!.trigger('click')
+    await wrapper.findAll('.designer-sidebar-item')[1]!.trigger('click')
     await button(wrapper, 'Remove section and its contents').trigger('click')
     expect(wrapper.text()).toContain('Remove the repeating set that depends on a field')
     expect(readFormDraft('1')!.definition.pages[0]!.groups).toHaveLength(2)
@@ -1199,10 +1243,10 @@ describe('connector form requirements', () => {
     await flushPromises()
     await button(wrapper, 'Edit').trigger('click')
     await wrapper.get('.designer-outline-add').trigger('click')
-    await wrapper.findAll('.designer-outline-item')[0]!.trigger('click')
+    await wrapper.findAll('.designer-sidebar-item')[0]!.trigger('click')
     await wrapper.get('select[name="pageNext"]').setValue(wrapper.get('select[name="pageNext"]').findAll('option')
       .find((item) => item.text() === 'Page 2')!.attributes('value')!)
-    await wrapper.findAll('.designer-outline-item')[1]!.trigger('click')
+    await wrapper.findAll('.designer-sidebar-item')[1]!.trigger('click')
     await button(wrapper, 'Remove empty group or page').trigger('click')
     expect((wrapper.get('select[name="pageNext"]').element as HTMLSelectElement).value).toBe('next')
     expect(wrapper.text()).toContain('Navigation to that page was updated')
@@ -1220,7 +1264,7 @@ describe('connector form requirements', () => {
     expect(wrapper.find('.designer-workspace').exists()).toBe(false)
     await wrapper.findAll('.flow-page-node')[0]!.trigger('click')
     expect(button(wrapper, 'Edit').attributes('aria-selected')).toBe('true')
-    expect(wrapper.findAll('.designer-outline-item')[0]!.attributes('aria-current')).toBe('location')
+    expect(wrapper.findAll('.designer-sidebar-item')[0]!.attributes('aria-current')).toBe('location')
   })
 
   it('requires a selected synchronized organization, Proponent and note before irreversible verification', async () => {
@@ -1425,7 +1469,7 @@ describe('form design guidance and valid calculated sources', () => {
     await button(wrapper, 'Add repeating set').trigger('click')
     await addType('Short answer').trigger('click')
     await wrapper.get('input[name="questionEn"]').setValue('Repeated source')
-    await wrapper.findAll('.designer-outline-item')[0]!.trigger('click')
+    await wrapper.findAll('.designer-sidebar-item')[0]!.trigger('click')
     await wrapper.findAll('.designer-question')[1]!.trigger('click')
     const sources = wrapper.get('[role="group"][aria-labelledby="computed-sources-label"]')
     expect(sources.findAll('input[type="checkbox"]')).toHaveLength(1)
@@ -2065,4 +2109,84 @@ describe('owning import diagnostics in live delivery UI', () => {
       wrapper.unmount()
     })
   }
+})
+
+
+describe('opportunity forms agency layout', () => {
+  const context = { target: 'opportunity' as const, agencyId: '1', opportunityId: '181', streamId: '31',
+    ownerType: 'fundingopportunity' as const, ownerId: '181', scope: { type: 'agency' as const, agencyId: '1' } }
+  const forms = [
+    { surveyId: 'V-ABCDE', revision: 2, title: { en: 'First form', fr: 'Premier formulaire' } },
+    { surveyId: 'V-FGHJK', revision: 4, title: { en: 'Second form', fr: 'Deuxième formulaire' } }
+  ]
+  const setup = async (options = { published: false, canWrite: true, disabled: false }) => {
+    get.mockResolvedValue({ forms, published: options.published, canWrite: options.canWrite })
+    const wrapper = mount(OpportunityForms, { props: { context, disabled: options.disabled },
+      global: { stubs: { FormCreator: true } } })
+    await flushPromises()
+    return wrapper
+  }
+  it.each(['en', 'fr'] as const)('uses the shared table and localized controls in %s', async locale => {
+    state.locale = locale
+    const wrapper = await setup()
+    expect(wrapper.find('[data-resource-table]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-table-row]').map(row => row.attributes('data-table-row'))).toEqual(['V-ABCDE', 'V-FGHJK'])
+    expect(wrapper.find('h3').text()).toBe(locale === 'en' ? 'Application forms' : 'Formulaires de demande')
+    expect(wrapper.find('input').attributes('aria-label')).toBe(locale === 'en' ? 'Search forms' : 'Rechercher des formulaires')
+    expect(wrapper.find('[aria-label^="' + (locale === 'en' ? 'Move up: First' : 'Monter: Premier') + '"]').attributes('disabled')).toBeDefined()
+    await wrapper.find('input').setValue('Second')
+    expect(wrapper.findAll('[data-table-row]')).toHaveLength(1)
+    await wrapper.find('[aria-label^="' + (locale === 'en' ? 'Move up' : 'Monter') + '"]').trigger('click')
+    await flushPromises()
+    expect(post).toHaveBeenCalledWith('/agencies/1/opportunities/181', { action: 'saveForms',
+      forms: [{ surveyId: 'V-FGHJK', revision: 4 }, { surveyId: 'V-ABCDE', revision: 2 }] })
+  })
+  it('returns to a populated page after removing the last form on a later page', async () => {
+    const six = Array.from({ length: 6 }, (_, index) => ({ ...forms[0]!, surveyId: `V-ABCDE${index}`,
+      title: { en: `Form ${index}`, fr: `Formulaire ${index}` } }))
+    get.mockResolvedValue({ forms: six, published: false, canWrite: true })
+    const wrapper = mount(OpportunityForms, { props: { context }, global: { stubs: { FormCreator: true } } })
+    await flushPromises()
+    wrapper.findComponent(ExtensionResourceLayoutCard).vm.$emit('update:pagination', { pageIndex: 1, pageSize: 5 })
+    await flushPromises()
+    expect(wrapper.findAll('[data-table-row]')).toHaveLength(1)
+    get.mockResolvedValue({ forms: six.slice(0, 5), published: false, canWrite: true })
+    await wrapper.find('[aria-label="Remove form: Form 5"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('[data-table-row]')).toHaveLength(5)
+  })
+  it('keeps editor scope and closes back into the collection', async () => {
+    const wrapper = await setup()
+    await wrapper.find('[aria-label="Edit form: First form"]').trigger('click')
+    const creator = wrapper.findComponent(FormCreator)
+    expect(creator.props()).toMatchObject({ agencyId: '1', opportunityId: '181', streamId: '31', selectedFormId: 'V-ABCDE', disabled: false })
+    creator.vm.$emit('close')
+    await flushPromises()
+    expect(wrapper.find('[data-resource-table]').exists()).toBe(true)
+  })
+  it('publishes and withdraws through the opportunity endpoint', async () => {
+    const wrapper = await setup()
+    get.mockResolvedValue({ forms, published: true, canWrite: true })
+    await button(wrapper, 'Publish opportunity').trigger('click')
+    await flushPromises()
+    expect(post).toHaveBeenCalledWith('/agencies/1/opportunities/181', { action: 'publish' })
+    expect(wrapper.find('[aria-label="Move up: Second form"]').exists()).toBe(false)
+    await wrapper.find('[aria-label="View form: First form"]').trigger('click')
+    expect(wrapper.findComponent(FormCreator).props('disabled')).toBe(true)
+    wrapper.findComponent(FormCreator).vm.$emit('close')
+    await flushPromises()
+    await button(wrapper, 'Withdraw opportunity').trigger('click')
+    await flushPromises()
+    expect(post).toHaveBeenCalledWith('/agencies/1/opportunities/181', { action: 'withdraw' })
+  })
+  it.each([{ published: false, canWrite: false, disabled: false },
+    { published: false, canWrite: true, disabled: true }])('keeps read-only access for %j', async options => {
+    const wrapper = await setup(options)
+    expect(wrapper.find('[aria-label="Remove form: First form"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Publish opportunity')
+    expect(wrapper.text()).not.toContain('Create form')
+    await wrapper.find('[aria-label="View form: First form"]').trigger('click')
+    expect(wrapper.findComponent(FormCreator).props('disabled')).toBe(true)
+    expect(post).not.toHaveBeenCalled()
+  })
 })
