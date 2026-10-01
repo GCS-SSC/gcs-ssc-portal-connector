@@ -1,6 +1,11 @@
 import { sql, type Kysely } from 'kysely'
 import { setEncryptedExtensionSecret } from '@gcs-ssc/extensions/server'
 import { asConnectorDb, type ConnectorDatabase } from './db.ts'
+import { designerSurveySchema } from '@gcs-ssc/survey'
+import { complexCommunityHealthForm } from '../demo/community-health-form.ts'
+import { enqueueForm } from './operations.ts'
+
+export const DEMO_APPLICATION_FORM_ID = 'V-HCANADA'
 
 export interface DemoPortalOrganization {
   id: string
@@ -20,12 +25,19 @@ export interface DemoSeedOptions {
   secretRootKey?: string
   preconfigureConnection?: boolean
   organizations: DemoPortalOrganization[]
+  seedApplicationForm?: boolean
+  requireEnabled?: boolean
 }
 
-/** Enables the connector first; the host applies extension migrations on its next startup. */
+/**
+ * Enables the connector first; the host applies extension migrations on its next startup.
+ * @param db Connector database.
+ * @param options Explicit local fixture configuration.
+ * @returns Seed phase and the existing Health Canada showcase identities.
+ */
 export const seedHealthCanadaPortalConnector = async (
   db: Kysely<ConnectorDatabase>, options: DemoSeedOptions
-): Promise<{ phase: 'restart-required' | 'ready'; agencyId: string; agreementId: string; proponentId: string; proponentName: string }> => {
+): Promise<{ phase: 'restart-required' | 'ready' | 'disabled'; agencyId: string; agreementId: string; proponentId: string; proponentName: string }> => {
   return db.transaction().execute(async transaction => {
     const agency = (await sql<{ id: string }>`
       SELECT id::text FROM "Agency_Profile"
@@ -51,6 +63,13 @@ export const seedHealthCanadaPortalConnector = async (
       WHERE extension_key='gcs-ssc-portal-connector' AND agency_id=${agency.id}::bigint AND _deleted=false
       FOR UPDATE
     `.execute(transaction)).rows[0]
+    const result = {
+      agencyId: agency.id,
+      agreementId: recipient.agreement_id,
+      proponentId: recipient.proponent_id,
+      proponentName: recipient.proponent_name
+    }
+    if (options.requireEnabled && !enablement?.enabled) return { phase: 'disabled' as const, ...result }
     if (enablement && !enablement.enabled) {
       await sql`UPDATE extensions.agency_enablement SET enabled=true
         WHERE id=${enablement.id}::bigint`.execute(transaction)
@@ -64,12 +83,6 @@ export const seedHealthCanadaPortalConnector = async (
     const extensionTable = (await sql<{ present: boolean }>`
       SELECT to_regclass('extensions.gcs_portal_organization') IS NOT NULL AS present
     `.execute(transaction)).rows[0]?.present
-    const result = {
-      agencyId: agency.id,
-      agreementId: recipient.agreement_id,
-      proponentId: recipient.proponent_id,
-      proponentName: recipient.proponent_name
-    }
     if (!extensionTable) return { phase: 'restart-required' as const, ...result }
 
     const connection = await transaction.selectFrom('extensions.gcs_portal_connection')
@@ -95,6 +108,15 @@ export const seedHealthCanadaPortalConnector = async (
         ownerType: 'agency', ownerId: agency.id,
         secretKey: 'portal-key', value: { key: options.portalKey }
       })
+    }
+
+    if (options.seedApplicationForm) {
+      const definition = designerSurveySchema.parse(complexCommunityHealthForm())
+      const form = await transaction.insertInto('extensions.gcs_portal_form').values({
+        id: DEMO_APPLICATION_FORM_ID, agency_id: agency.id, definition,
+        revision: 1, portal_id: null, portal_revision: null
+      }).onConflict(conflict => conflict.column('id').doNothing()).returning('id').executeTakeFirst()
+      if (form) await enqueueForm(transaction, agency.id, form.id)
     }
 
     for (const organization of options.organizations) {

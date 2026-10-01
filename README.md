@@ -65,3 +65,22 @@ GCS Funding Opportunities have a **Portal forms** tab. Staff with the opportunit
 Run `bun run typecheck` and `bun run test:unit` in this package. The portal and host run their own checks.
 
 The extension and portal each include the same compiled survey provider under `vendor/survey` so workspace and production installs are self-contained. Its editable source remains in `gcs-ssc-survey`; rebuild there and refresh both vendor copies after a provider change. Replace the copies with a pinned Git release when version 3 is published.
+
+## Ready-to-test local seed
+
+Launch the companion Portal on port **3003**, then run `bun run dev:clean` in GCS.
+The first GCS request initializes Health Canada's enabled connector, localhost
+connection and encrypted public demo API credential. The **Forms** library starts
+with **Community health project plan / Plan de projet de santé communautaire**, a
+four-page bilingual form with all 14 provider types, nested repeating sections,
+conditional questions, page branching, dependent selections, calculated values,
+tables, budgets, activities and attachments. Open it and use **Test** immediately.
+Its saved revision automatically enters the normal Portal sync queue; delivery
+starts after the worker's short startup grace. If the Portal starts later, the
+queued form retries automatically. It appears in the Portal survey designer after
+sync; publication to an organization or intake uses the existing Publish workflow.
+
+Existing connections and edited forms survive restarts. `GCS_PORTAL_DEMO_SEED=0`
+disables automatic initialization, and production processes never initialize this
+local fixture. Override `PORTAL_DEMO_URL`, `PORTAL_DEMO_HEALTH_CANADA_AGENCY_ID`
+or `PORTAL_DEMO_HEALTH_CANADA_TOKEN` for a different local companion configuration.
