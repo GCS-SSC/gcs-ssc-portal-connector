@@ -53,13 +53,14 @@ const importClaim = async (
   update: PortalUpdate, submission: PortalSubmission
 ): Promise<string> => {
   const item = claimItemSchema.parse(submission.items.find((candidate) => candidate.itemSubmissionId === update.itemSubmissionId))
-  const proponentId = submission.agreementReference?.externalApplicantRecipientId
-  if (!proponentId) throw new Error('The organization has no verified GCS proponent mapping.')
   return authorizedWrite(context, async (transaction) => {
     const identity = await transaction.selectFrom('extensions.gcs_portal_identity').select('proponent_id')
       .where('agency_id', '=', agencyId).where('portal_organization_id', '=', submission.organizationId)
       .executeTakeFirst()
-    if (identity?.proponent_id !== proponentId) throw new Error('The portal organization is not verified for this GCS recipient.')
+    const proponentId = identity?.proponent_id
+    if (!proponentId || submission.agreementReference?.externalApplicantRecipientId !== proponentId
+      || item.claim.applicantRecipientId !== proponentId)
+      throw new Error('The portal organization is not verified for this GCS recipient.')
     const existing = await transaction.selectFrom('extensions.gcs_portal_receipt').selectAll()
       .where('agency_id', '=', agencyId)
       .where('item_submission_id', '=', item.itemSubmissionId).forUpdate().executeTakeFirst()

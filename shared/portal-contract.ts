@@ -34,6 +34,7 @@ export const claimItemSchema = z.object({
   mappingComplete: z.literal(true),
   claim: z.object({
     agreementId: externalId,
+    applicantRecipientId: externalId,
     streamId: externalId,
     fiscalYearId: externalId,
     isFinalForYear: z.boolean(),
