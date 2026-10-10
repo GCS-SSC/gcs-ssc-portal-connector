@@ -44,7 +44,7 @@ export const publishAgreement = async (context: GcsExtensionRouteContext) => {
 }
 
 export const publishAgreementCore = async (
-  db: ConnectorDb, agencyId: string, input: z.infer<typeof publicationInput>
+  db: ConnectorDb, agencyId: string, input: z.infer<typeof publicationInput>, deliveryScope?: string
 ) => {
   const activeLink = await db.selectFrom('extensions.gcs_portal_verification')
     .select('portal_organization_id').where('portal_organization_id', '=', input.portalOrganizationId)
@@ -53,11 +53,13 @@ export const publishAgreementCore = async (
   const connection = await db.selectFrom('extensions.gcs_portal_connection').selectAll()
     .where('agency_id', '=', agencyId).executeTakeFirst()
   if (!connection) throw new Error('Connect an organization portal before publishing.')
-  const client = queuePortalClient(db, agencyId, {
+  const source = await projectAgreement(db, agencyId, input.agreementId, input.proponentId)
+  const digest = createHash('sha256').update(stable({ source, organizationId: input.portalOrganizationId })).digest('hex')
+  const portalConnection = {
     portalUrl: connection.portal_url, portalAgencyId: connection.portal_agency_id,
     key: await readPortalCredentialFromDb(asConnectorDb(db), agencyId)
-  })
-  const source = await projectAgreement(db, agencyId, input.agreementId, input.proponentId)
+  }
+  const client = queuePortalClient(db, agencyId, portalConnection, deliveryScope ? `${deliveryScope}:${digest}` : undefined)
   const { agreement, fiscalYears, lines } = source
   const structure = await client.structure()
   const programId = structure.programs.find((program) => program.sourceSystem === 'gcs-ssc'
@@ -145,6 +147,8 @@ export const publishAgreementCore = async (
     organizationId: input.portalOrganizationId,
     foreignApplicantRecipientId: input.proponentId
   })
+  const setClient = queuePortalClient(db, agencyId, portalConnection,
+    deliveryScope ? `${deliveryScope}:sets:${portalAgreementId}:${revision}` : undefined)
   const existingSets = (await client.sets()).sets.filter((item) =>
     item.organizationId === input.portalOrganizationId && item.agreementId === portalAgreementId
     && item.sourceSystem === 'gcs-ssc-portal-connector')
@@ -158,8 +162,8 @@ export const publishAgreementCore = async (
       publishedSetIds.push(matching.id)
       continue
     }
-    for (const old of matches.filter((set) => set.published)) await client.withdrawSet(old.id, old.revision)
-    const set = await client.createSet({
+    for (const old of matches.filter((set) => set.published)) await setClient.withdrawSet(old.id, old.revision)
+    const set = await setClient.createSet({
       organizationId: input.portalOrganizationId,
       agencyId: connection.portal_agency_id,
       agreementId: portalAgreementId,
@@ -168,10 +172,9 @@ export const publishAgreementCore = async (
       sourceSystem: 'gcs-ssc-portal-connector', foreignSystemId: null,
       items: [{ id: `${kind}-${year.id}`, kind, fiscalYearId: year.id }]
     })
-    await client.publishSet(set.id, set.revision)
+    await setClient.publishSet(set.id, set.revision)
     publishedSetIds.push(set.id)
   }
-  const digest = createHash('sha256').update(stable({ source, organizationId: input.portalOrganizationId })).digest('hex')
   await db.transaction().execute(async (transaction) => {
     await transaction.insertInto('extensions.gcs_portal_publication').values({
       agency_id: agencyId,

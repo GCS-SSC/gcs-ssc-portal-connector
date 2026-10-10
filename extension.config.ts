@@ -14,7 +14,7 @@ export default defineGcsExtension({
     'agency-only-configuration', 'configuration-access', 'server-handlers',
     'server-handler-rbac', 'migrations', 'extension-secrets', 'audit-ownership',
     'agency-config', 'extension-ui', 'extension-api-client', 'host-api-client',
-    'scheduled-agreement-import', 'scheduled-intake-import', 'extension-lifecycle-hooks', 'agency-workspace', 'entity-tabs'
+    'scheduled-agreement-import', 'scheduled-intake-import', 'l1-queue', 'extension-lifecycle-hooks', 'agency-workspace', 'entity-tabs'
   ],
   admin: {
     agency: { path: './components/PortalConnection.vue' },

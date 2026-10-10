@@ -51,7 +51,7 @@ export const drainOutbox = async (db: ConnectorDb, limit: number, agencyId?: str
       const publication = await publishAgreementCore(db, row.agency_id, {
         agreementId: row.agreement_id, proponentId: row.proponent_id,
         portalOrganizationId: row.portal_organization_id
-      })
+      }, `agreement-delivery:${row.id}`)
       await sql`UPDATE extensions.gcs_portal_outbox SET state='delivered', delivered_at=now(),
         updated_at=now(), last_error=NULL,
         delivery_payload=${JSON.stringify(publication.deliveryPayload)}::jsonb WHERE id=${row.id}::bigint

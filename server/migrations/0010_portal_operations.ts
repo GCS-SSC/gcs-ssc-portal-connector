@@ -16,6 +16,8 @@ export default defineGcsExtensionMigration({
     await sql`CREATE INDEX gcs_portal_form_agency ON extensions.gcs_portal_form (agency_id, updated_at DESC)`.execute(db)
     await sql`CREATE TABLE extensions.gcs_portal_operation (
       id bigserial PRIMARY KEY,
+      idempotency_key text NOT NULL UNIQUE DEFAULT gen_random_uuid()::text,
+      deduplication_key text UNIQUE,
       agency_id bigint NOT NULL REFERENCES "Agency_Profile"(id),
       kind text NOT NULL CHECK (kind IN ('request', 'form')),
       method text,

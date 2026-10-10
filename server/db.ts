@@ -13,6 +13,8 @@ export interface ConnectorDatabase extends ExtensionSecretDatabase {
   }
   'extensions.gcs_portal_operation': {
     id: Generated<string>
+    idempotency_key: Generated<string>
+    deduplication_key: Generated<string | null>
     agency_id: string
     kind: 'request' | 'form'
     method: string | null

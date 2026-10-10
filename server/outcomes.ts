@@ -63,7 +63,7 @@ export const drainOutcomeOutbox = async (db: ConnectorDb, limit: number, agencyI
       const status = visible ? { en: source.status_en!, fr: source.status_fr!, colour: source.status_colour! } : null
       const client = queuePortalClient(db, row.agency_id, { portalUrl: source.portal_url,
         portalAgencyId: source.portal_agency_id,
-        key: await readPortalCredentialFromDb(asConnectorDb(db), row.agency_id) })
+        key: await readPortalCredentialFromDb(asConnectorDb(db), row.agency_id) }, `outcome-delivery:${row.id}`)
       await client.publishItemStatus(source.submission_id, source.item_submission_id,
         source.gcs_entity_id, status)
       await sql`UPDATE extensions.gcs_portal_outcome_outbox SET state='delivered', delivered_at=now(),

@@ -22,17 +22,24 @@ export class PortalRequestError extends Error {
 export type PortalMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 export type PortalMutationQueue = (path: string, method: Exclude<PortalMethod, 'GET'>, body?: object) => Promise<unknown>
 
+/** Canonical wire bytes survive JSONB storage and response-loss retries. */
+export const serializePortalBody = (body: object) => JSON.stringify(body, (_key, value: unknown) =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)))
+    : value)
+
 export const portalRequest = async (connection: PortalConnection, path: string,
-  method: PortalMethod = 'GET', body?: object, transport: typeof fetch = fetch): Promise<unknown> => {
+  method: PortalMethod = 'GET', body?: object, transport: typeof fetch = fetch, idempotencyKey?: string): Promise<unknown> => {
     const url = new URL(`api/government/${path}`, connection.portalUrl)
     const response = await transport(url, {
       method, redirect: 'manual', signal: AbortSignal.timeout(30000),
       headers: {
         Authorization: `Bearer ${connection.key}`,
         Accept: 'application/json',
+        ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
         ...(body ? { 'Content-Type': 'application/json' } : {})
       },
-      ...(body ? { body: JSON.stringify(body) } : {})
+      ...(body ? { body: serializePortalBody(body) } : {})
     })
     if (!response.ok) throw new PortalRequestError(response.status, path)
     const bytes = await response.arrayBuffer()

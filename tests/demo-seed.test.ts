@@ -1,4 +1,4 @@
-import { Kysely, sql } from 'kysely'
+import { Kysely, sql, UpdateQueryBuilder } from 'kysely'
 import { KyselyPGlite } from 'kysely-pglite'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEMO_APPLICATION_FORM_ID, seedHealthCanadaPortalConnector } from '../server/demo-seed.ts'
@@ -6,7 +6,7 @@ import type { ConnectorDatabase } from '../server/db.ts'
 import { initializeLocalPortalDemo } from '../server/local-demo.ts'
 import { getEncryptedExtensionSecret } from '@gcs-ssc/extensions/server'
 import migration0010 from '../server/migrations/0010_portal_operations.ts'
-import { drainOperations } from '../server/operations.ts'
+import { drainOperations, enqueueForm, queuePortalClient } from '../server/operations.ts'
 import { designerSurveySchema } from '@gcs-ssc/survey'
 import { formPublicationIssues } from '../server/form-readiness.ts'
 
@@ -146,6 +146,89 @@ describe('automatic local Portal demo', () => {
     expect((await db.selectFrom('extensions.gcs_portal_form').select(['portal_id', 'portal_revision']).executeTakeFirstOrThrow()))
       .toEqual({ portal_id: 'V-ABCDE', portal_revision: 1 })
     expect((await drainOperations(db, 1)).results).toEqual([])
+  })
+
+  it('replays a committed form with the same key and bytes, then delivers the next saved revision', async () => {
+    const db = await readyFixture()
+    await initializeLocalPortalDemo(db)
+    const initial = await db.selectFrom('extensions.gcs_portal_form').selectAll().executeTakeFirstOrThrow()
+    const edited = designerSurveySchema.parse(initial.definition)
+    edited.title.en = 'Second saved revision'
+    await db.updateTable('extensions.gcs_portal_form').set({ definition: edited, revision: 2 }).execute()
+    await enqueueForm(db, '11', initial.id)
+    const requests: Array<{ key: string; body: string; url: string }> = []
+    const transport = vi.fn(async (url: URL, request: RequestInit) => {
+      const headers = request.headers as Record<string, string>
+      requests.push({ key: headers['Idempotency-Key']!, body: request.body as string, url: String(url) })
+      if (requests.length === 1) throw new Error('Response lost after Portal commit')
+      return Response.json({ survey: { id: 'V-ABCDE', revision: requests.length === 2 ? 1 : 2 } })
+    })
+    vi.stubGlobal('fetch', transport)
+    expect((await drainOperations(db, 1)).results[0]?.delivered).toBe(false)
+    await sql`UPDATE extensions.gcs_portal_operation SET next_attempt_at=now() WHERE state='pending'`.execute(db)
+    expect((await drainOperations(db, 2)).results.map(result => result.delivered)).toEqual([true, true])
+    expect(requests[0]).toEqual(requests[1])
+    expect(requests[0]!.key).toMatch(/^[0-9a-f-]{36}$/)
+    expect(requests[2]!.key).not.toBe(requests[0]!.key)
+    expect(JSON.parse(requests[0]!.body).definition.title.en).toBe(
+      designerSurveySchema.parse(initial.definition).title.en)
+    expect(JSON.parse(requests[2]!.body)).toMatchObject({ expectedRevision: 1,
+      definition: { title: { en: 'Second saved revision' } } })
+    expect(requests[2]!.url).toContain('/surveys/V-ABCDE')
+    expect((await db.selectFrom('extensions.gcs_portal_form').select('portal_revision').executeTakeFirstOrThrow()).portal_revision).toBe(2)
+  })
+
+  it('reuses an outer delivery step after its queued mutation recovers', async () => {
+    const db = await readyFixture()
+    await initializeLocalPortalDemo(db)
+    await db.deleteFrom('extensions.gcs_portal_operation').execute()
+    const transport = vi.fn().mockRejectedValueOnce(new Error('Response lost after commit'))
+      .mockImplementation(async () => Response.json({ set: { id: 'S-ABCDE', revision: 1 } }))
+    vi.stubGlobal('fetch', transport)
+    const connection = { portalUrl: 'http://localhost:3003/', portalAgencyId: 'G-NFAFV', key: options.portalKey }
+    const first = queuePortalClient(db, '11', connection, 'agreement-delivery:123')
+    await expect(first.createSet({ nameEn: 'Claim set' })).rejects.toThrow('Response lost')
+    await sql`UPDATE extensions.gcs_portal_operation SET next_attempt_at=now()`.execute(db)
+    expect((await drainOperations(db, 1)).results[0]?.delivered).toBe(true)
+    const retried = queuePortalClient(db, '11', connection, 'agreement-delivery:123')
+    expect(await retried.createSet({ nameEn: 'Claim set' })).toEqual({ id: 'S-ABCDE', revision: 1 })
+    expect(transport).toHaveBeenCalledTimes(2)
+    expect(await db.selectFrom('extensions.gcs_portal_operation').select('id').execute()).toHaveLength(1)
+    await queuePortalClient(db, '11', connection, 'agreement-delivery:124').createSet({ nameEn: 'Claim set' })
+    expect(transport).toHaveBeenCalledTimes(3)
+  })
+
+  it('stops before I/O when a replacement worker owns the form snapshot lease', async () => {
+    const db = await readyFixture()
+    await initializeLocalPortalDemo(db)
+    const transport = vi.fn()
+    vi.stubGlobal('fetch', transport)
+    const snapshotWrite = vi.spyOn(UpdateQueryBuilder.prototype, 'executeTakeFirst').mockImplementationOnce(async () => {
+      await sql`UPDATE extensions.gcs_portal_operation SET attempts=attempts+1 WHERE state='leased'`.execute(db)
+      return undefined as never
+    })
+    try {
+      expect((await drainOperations(db, 1)).results[0]).toMatchObject({ delivered: false,
+        error: 'Portal operation lease expired before delivery.' })
+      expect(transport).not.toHaveBeenCalled()
+      const operation = await db.selectFrom('extensions.gcs_portal_operation').selectAll().executeTakeFirstOrThrow()
+      expect(operation).toMatchObject({ state: 'leased', attempts: 2 })
+      expect(operation.body).not.toHaveProperty('request')
+    } finally { snapshotWrite.mockRestore() }
+  })
+
+  it('fences form mappings and success after another worker takes the delivery lease', async () => {
+    const db = await readyFixture()
+    await initializeLocalPortalDemo(db)
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      await sql`UPDATE extensions.gcs_portal_operation SET attempts=attempts+1 WHERE state='leased'`.execute(db)
+      return Response.json({ survey: { id: 'V-ABCDE', revision: 1 } })
+    }))
+    expect((await drainOperations(db, 1)).results[0]).toMatchObject({ delivered: false })
+    expect(await db.selectFrom('extensions.gcs_portal_form').select('portal_id').executeTakeFirstOrThrow())
+      .toEqual({ portal_id: null })
+    expect(await db.selectFrom('extensions.gcs_portal_operation').select(['state', 'attempts']).executeTakeFirstOrThrow())
+      .toEqual({ state: 'leased', attempts: 2 })
   })
 
   it('does not initialize in production, when opted out, or after Health Canada disables the connector', async () => {
