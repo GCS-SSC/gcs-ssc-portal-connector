@@ -51,7 +51,7 @@ const updateTable = (items: TableRow[]) => props.field.setValue(JSON.stringify(i
       <p v-if="field.hint" class="text-sm text-muted">{{ field.hint }}</p>
       <div v-for="(row, index) in rows()" :key="row.id" class="flex items-end gap-2">
         <ExtensionFormField :label="previewLabel(`${field.label} ${index + 1}`, true)" :name="`${field.id}-${row.id}`">
-          <ExtensionInput :model-value="row.value" :name="`${field.id}-${row.id}`" required :disabled="field.disabled"
+          <ExtensionInput :model-value="row.value" :name="`${field.id}-${row.id}`" :aria-describedby="field.error ? `${field.id}-error` : undefined" required :disabled="field.disabled"
             @update:model-value="updateList(rows().map((item) => item.id === row.id ? { ...item, value: answerText($event) } : item))" />
         </ExtensionFormField>
         <ExtensionButton type="button" color="neutral" variant="ghost" :disabled="field.disabled" @click="updateList(rows().filter((item) => item.id !== row.id))">{{ tr('Remove', 'Retirer') }}</ExtensionButton>
@@ -67,6 +67,7 @@ const updateTable = (items: TableRow[]) => props.field.setValue(JSON.stringify(i
         <ExtensionFormField v-for="column in field.question.columns" :key="column.id"
           :label="previewLabel(column.label[locale], column.required)" :name="`${field.id}-${row.id}-${column.id}`">
           <ExtensionInput :model-value="row.cells[column.id] ?? ''" :name="`${field.id}-${row.id}-${column.id}`"
+            :aria-describedby="field.error ? `${field.id}-error` : undefined"
             :required="column.required" :disabled="field.disabled" :type="column.type === 'number' ? 'number' : column.type === 'date' ? 'date' : 'text'" @update:model-value="updateTable(table().map((item) => item.id === row.id
               ? { ...item, cells: { ...item.cells, [column.id]: answerText($event) } } : item))" />
         </ExtensionFormField>

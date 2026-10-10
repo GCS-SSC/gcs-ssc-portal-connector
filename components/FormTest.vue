@@ -56,7 +56,7 @@ const previous = (back: () => void, complete: boolean, pageIndex: number) => {
 </script>
 
 <template>
-  <div class="space-y-5">
+  <div class="space-y-5" :lang="locale">
     <p class="text-sm text-muted">
       {{ t('previewNotice') }}
     </p>

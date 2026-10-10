@@ -89,10 +89,10 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
     ]) }
   })
   const routeTabs = defineComponent({
-    props: ['modelValue', 'items'], emits: ['update:modelValue'],
+    props: ['modelValue', 'items', 'externalPanelId'], emits: ['update:modelValue'],
     setup(props, { emit }) { return () => h('nav', { 'aria-label': 'Form workflow' },
       (props.items as Array<{ value: string; label: string }>).map(item => h('button', {
-        role: 'tab', 'aria-selected': props.modelValue === item.value,
+        role: 'tab', 'aria-selected': props.modelValue === item.value, 'aria-controls': props.modelValue === item.value ? props.externalPanelId : undefined,
         onClick: () => emit('update:modelValue', item.value)
       }, item.label))) }
   })
@@ -204,6 +204,9 @@ describe('connector form requirements', () => {
       expect(nav.findAll('[role="tab"]')).toHaveLength('standalone' in scope ? 4 : 3)
       await nav.findAll('[role="tab"]')[1]!.trigger('click')
       expect(wrapper.find('.flow-map').exists()).toBe(true)
+      const panel = wrapper.get('[role="tabpanel"]')
+      expect(nav.findAll('[role="tab"]')[1]!.attributes('aria-controls')).toBe(panel.attributes('id'))
+      expect(panel.attributes('aria-label')).toBe(nav.findAll('[role="tab"]')[1]!.text())
       await wrapper.get('.designer-sidebar-item').trigger('click')
       expect(nav.findAll('[role="tab"]')[0]!.attributes('aria-selected')).toBe('true')
       await button(wrapper, locale === 'fr' ? 'Ajouter une page' : 'Add page').trigger('click')
@@ -1051,6 +1054,11 @@ describe('connector form requirements', () => {
         { id: 'page_2', title: { en: 'Second page', fr: 'Deuxième page' }, questionIds: ['second'], groups: [], branches: [] }
       ]
     } } })
+    expect(wrapper.attributes('lang')).toBe('en')
+    await wrapper.setProps({ locale: 'fr' })
+    expect(wrapper.attributes('lang')).toBe('fr')
+    expect(wrapper.get('h3').text()).toBe('Rapport')
+    await wrapper.setProps({ locale: 'en' })
     await button(wrapper, 'Next').trigger('click')
     await button(wrapper, 'Check').trigger('click')
     expect(wrapper.text()).toContain('Responses are valid.')
@@ -1623,6 +1631,22 @@ describe('Test answer controls', () => {
     expect(field.setValue).toHaveBeenLastCalledWith('[]')
     await wrapper.setProps({field:{...field,disabled:true,value:JSON.stringify(added)}})
     expect(wrapper.findAll('button').every(item => item.attributes('disabled') !== undefined)).toBe(true)
+    wrapper.unmount()
+  })
+
+  it.each(['list', 'table'] as const)('describes %s row controls with aggregate errors and clears the association on recovery', async type => {
+    const question = type === 'list'
+      ? { ...base, type, maxItems: 2 }
+      : { ...base, type, maxRows: 2, columns: [{ id: 'name', label: { en: 'Name', fr: 'Nom' }, type: 'text' as const, required: true }] }
+    const value = JSON.stringify(type === 'list' ? [{ id: 'r_row', value: '' }] : [{ id: 'r_row', cells: {} }])
+    const field = { ...fieldFor(question, value), error: 'required' as const }
+    const wrapper = mount(FormTestControl, { props: { field, locale: 'en' } })
+    const input = wrapper.get('input')
+    expect(input.attributes('aria-describedby')).toBe(`${field.id}-error`)
+    expect(wrapper.get(`[id="${field.id}-error"]`).text()).toBe('Enter a response.')
+    await wrapper.setProps({ field: { ...field, error: undefined } })
+    expect(input.attributes('aria-describedby')).toBeUndefined()
+    expect(wrapper.find(`[id="${field.id}-error"]`).exists()).toBe(false)
     wrapper.unmount()
   })
 

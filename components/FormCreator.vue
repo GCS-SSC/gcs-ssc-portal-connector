@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, useId, watch } from 'vue'
 import { customAlphabet } from 'nanoid'
 import { grantConfigurationReady, emptyBudgetConfig, emptyActivityConfig, designerSurveySchema, upgradeToAdvancedSurvey, type AdvancedGroup, type AdvancedQuestion,
   type AdvancedSurvey, type SurveyCondition } from '@gcs-ssc/survey'
@@ -38,6 +38,7 @@ const formsLoaded = ref(false)
 const agreements = ref<Agreement[]>([]), organizations = ref<Organization[]>([])
 const formId = ref(''), revision = ref(0), selectedContainerId = ref('page_1'), selectedQuestionId = ref('')
 const tab = ref<'edit' | 'flow' | 'test' | 'publish'>('edit')
+const editorPanelId = useId()
 const workflowTabs = computed(() => [
   { key: 'edit', value: 'edit', label: t('formEditTab'), icon: 'i-lucide-pencil' },
   { key: 'flow', value: 'flow', label: t('formFlowTab'), icon: 'i-lucide-git-branch' },
@@ -1026,7 +1027,7 @@ watch(() => props.agencyId, () => {
     <ExtensionEntityEditorWorkspace content-test-id="form-detail-content">
       <template #sidebar>
         <ExtensionRouteTabs
-          v-model="tab" :items="workflowTabs" :priority-values="['edit', 'flow', 'test', 'publish']" orientation="vertical"
+          v-model="tab" :items="workflowTabs" :external-panel-id="editorPanelId" :priority-values="['edit', 'flow', 'test', 'publish']" orientation="vertical"
           :ui="{ root: 'w-full', list: 'w-full flex-col items-stretch p-0', trigger: 'w-full justify-start' }" />
         <nav class="designer-sidebar-outline" :aria-label="tr('Form pages and sections', 'Pages et sections du formulaire')">
           <h4 class="designer-eyebrow px-3">
@@ -1066,7 +1067,7 @@ watch(() => props.agencyId, () => {
         </nav>
       </template>
       <div>
-        <div class="designer-content min-w-0 space-y-5">
+        <div :id="editorPanelId" role="tabpanel" :aria-label="workflowTabs.find(item => item.value === tab)?.label" class="designer-content min-w-0 space-y-5">
           <template v-if="tab === 'edit'">
             <template v-if="selected">
               <div class="designer-workspace">

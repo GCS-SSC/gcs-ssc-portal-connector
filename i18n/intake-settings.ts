@@ -19,7 +19,7 @@ export const intakeSettingsMessages = defineGcsExtensionMessages({
     groupLabel: 'Groupe de réception des demandes',
     groupHint: 'Les demandes de financement reçues du portail sont attribuées à ce groupe de l’organisme gouvernemental. Sélectionnez un groupe avant d’importer les demandes.',
     none: 'Aucun groupe sélectionné',
-    prerequisite: 'Sélectionnez un groupe de réception pour activer l’importation des demandes de financement. Les réclamations, les prévisions et les autres rapports peuvent continuer à se synchroniser.',
+    prerequisite: 'Sélectionnez un groupe de réception pour activer l’importation des demandes de financement. Les demandes de remboursement, les prévisions et les autres rapports peuvent continuer à se synchroniser.',
     unavailable: 'Le groupe sélectionné n’est pas disponible. Choisissez un autre groupe actif de cet organisme gouvernemental.',
     loadFailed: 'Impossible de charger les paramètres de réception.',
     saveFailed: 'Impossible d’enregistrer les paramètres de réception.',
