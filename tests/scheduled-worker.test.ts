@@ -57,7 +57,7 @@ describe('host L1 scheduled portal worker', () => {
       expect(runForAgency).toHaveBeenCalledWith('11', expect.any(Function))
       expect(createWriteAuthorization).toHaveBeenCalledWith('gcs-ssc-portal-connector', '11')
       expect(syncPortal).toHaveBeenCalledWith(expect.objectContaining({ db: database,
-        params: { agencyId: '11' }, writeAuthorization: authorization }))
+        params: { agencyId: '11' }, config: {}, agencyConfig: {}, writeAuthorization: authorization }))
       expect(releasePullLease).toHaveBeenCalledWith(database, '11')
     } finally { log.mockRestore() }
   })

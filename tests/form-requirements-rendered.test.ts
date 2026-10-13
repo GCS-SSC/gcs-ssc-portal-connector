@@ -79,6 +79,10 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
     props: ['title'],
     setup(props, { slots }) { return () => h('section', [h('h3', String(props.title)), slots.default?.()]) }
   })
+  const flowDiagram = defineComponent({
+    name: 'ExtensionFlowDiagram', props: ['definition', 'selectedNodeId', 'filename'], emits: ['select-node'],
+    setup() { return () => h('div', { 'data-host-flow-diagram': '' }) }
+  })
   const hero = defineComponent({
     props: ['title', 'description', 'actions', 'badges'],
     setup(props) { return () => h('header', { 'data-form-hero': '' }, [
@@ -122,6 +126,7 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
     ExtensionIcon: defineComponent({ setup() { return () => h('span') } }),
     ExtensionTable: resourceTable, ExtensionTextarea: textarea, ExtensionModal: modal, ExtensionResourceLayoutCard: resourceTable,
     ExtensionAssessmentSchemaPageSection: pageSection, ExtensionAssessmentSchemaAccordionSection: accordionSection,
+    ExtensionFlowDiagram: flowDiagram,
     ExtensionEntityEditorWorkspace: workspace, ExtensionEntityHero: hero, ExtensionRouteTabs: routeTabs,
     ExtensionBadge: defineComponent({ setup(_, { slots }) { return () => h('span', slots.default?.()) } }),
     ExtensionAlert: defineComponent({ props: ['title'], setup(props, { slots }) {
@@ -139,6 +144,7 @@ import FormTest from '../components/FormTest.vue'
 import FormTestControl from '../components/FormTestControl.vue'
 import type { SurveyField } from '@gcs-ssc/survey/vue'
 import { ExtensionSelect, ExtensionModal, ExtensionResourceLayoutCard } from '@gcs-ssc/extensions/ui'
+import type { FlowDiagramDefinition } from '@gcs-ssc/extensions/ui'
 import { readFormDraft } from '../components/form-draft-session'
 import PortalConnection from '../components/PortalConnection.vue'
 import ProponentVerification from '../components/ProponentVerification.vue'
@@ -203,7 +209,7 @@ describe('connector form requirements', () => {
       const nav = wrapper.get('[data-form-workspace] nav')
       expect(nav.findAll('[role="tab"]')).toHaveLength('standalone' in scope ? 4 : 3)
       await nav.findAll('[role="tab"]')[1]!.trigger('click')
-      expect(wrapper.find('.flow-map').exists()).toBe(true)
+      expect(wrapper.findComponent({ name: 'ExtensionFlowDiagram' }).exists()).toBe(true)
       const panel = wrapper.get('[role="tabpanel"]')
       expect(nav.findAll('[role="tab"]')[1]!.attributes('aria-controls')).toBe(panel.attributes('id'))
       expect(panel.attributes('aria-label')).toBe(nav.findAll('[role="tab"]')[1]!.text())
@@ -1026,10 +1032,10 @@ describe('connector form requirements', () => {
     await wrapper.get('.designer-outline-add').trigger('click')
     await button(wrapper, 'Add an if rule').trigger('click')
     await button(wrapper, 'Flow').trigger('click')
-    expect(wrapper.get('.flow-stats').text()).toContain('2 pages')
-    expect(wrapper.get('.flow-stats').text()).toContain('1 rule')
-    expect(wrapper.findAll('.flow-route--conditional')).toHaveLength(1)
-    expect(wrapper.findAll('.flow-route--default')).toHaveLength(1)
+    const diagram = wrapper.findComponent({ name: 'ExtensionFlowDiagram' }).props('definition') as FlowDiagramDefinition
+    expect(diagram.stats).toEqual(['2 pages', '1 rule'])
+    expect(diagram.nodes.flatMap(node => node.routes ?? []).filter(route => route.kind === 'conditional')).toHaveLength(1)
+    expect(diagram.nodes.flatMap(node => node.routes ?? []).filter(route => route.kind === 'default')).toHaveLength(1)
     await button(wrapper, 'Edit').trigger('click')
     const questionChoices = wrapper.get('select[name="conditionQuestion0"]').findAll('option').map(item => item.text())
     expect(questionChoices).toContain('New question')
@@ -1266,11 +1272,14 @@ describe('connector form requirements', () => {
     await button(wrapper, 'Edit').trigger('click')
     await wrapper.get('.designer-outline-add').trigger('click')
     await button(wrapper, 'Flow').trigger('click')
-    expect(wrapper.findAll('.flow-page-node')).toHaveLength(2)
-    expect(wrapper.findAll('.flow-route')).toHaveLength(0)
-    expect(wrapper.findAll('[data-flow-kind="direct"]')).toHaveLength(3)
+    const renderer = wrapper.findComponent({ name: 'ExtensionFlowDiagram' })
+    const diagram = renderer.props('definition') as FlowDiagramDefinition
+    const pageNodes = diagram.nodes.filter(node => node.kind === 'step')
+    expect(pageNodes).toHaveLength(2)
+    expect(diagram.nodes.flatMap(node => node.routes ?? []).map(route => route.kind)).toEqual(['direct', 'direct', 'direct'])
     expect(wrapper.find('.designer-workspace').exists()).toBe(false)
-    await wrapper.findAll('.flow-page-node')[0]!.trigger('click')
+    renderer.vm.$emit('select-node', pageNodes[0]!.id)
+    await flushPromises()
     expect(button(wrapper, 'Edit').attributes('aria-selected')).toBe('true')
     expect(wrapper.findAll('.designer-sidebar-item')[0]!.attributes('aria-current')).toBe('location')
   })
