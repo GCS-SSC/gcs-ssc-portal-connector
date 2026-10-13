@@ -32,7 +32,7 @@ const categoryLabel = (id?: string) => question.value.type === 'budget' ? questi
 </script>
 
 <template>
-  <fieldset class="min-w-0 space-y-5" :aria-describedby="`${field.id}-instructions`">
+  <fieldset class="min-w-0 space-y-5" :aria-describedby="`${field.id}-instructions${field.errorMessage ? ` ${field.id}-rule-error` : ''}`">
     <legend class="text-lg font-semibold">
       {{ field.label }}{{ field.required ? ` ${t('previewRequired')}` : '' }}
     </legend>
@@ -41,6 +41,9 @@ const categoryLabel = (id?: string) => question.value.type === 'budget' ? questi
     </p>
     <p v-if="!configured" class="text-sm text-warning">
       {{ t('grantNotConfigured') }}
+    </p>
+    <p v-if="field.errorMessage" :id="`${field.id}-rule-error`" role="alert" class="text-sm text-error">
+      {{ field.errorMessage }}
     </p>
     <p v-if="editor.issues.value.find(issue => !issue.path)" role="alert" class="text-sm text-error">
       {{ t(`grantError_${editor.issues.value.find(issue => !issue.path)!.code}`) }}

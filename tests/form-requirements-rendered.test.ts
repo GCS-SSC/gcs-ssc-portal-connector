@@ -1,7 +1,7 @@
 import { reactive } from 'vue'
 // @vitest-environment jsdom
 import { FetchResponseError, translateGcsExtensionMessage, type GcsExtensionMessages } from '@gcs-ssc/extensions'
-import { instanceKey, resolveAdvancedSurvey, surveyV3Schema } from '@gcs-ssc/survey'
+import { instanceKey, resolveAdvancedSurvey, surveyV3Schema, surveyV5Schema, type AdvancedSurvey } from '@gcs-ssc/survey'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -132,6 +132,7 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
 
 import FormChoiceEditor from '../components/FormChoiceEditor.vue'
 import FormCreator from '../components/FormCreator.vue'
+import FormFieldRules from '../components/FormFieldRules.vue'
 import FormLibrary from '../components/FormLibrary.vue'
 import IntakeWorkspace from '../components/IntakeWorkspace.vue'
 import OpportunityForms from '../components/OpportunityForms.vue'
@@ -1587,7 +1588,8 @@ describe('Test answer controls', () => {
     const field = fieldFor(type === 'text' ? { ...base, type, maxLength: 100 } : { ...base, type })
     const wrapper = mount(FormTestControl, { props: {field, locale: 'en'} })
     const input = wrapper.get('input')
-    expect(input.attributes('type')).toBe(type)
+    expect(input.attributes('type')).toBe(type === 'number' ? 'text' : type)
+    if (type === 'number') expect(input.attributes('inputmode')).toBe('decimal')
     expect(input.attributes('required')).toBeDefined()
     await input.setValue(type === 'date' ? '2026-09-29' : type === 'number' ? '12.5' : 'value')
     expect(field.setValue).toHaveBeenCalled()
@@ -1660,9 +1662,10 @@ describe('Test answer controls', () => {
     await button(wrapper,'Add row').trigger('click')
     const rows = JSON.parse((field.setValue as ReturnType<typeof vi.fn>).mock.calls[0]![0])
     await wrapper.setProps({field:{...field,value:JSON.stringify(rows)}})
-    expect(wrapper.findAll('input').map(input => input.attributes('type'))).toEqual(['number','date','text'])
+    expect(wrapper.findAll('input').map(input => input.attributes('type'))).toEqual(['text','date','text'])
     expect(wrapper.findAll('input').map(input => input.attributes('required') !== undefined)).toEqual([true,false,false])
-    await wrapper.get('input[type="number"]').setValue('12.5')
+    expect(wrapper.findAll('input')[0]!.attributes('inputmode')).toBe('decimal')
+    await wrapper.findAll('input')[0]!.setValue('12.5')
     expect(JSON.parse((field.setValue as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0])[0].cells.amount).toBe('12.5')
     await button(wrapper,'Remove row').trigger('click')
     expect(field.setValue).toHaveBeenLastCalledWith('[]')
@@ -1889,7 +1892,7 @@ describe('choice and table authoring', () => {
     await wrapper.get('select[name="columnType0"]').setValue('number')
     await button(wrapper, 'Test').trigger('click')
     await wrapper.findAll('button').find(item => item.text() === 'Add row')!.trigger('click')
-    await wrapper.findAll('input[type="number"]').at(-1)!.setValue('0.3')
+    await wrapper.findAll('input[inputmode="decimal"]').at(-1)!.setValue('0.3')
     expect(wrapper.findAll('output').map(item => item.text())).toEqual(['0.3', '0.3'])
     wrapper.unmount()
   })
@@ -2080,7 +2083,7 @@ describe('received immutable form evidence', () => {
       expect(source.items[0]!.answers.project_title).toBe('Northern health')
       await button(wrapper, language === 'fr' ? 'Suivant' : 'Next').trigger('click')
       expect(wrapper.text()).toContain(language === 'fr' ? 'Prestation' : 'Delivery')
-      const number = wrapper.get('input[type="number"]')
+      const number = wrapper.get('input[inputmode="decimal"]')
       expect(number.element).toHaveProperty('value', '0')
       expect(number.element).toHaveProperty('disabled', true)
       await button(wrapper, language === 'fr' ? 'Précédent' : 'Previous').trigger('click')
@@ -2212,5 +2215,184 @@ describe('opportunity forms agency layout', () => {
     await wrapper.find('[aria-label="View form: First form"]').trigger('click')
     expect(wrapper.findComponent(FormCreator).props('disabled')).toBe(true)
     expect(post).not.toHaveBeenCalled()
+  })
+})
+
+
+describe('field rules in the applicant Test view', () => {
+  it.each(['en', 'fr'] as const)('shows a date comparison error and recovers in %s', async locale => {
+    const definition = surveyV5Schema.parse({ schemaVersion: 5,
+      title: { en: 'Project dates', fr: 'Dates du projet' },
+      questions: [
+        { id: 'start', type: 'date', label: { en: 'Start date', fr: 'Date de début' }, required: true },
+        { id: 'end', type: 'date', label: { en: 'End date', fr: 'Date de fin' }, required: true,
+          rules: [{ kind: 'compare', operator: 'greaterThan', target: { kind: 'question', questionId: 'start' } }] }
+      ], pages: [{ id: 'dates', title: { en: 'Dates', fr: 'Dates' }, questionIds: ['start', 'end'], groups: [], branches: [] }]
+    })
+    const wrapper = mount(FormTest, { props: { definition, locale } })
+    await wrapper.get('input[name="start"]').setValue('2026-10-10')
+    await wrapper.get('input[name="end"]').setValue('2026-10-10')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    const message = locale === 'en' ? 'Date must be after “Start date”.' : 'La date doit être après « Date de début ».'
+    expect(wrapper.get('[data-field="end"] [role="alert"]').text()).toBe(message)
+    expect(wrapper.get('a[href="#end"]').text()).toContain(message)
+    expect(wrapper.get('input[name="end"]').attributes('aria-invalid')).toBe('true')
+    await wrapper.get('input[name="end"]').setValue('2026-10-11')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('a[href="#end"]').exists()).toBe(false)
+    expect(wrapper.get('[role="status"]').text()).toContain(locale === 'en' ? 'Responses are valid.' : 'Réponses valides.')
+    wrapper.unmount()
+  })
+
+  it('updates visible and native requirements when a condition changes', async () => {
+    const definition = surveyV5Schema.parse({ schemaVersion: 5,
+      title: { en: 'Contact', fr: 'Contact' },
+      questions: [
+        { id: 'method', type: 'select', label: { en: 'Contact method', fr: 'Méthode de contact' }, required: true,
+          options: [{ value: 'email', label: { en: 'Email', fr: 'Courriel' } }, { value: 'phone', label: { en: 'Phone', fr: 'Téléphone' } }] },
+        { id: 'contact', type: 'email', label: { en: 'Email address', fr: 'Adresse courriel' }, required: false,
+          rules: [{ kind: 'required', when: { match: 'all', conditions: [{ questionId: 'method', operator: 'equals', value: 'email' }] } }] }
+      ], pages: [{ id: 'contact_page', title: { en: 'Contact', fr: 'Contact' }, questionIds: ['method', 'contact'], groups: [], branches: [] }]
+    })
+    const wrapper = mount(FormTest, { props: { definition, locale: 'en' } })
+    expect(wrapper.get('input[name="contact"]').attributes('required')).toBeUndefined()
+    await wrapper.get('select[name="method"]').setValue('email')
+    expect(wrapper.get('input[name="contact"]').attributes('required')).toBeDefined()
+    expect(wrapper.get('[data-field="contact"] label').text()).toContain('(required)')
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.get('[data-field="contact"] [role="alert"]').text()).toBe('Enter a response.')
+    await wrapper.get('select[name="method"]').setValue('phone')
+    expect(wrapper.get('input[name="contact"]').attributes('required')).toBeUndefined()
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.get('[role="status"]').text()).toContain('Responses are valid.')
+    wrapper.unmount()
+  })
+})
+
+
+describe('answer rule references during form editing', () => {
+  const label = (en: string) => ({ en, fr: en })
+  const form = (questions: AdvancedSurvey['questions']): AdvancedSurvey => ({ schemaVersion: 5,
+    title: label('Rule references'), questions, pages: [{ id: 'main', title: label('Main'),
+      questionIds: questions.map(question => question.id), groups: [], branches: [] }] })
+  const loadDesigner = async (definition: AdvancedSurvey) => {
+    const defaultGet = get.getMockImplementation()!
+    get.mockImplementation(async (path: string) => path.endsWith('/forms/rules')
+      ? { survey: { id: 'rules', revision: 1, definition } } : defaultGet(path))
+    const wrapper = mount(FormCreator, { props: { agencyId: '1', selectedFormId: 'rules' } })
+    await flushPromises()
+    return wrapper
+  }
+
+  it('keeps incomplete number rules out of Test and recovers without losing exact literals', async () => {
+    const wrapper = await loadDesigner(form([{ id: 'amount', type: 'number', label: label('Amount'), required: false,
+      rules: [{ kind: 'compare', operator: 'greaterThanOrEqual', target: { kind: 'value', value: '0' } }] }]))
+    await wrapper.get('[data-question-id="amount"]').trigger('click')
+    wrapper.findComponent(FormFieldRules).vm.$emit('update:modelValue', [
+      { kind: 'compare', operator: 'greaterThanOrEqual', target: { kind: 'value', value: 'bad' } }
+    ])
+    await button(wrapper, 'Test').trigger('click')
+    expect(wrapper.findComponent(FormTest).exists()).toBe(false)
+    expect(wrapper.text()).toContain('Complete answer rules before testing')
+    expect(readFormDraft('1')!.definition.questions[0]).toMatchObject({ rules: [{ target: { value: 'bad' } }] })
+    await button(wrapper, 'Edit answer rules').trigger('click')
+    await wrapper.get('input[name$="-value"]').setValue('9007199254740993')
+    await button(wrapper, 'Test').trigger('click')
+    expect(wrapper.findComponent(FormTest).exists()).toBe(true)
+    await wrapper.get('input[name="amount"]').setValue('9007199254740992')
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.text()).toContain('9007199254740993')
+    await wrapper.get('input[name="amount"]').setValue('9007199254740993')
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.get('[role="status"]').text()).toContain('Responses are valid.')
+    wrapper.unmount()
+  })
+
+  it.each(['literal', 'reference'] as const)('keeps invalid table column %s rules out of Test', async kind => {
+    const wrapper = await loadDesigner(form([{ id: 'costs', type: 'table', label: label('Costs'), required: false, maxRows: 5,
+      columns: [{ id: 'cost', type: 'number', label: label('Cost'), required: false }] }]))
+    await wrapper.get('[data-question-id="costs"]').trigger('click')
+    const editor = wrapper.findAllComponents(FormFieldRules).find(item => item.props('scope') === 'column')!
+    editor.vm.$emit('update:modelValue', [{ kind: 'compare', operator: 'greaterThanOrEqual',
+      target: kind === 'literal' ? { kind: 'value', value: 'bad' } : { kind: 'column', columnId: 'missing' } }])
+    await button(wrapper, 'Test').trigger('click')
+    expect(wrapper.findComponent(FormTest).exists()).toBe(false)
+    expect(wrapper.text()).toContain('Complete answer rules before testing')
+    await button(wrapper, 'Edit answer rules').trigger('click')
+    const fixed = wrapper.findAllComponents(FormFieldRules).find(item => item.props('scope') === 'column')!
+    fixed.vm.$emit('update:modelValue', [{ kind: 'compare', operator: 'greaterThanOrEqual', target: { kind: 'value', value: '0' } }])
+    await button(wrapper, 'Test').trigger('click')
+    expect(wrapper.findComponent(FormTest).exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('protects referenced table columns and retains v5 when display totals change', async () => {
+    const wrapper = await loadDesigner(form([{ id: 'dates', type: 'table', label: label('Dates'), required: false, maxRows: 5,
+      columns: [
+        { id: 'start', type: 'date', label: label('Start'), required: true },
+        { id: 'end', type: 'date', label: label('End'), required: true,
+          rules: [{ kind: 'compare', operator: 'greaterThan', target: { kind: 'column', columnId: 'start' } }] }
+      ] }]))
+    await wrapper.get('[data-question-id="dates"]').trigger('click')
+    await wrapper.get('.designer-column').findAll('button').find(item => item.text() === 'Remove column')!.trigger('click')
+    expect(wrapper.findAll('.designer-column')).toHaveLength(2)
+    expect(wrapper.text()).toContain('This column is used by an answer rule. Remove or update the rule first.')
+    await wrapper.get('select[name="columnType0"]').setValue('text')
+    expect((wrapper.get('select[name="columnType0"]').element as HTMLSelectElement).value).toBe('date')
+    expect(wrapper.text()).toContain('This change would invalidate an answer rule in the table.')
+    await wrapper.get('select[name="tableTotals"]').setValue('both')
+    expect(readFormDraft('1')!.definition.schemaVersion).toBe(5)
+    await button(wrapper, 'Save revision').trigger('click')
+    const body = post.mock.calls.find(call => call[1]?.action === 'save')![1]
+    expect(body.definition.schemaVersion).toBe(5)
+    expect(body.definition.questions[0].columns[1].rules[0].target.columnId).toBe('start')
+    wrapper.unmount()
+  })
+
+  it('protects an acknowledgement choice from removal', async () => {
+    const options = ['accept', 'decline'].map(value => ({ value, label: label(value) }))
+    const wrapper = await loadDesigner(form([{ id: 'consent', type: 'select', label: label('Consent'), required: false,
+      options, rules: [{ kind: 'choice', value: 'accept' }] }]))
+    await wrapper.get('[data-question-id="consent"]').trigger('click')
+    const editor = wrapper.findComponent(FormChoiceEditor)
+    editor.vm.$emit('update:options', [options[1]])
+    await flushPromises()
+    expect(editor.props('options')).toHaveLength(2)
+    expect(wrapper.text()).toContain('A removed choice is used by an answer rule')
+    wrapper.unmount()
+  })
+
+  it('moves a group-rule owner past unrelated questions while preserving earlier references', async () => {
+    const text = (id: string) => ({ id, type: 'text' as const, label: label(id), required: false, maxLength: 50 })
+    const wrapper = await loadDesigner(form([text('source'), text('unrelated'), {
+      ...text('owner'), rules: [{ kind: 'group', mode: 'atLeastOne', questionIds: ['source', 'owner'] }]
+    }]))
+    await wrapper.get('[data-question-id="owner"]').trigger('click')
+    await button(wrapper, 'Move up').trigger('click')
+    expect(wrapper.findAll('[data-question-id]').map(item => item.attributes('data-question-id'))).toEqual(['source', 'owner', 'unrelated'])
+    await button(wrapper, 'Save revision').trigger('click')
+    expect(post.mock.calls.find(call => call[1]?.action === 'save')![1].definition.pages[0].questionIds).toEqual(['source', 'owner', 'unrelated'])
+    wrapper.unmount()
+  })
+
+  it('moves a repeat uniqueness child and protects it from deletion', async () => {
+    const text = (id: string) => ({ id, type: 'text' as const, label: label(id), required: false, maxLength: 50 })
+    const definition = form([{ id: 'people', type: 'repeat', label: label('People'), required: false, maxItems: 5,
+      rules: [{ kind: 'unique', questionIds: ['name'] }] }, text('name'), text('note')])
+    definition.pages[0]!.questionIds = ['people']
+    definition.pages[0]!.groups = [{ id: 'person', title: label('Person'), repeatFor: 'people', questionIds: ['name', 'note'], groups: [] }]
+    const wrapper = await loadDesigner(definition)
+    await wrapper.findAll('.designer-sidebar-item').find(item => item.text().includes('People'))!.trigger('click')
+    await wrapper.get('[data-question-id="note"]').trigger('click')
+    await button(wrapper, 'Move up').trigger('click')
+    expect(wrapper.findAll('[data-question-id]').map(item => item.attributes('data-question-id'))).toEqual(['note', 'name'])
+    await wrapper.get('[data-question-id="name"]').trigger('click')
+    await button(wrapper, 'Delete question').trigger('click')
+    await wrapper.get('[role=dialog]').findAll('button').find(item => item.text() === 'Delete question')!.trigger('click')
+    expect(wrapper.findAll('[data-question-id]')).toHaveLength(2)
+    expect(wrapper.text()).toContain('is used by an answer rule in')
+    wrapper.unmount()
   })
 })

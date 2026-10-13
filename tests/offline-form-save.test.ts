@@ -72,4 +72,19 @@ describe('offline form save', () => {
       expectedRevision: 2, definition }))).rejects.toThrow('latest saved form revision')
     expect(state.enqueue).toHaveBeenCalledTimes(1)
   })
+
+  it('saves and queues v5 answer rules, rejecting invalid references before saving', async () => {
+    const withRules = { ...definition, schemaVersion: 5, questions: [
+      { id: 'start', type: 'date', label: { en: 'Start date', fr: 'Date de début' }, required: true },
+      { id: 'end', type: 'date', label: { en: 'End date', fr: 'Date de fin' }, required: true,
+        rules: [{ kind: 'compare', operator: 'greaterThan', target: { kind: 'question', questionId: 'start' } }] }
+    ], pages: [{ ...definition.pages[0], questionIds: ['start', 'end'] }] }
+    const invalid = { ...withRules, pages: [{ ...withRules.pages[0], questionIds: ['end', 'start'] }] }
+    await expect(manageForm(context({ action: 'save', definition: invalid }))).rejects.toThrow()
+    expect(state.rows.size).toBe(0)
+    expect(state.enqueue).not.toHaveBeenCalled()
+    const saved = await manageForm(context({ action: 'save', definition: withRules })) as { survey: { id: string; revision: number }; queued: boolean }
+    expect(saved).toMatchObject({ survey: { revision: 1 }, queued: true })
+    expect(state.enqueue).toHaveBeenCalledWith(db, '1', saved.survey.id)
+  })
 })

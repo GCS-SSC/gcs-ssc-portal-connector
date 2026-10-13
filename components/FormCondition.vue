@@ -5,7 +5,8 @@ import { ExtensionButton, ExtensionFormField, ExtensionInput, ExtensionSelect, u
 import { messages } from '../i18n/messages'
 const { t } = useExtensionI18n(messages)
 type Question = { id: string; label: string; type?: string; options?: { value: string; label: string }[] }
-const props = defineProps<{ questions: Question[]; disabled?: boolean; locale: 'en' | 'fr'; purpose?: 'visibility' | 'branch' }>()
+const props = defineProps<{ questions: Question[]; disabled?: boolean; locale: 'en' | 'fr'; purpose?: 'visibility' | 'branch' | 'required'; namePrefix?: string; errorId?: string }>()
+const fieldName = (name: string) => props.namePrefix ? `${props.namePrefix}-${name}` : name
 const condition = defineModel<SurveyCondition | undefined>({ required: true })
 const label = (en: string, fr: string) => props.locale === 'fr' ? fr : en
 const operators = computed(() => [
@@ -57,29 +58,35 @@ const remove = (index: number) => {
 
 <template>
   <div class="condition-editor">
-    <p v-if="!condition?.conditions.length" class="text-sm text-muted">{{ t(purpose === 'branch' ? 'designConditionBranchEmpty' : 'designConditionAlways') }}</p>
+    <p v-if="!condition?.conditions.length" class="text-sm text-muted">{{ t(purpose === 'required' ? 'fieldRuleConditionEmpty' : purpose === 'branch' ? 'designConditionBranchEmpty' : 'designConditionAlways') }}</p>
     <p v-if="!questions.length" class="text-sm text-muted">{{ t('designConditionEmpty') }}</p>
     <p v-if="condition && condition.conditions.length > 1" class="text-sm text-muted">{{ t('designConditionMatchHelp') }}</p>
-    <ExtensionFormField v-if="condition && condition.conditions.length > 1" :label="label('Match', 'Correspondance')" name="conditionMatch">
-      <ExtensionSelect :model-value="condition.match" name="conditionMatch" value-key="value" :disabled="disabled"
+    <ExtensionFormField v-if="condition && condition.conditions.length > 1" :label="label('Match', 'Correspondance')" :name="fieldName('conditionMatch')" required>
+      <ExtensionSelect :model-value="condition.match" :name="fieldName('conditionMatch')" value-key="value" :disabled="disabled" required
+        :aria-invalid="Boolean(errorId)" :aria-describedby="errorId"
         :items="[{ value: 'all', label: label('All rules', 'Toutes les règles') }, { value: 'any', label: label('Any rule', 'Une règle') }]"
         @update:model-value="condition = { ...condition!, match: $event as 'all' | 'any' }" />
     </ExtensionFormField>
     <div v-for="(row, index) in condition?.conditions ?? []" :key="index" class="condition-row">
-      <ExtensionFormField :label="label('If the answer to', 'Si la réponse à')" :name="`conditionQuestion${index}`">
-        <ExtensionSelect :model-value="row.questionId" :name="`conditionQuestion${index}`" value-key="value"
-          :items="questions.map((item) => ({ value: item.id, label: item.label }))" :disabled="disabled"
+      <ExtensionFormField :label="label('If the answer to', 'Si la réponse à')" :name="fieldName(`conditionQuestion${index}`)" required>
+        <ExtensionSelect :model-value="row.questionId" :name="fieldName(`conditionQuestion${index}`)" value-key="value"
+          :aria-invalid="Boolean(errorId)" :aria-describedby="errorId"
+          :items="questions.map((item) => ({ value: item.id, label: item.label }))" :disabled="disabled" required
           @update:model-value="update(index, 'questionId', String($event))" />
       </ExtensionFormField>
-      <ExtensionFormField :label="label('Is', 'Est')" :name="`conditionOperator${index}`">
-        <ExtensionSelect :model-value="row.operator" :name="`conditionOperator${index}`" value-key="value"
-          :items="operatorItems(row.questionId)" :disabled="disabled" @update:model-value="update(index, 'operator', String($event))" />
+      <ExtensionFormField :label="label('Is', 'Est')" :name="fieldName(`conditionOperator${index}`)" required>
+        <ExtensionSelect :model-value="row.operator" :name="fieldName(`conditionOperator${index}`)" value-key="value"
+          :aria-invalid="Boolean(errorId)" :aria-describedby="errorId"
+          :items="operatorItems(row.questionId)" :disabled="disabled" required @update:model-value="update(index, 'operator', String($event))" />
       </ExtensionFormField>
-      <ExtensionFormField v-if="'value' in row" :label="label('This answer', 'Cette réponse')" :name="`conditionValue${index}`" required>
-        <ExtensionSelect v-if="source(row.questionId)?.options" :model-value="row.value" :name="`conditionValue${index}`"
+      <ExtensionFormField v-if="'value' in row" :label="label('This answer', 'Cette réponse')" :name="fieldName(`conditionValue${index}`)"
+        :description="source(row.questionId)?.type === 'number' ? t('fieldRuleNumberInputHelp') : undefined" required>
+        <ExtensionSelect v-if="source(row.questionId)?.options" :model-value="row.value" :name="fieldName(`conditionValue${index}`)"
+          :aria-invalid="Boolean(errorId)" :aria-describedby="errorId"
           value-key="value" :items="source(row.questionId)?.options ?? []" :disabled="disabled" required
           @update:model-value="update(index, 'value', String($event))" />
-        <ExtensionInput v-else :model-value="row.value" :name="`conditionValue${index}`" :type="source(row.questionId)?.type === 'number' ? 'number' : 'text'" required :disabled="disabled"
+        <ExtensionInput v-else :model-value="row.value" :name="fieldName(`conditionValue${index}`)" type="text" :inputmode="source(row.questionId)?.type === 'number' ? 'decimal' : undefined" required :disabled="disabled"
+          :aria-invalid="Boolean(errorId)" :aria-describedby="errorId"
           @update:model-value="update(index, 'value', String($event))" />
       </ExtensionFormField>
       <div class="condition-actions">

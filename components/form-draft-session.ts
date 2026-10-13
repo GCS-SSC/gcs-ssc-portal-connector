@@ -20,8 +20,25 @@ const draftBudget = z.object({ source: draftSource, maxRows: z.number(), currenc
   fundingSubtypes: z.array(draftOption.extend({ typeId: z.string() })) })
 const draftActivities = z.object({ source: draftSource, maxRows: z.number(), outcomes: z.array(draftOption), responsibleParties: z.array(draftOption),
   requireOutcomes: z.boolean(), requireResponsibleParties: z.boolean(), bilingual: z.boolean() })
+const draftFieldRule = z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('compare'), operator: z.enum(['equals', 'notEquals', 'greaterThan', 'greaterThanOrEqual', 'lessThan', 'lessThanOrEqual']),
+      target: z.discriminatedUnion('kind', [z.object({ kind: z.literal('question'), questionId: z.string(), offsetDays: z.number().optional() }),
+        z.object({ kind: z.literal('value'), value: z.string() }), z.object({ kind: z.literal('today'), offsetDays: z.number().optional() }),
+        z.object({ kind: z.literal('column'), columnId: z.string() })]) }),
+    z.object({ kind: z.literal('length'), min: z.number().optional(), max: z.number().optional() }),
+    z.object({ kind: z.literal('count'), min: z.number().optional(), max: z.number().optional() }),
+    z.object({ kind: z.literal('precision'), decimalPlaces: z.number() }),
+    z.object({ kind: z.literal('required'), when: condition }),
+    z.object({ kind: z.literal('format'), format: z.enum(['url', 'postalCode', 'phone', 'identifier']) }),
+    z.object({ kind: z.literal('choice'), value: z.string() }),
+    z.object({ kind: z.literal('group'), mode: z.enum(['atLeastOne', 'exactlyOne', 'all', 'allOrNone']), questionIds: z.array(z.string()) }),
+    z.object({ kind: z.literal('unique'), columnIds: z.array(z.string()).optional(), questionIds: z.array(z.string()).optional() }),
+    z.object({ kind: z.literal('total'), columnIds: z.array(z.string()), operator: z.enum(['equals', 'lessThanOrEqual']),
+      target: z.discriminatedUnion('kind', [z.object({ kind: z.literal('question'), questionId: z.string() }), z.object({ kind: z.literal('value'), value: z.string() })]) })
+  ])
+const draftRules = z.array(draftFieldRule).max(20).optional()
 const questionBase = z.object({ id: z.string(), label: bilingual, hint: bilingual.optional(),
-  required: z.boolean(), visibleWhen: condition.optional() })
+  required: z.boolean(), visibleWhen: condition.optional(), rules: draftRules })
 const question = z.discriminatedUnion('type', [
   questionBase.extend({ type: z.literal('text'), maxLength: z.number() }),
   questionBase.extend({ type: z.literal('textarea'), maxLength: z.number() }),
@@ -36,14 +53,14 @@ const question = z.discriminatedUnion('type', [
   questionBase.extend({ type: z.literal('list'), maxItems: z.number() }),
   questionBase.extend({ type: z.literal('repeat'), maxItems: z.number() }),
   questionBase.extend({ type: z.literal('table'), totals: z.enum(['none', 'rows', 'columns', 'both']).optional(), maxRows: z.number(), columns: z.array(z.object({
-    id: z.string(), label: bilingual, type: z.enum(['text', 'number', 'date']), required: z.boolean()
+    id: z.string(), label: bilingual, type: z.enum(['text', 'number', 'date']), required: z.boolean(), rules: draftRules
   })) }),
   questionBase.extend({ type: z.literal('computed'), template: z.string(), sourceIds: z.array(z.string()) }),
   questionBase.extend({ type: z.literal('budget'), config: draftBudget }),
   questionBase.extend({ type: z.literal('activities'), config: draftActivities })
 ])
 const editableSurvey = z.object({
-  schemaVersion: z.union([z.literal(3), z.literal(4)]), title: bilingual, description: bilingual.optional(),
+  schemaVersion: z.union([z.literal(3), z.literal(4), z.literal(5)]), title: bilingual, description: bilingual.optional(),
   questions: z.array(question), pages: z.array(z.object({
     id: z.string(), title: bilingual, description: bilingual.optional(), questionIds: z.array(z.string()),
     groups: z.array(group), branches: z.array(z.object({ when: condition, destination: z.discriminatedUnion('kind', [

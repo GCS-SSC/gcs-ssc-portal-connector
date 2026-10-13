@@ -2,15 +2,17 @@
 import { computed, nextTick, onMounted, ref, useId, watch } from 'vue'
 import { customAlphabet } from 'nanoid'
 import { grantConfigurationReady, emptyBudgetConfig, emptyActivityConfig, designerSurveySchema, upgradeToAdvancedSurvey, type AdvancedGroup, type AdvancedQuestion,
-  type AdvancedSurvey, type SurveyCondition } from '@gcs-ssc/survey'
+  type AdvancedSurvey, type FieldRule, type SurveyCondition } from '@gcs-ssc/survey'
 import { ExtensionAssessmentSchemaAccordionSection, ExtensionAssessmentSchemaPageSection, ExtensionButton, ExtensionCheckbox, ExtensionEntityEditorWorkspace, ExtensionEntityHero,
   ExtensionFormField, ExtensionIcon, ExtensionInput, ExtensionModal, ExtensionRouteTabs, ExtensionSaveButton,
   ExtensionSelect, ExtensionTextarea, useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
 import { messages } from '../i18n/messages'
 import { updateFormChoices } from '../shared/form-choices'
 import { computedTemplateReady } from '../shared/form-localization'
+import { comparisonCompatible, fieldRuleError, fieldRuleSourceIds, repeatFieldRuleSources, type RuleSourceQuestion } from '../shared/field-rules'
 import FormChoiceEditor from './FormChoiceEditor.vue'
 import FormCondition from './FormCondition.vue'
+import FormFieldRules from './FormFieldRules.vue'
 import FormDesignHelp from './FormDesignHelp.vue'
 import FormGrantDesigner from './FormGrantDesigner.vue'
 import FormFlowMap from './FormFlowMap.vue'
@@ -23,6 +25,7 @@ const emit = defineEmits<{ close: []; saved: [id: string] }>()
 const { locale, t } = useExtensionI18n(messages)
 const language = computed<'en' | 'fr'>(() => locale.value === 'fr' ? 'fr' : 'en')
 const previewLocale = ref<'en' | 'fr'>(language.value)
+const ruleCorrectionQuestionId = ref('')
 const tr = (en: string, fr: string) => language.value === 'fr' ? fr : en
 const api = useExtensionApi('gcs-ssc-portal-connector')
 const draftOwner = computed(() => props.opportunityId
@@ -292,6 +295,7 @@ const publicationChecks = computed(() => {
       ok: definition.value.questions.every((item) => item.type !== 'computed' || computedTemplateReady(item.template, item.sourceIds)), target: 'edit' as const },
     { label: t('grantReadyBudget'), ok: definition.value.questions.every(item => item.type !== 'budget' || grantConfigurationReady(item)), target: 'edit' as const },
     { label: t('grantReadyActivities'), ok: definition.value.questions.every(item => item.type !== 'activities' || grantConfigurationReady(item)), target: 'edit' as const },
+    { label: t('fieldRuleReady'), ok: !invalidRuleQuestions.value.length, target: 'edit' as const },
     { label: tr('Latest revision saved', 'Dernière version enregistrée'), ok: Boolean(formId.value) && revision.value > 0 && !dirty.value, target: 'edit' as const },
     { label: t('formSyncPendingCheck'),
       ok: !syncPending.value, target: 'edit' as const }
@@ -362,6 +366,10 @@ const referencesValid = (survey: AdvancedSurvey) => {
   for (const question of survey.questions) {
     const choices = eligible('question', question.id)
     if (!conditionValid(question.visibleWhen, choices)) return false
+    if (question.type !== 'computed' && (question.rules ?? []).some(rule => {
+      const sources = rule.kind === 'unique' ? new Set(repeatFieldRuleSources(survey, question.id, language.value).map(source => source.id)) : choices
+      return fieldRuleSourceIds(rule).some(id => !(rule.kind === 'group' && id === question.id) && !sources.has(id))
+    })) return false
     if (question.type === 'select' && question.dependsOn && !choices.has(question.dependsOn.questionId)) return false
     if (question.type === 'computed' && question.sourceIds.some((id) => !choices.has(id))) return false
   }
@@ -491,7 +499,8 @@ const save = async () => {
       if (issue.path[0] === 'description') return t('formInvalidIntroduction')
       if (issue.path[0] === 'questions' && typeof issue.path[1] === 'number') {
         const question = definition.value.questions[issue.path[1]]
-        const section = question?.type === 'computed' ? t('formQuestionCalculation')
+        const section = issue.path.includes('rules') ? t('fieldRulesTitle')
+          : question?.type === 'computed' ? t('formQuestionCalculation')
           : question?.type === 'table' ? t('formQuestionTable')
             : ['select', 'checkboxes', 'multiselect'].includes(question?.type ?? '') ? t('formQuestionChoices')
               : t('formInvalidQuestionSettings')
@@ -629,7 +638,7 @@ const addQuestion = (type: AdvancedQuestion['type']) => {
               : type === 'activities'
                 ? { ...base, label: { en: 'Project activities', fr: 'Activités du projet' }, type, config: emptyActivityConfig() }
                 : { ...base, type }
-  if (type === 'budget' || type === 'activities' || type === 'textarea' || type === 'checkboxes' || type === 'multiselect') definition.value.schemaVersion = 4
+  if (definition.value.schemaVersion < 4 && (type === 'budget' || type === 'activities' || type === 'textarea' || type === 'checkboxes' || type === 'multiselect')) definition.value.schemaVersion = 4
   definition.value.questions.push(question)
   target.questionIds.push(id)
   selectedQuestionId.value = id
@@ -709,6 +718,12 @@ const removeQuestionById = (id: string) => {
  */
 const removeQuestion = (id = selectedQuestionId.value) => {
   if (!id) return
+  const dependent = ruleDependent([id])
+  if (dependent) {
+    error.value = t('fieldRuleDeleteBlocked', { question: definition.value.questions.find(question => question.id === id)?.label[language.value] || id,
+      dependent: dependent.label[language.value] || dependent.id })
+    return
+  }
   if (nodes.value.some((node) => node.repeatFor === id)) {
     error.value = t('formRemoveRepeatSourceFirst')
     return
@@ -836,6 +851,12 @@ const removeContainer = () => {
       item.groups.forEach(collect)
     }
     collect(group)
+    const removedIds = [...questionIds, ...(group.repeatFor && !nodes.value.some(item => item.id !== group.id && item.repeatFor === group.repeatFor) ? [group.repeatFor] : [])]
+    const dependent = ruleDependent(removedIds)
+    if (dependent) {
+      error.value = t('fieldRuleDeleteBlocked', { question: node.title || node.id, dependent: dependent.label[language.value] || dependent.id })
+      return
+    }
     if (nodes.value.some((item) => item.repeatFor && questionIds.includes(item.repeatFor) && !groupIds.has(item.id))) {
       error.value = t('formRemoveDependentSetFirst')
       return
@@ -860,7 +881,102 @@ const removeContainer = () => {
  *
  */
 const updateChoices = (options: { value: string; label: { en: string; fr: string } }[]) => {
+  const question = selectedQuestion.value
+  if (!question || !('options' in question)) return
+  const removed = question.options.filter(option => !options.some(item => item.value === option.value)).map(option => option.value)
+  const dependent = definition.value.questions.find(item => item.type !== 'computed' && (item.rules ?? []).some(rule => rule.kind === 'required'
+    ? rule.when.conditions.some(condition => condition.questionId === question.id && 'value' in condition && removed.includes(condition.value))
+    : rule.kind === 'choice' && item.id === question.id && removed.includes(rule.value)))
+  if (dependent) {
+    error.value = t('fieldRuleChoiceBlocked', { dependent: dependent.label[language.value] || dependent.id })
+    return
+  }
   updateFormChoices(definition.value, selectedQuestionId.value, options)
+}
+const updateRules = (question: AdvancedQuestion, rules: FieldRule[] | undefined) => {
+  if (question.type === 'computed' || disabled.value) return
+  definition.value.schemaVersion = 5
+  if (rules?.length) question.rules = rules
+  else delete question.rules
+}
+const ruleDependent = (removedIds: string[]) => definition.value.questions.find(question => !removedIds.includes(question.id) && question.type !== 'computed'
+  && (question.rules ?? []).some(rule => fieldRuleSourceIds(rule).some(id => removedIds.includes(id))))
+const invalidRuleQuestions = computed(() => {
+  const ids = new Set<string>()
+  for (const question of definition.value.questions) {
+    if (question.type === 'computed') continue
+    if ((question.rules ?? []).some(rule => fieldRuleError(question, rule, conditionChoicesFor('question', question.id), repeatFieldRuleSources(definition.value, question.id, language.value)))
+      || question.type === 'table' && question.columns.some((column, index) => (column.rules ?? []).some(rule => fieldRuleError(column, rule, columnRuleSources(question, index))))) ids.add(question.id)
+  }
+  const parsed = designerSurveySchema.safeParse(forSaving(definition.value))
+  if (!parsed.success) for (const issue of parsed.error.issues) {
+    if (issue.path.includes('rules') && issue.path[0] === 'questions' && typeof issue.path[1] === 'number') {
+      const question = definition.value.questions[issue.path[1]]
+      if (question) ids.add(question.id)
+    }
+  }
+  return definition.value.questions.filter(question => ids.has(question.id))
+})
+const editInvalidRules = async () => {
+  const question = invalidRuleQuestions.value[0]
+  if (!question) return
+  const node = nodes.value.find(item => question.type === 'repeat' ? item.repeatFor === question.id : item.item.questionIds.includes(question.id))
+  if (node) selectedContainerId.value = node.id
+  selectedQuestionId.value = question.id
+  ruleCorrectionQuestionId.value = question.id
+  tab.value = 'edit'
+  await nextTick()
+  const questionElement = [...document.querySelectorAll<HTMLElement>('[data-question-id]')].find(element => element.dataset.questionId === question.id)
+  ;(questionElement?.querySelector<HTMLElement>('button') ?? document.querySelector<HTMLElement>('.designer-content button'))?.focus()
+}
+const updateRepeatSource = (groupId: string, sourceId: string) => {
+  if (disabled.value) return
+  const trial = JSON.parse(JSON.stringify(definition.value)) as AdvancedSurvey
+  const group = containerIn(trial, groupId) as AdvancedGroup | undefined
+  if (!group) return
+  group.repeatFor = sourceId === 'none' ? undefined : sourceId
+  if (!referencesValid(trial)) {
+    error.value = t('fieldRuleRepeatSourceBlocked')
+    return
+  }
+  const current = containerIn(definition.value, groupId) as AdvancedGroup
+  current.repeatFor = group.repeatFor
+  error.value = ''
+}
+const columnRuleSources = (question: Extract<AdvancedQuestion, { type: 'table' }>, index: number): RuleSourceQuestion[] =>
+  question.columns.slice(0, index).map(column => ({ id: column.id, label: column.label[language.value] || column.id, type: column.type }))
+const updateColumnRules = (question: Extract<AdvancedQuestion, { type: 'table' }>, index: number, rules: FieldRule[] | undefined) => {
+  if (disabled.value) return
+  definition.value.schemaVersion = 5
+  const column = question.columns[index]!
+  if (rules?.length) column.rules = rules
+  else delete column.rules
+}
+const removeColumn = (index: number) => {
+  const question = selectedQuestion.value
+  if (question?.type !== 'table' || disabled.value || question.columns.length === 1) return
+  const id = question.columns[index]!.id
+  if ((question.rules ?? []).some(rule => (rule.kind === 'total' || rule.kind === 'unique') && rule.columnIds?.includes(id))
+    || question.columns.some(column => column.id !== id && (column.rules ?? []).some(rule => rule.kind === 'compare' && rule.target.kind === 'column' && rule.target.columnId === id))) {
+    error.value = t('fieldRuleColumnBlocked')
+    return
+  }
+  question.columns.splice(index, 1)
+  error.value = ''
+}
+const changeColumnType = (index: number, type: 'text' | 'number' | 'date') => {
+  const question = selectedQuestion.value
+  if (question?.type !== 'table' || disabled.value) return
+  const column = question.columns[index]!
+  if ((column.rules ?? []).some(rule => fieldRuleError({ ...column, type }, rule, columnRuleSources(question, index)))
+    || question.columns.some(other => (other.rules ?? []).some(rule => rule.kind === 'compare' && rule.target.kind === 'column'
+      && rule.target.columnId === column.id && !comparisonCompatible(other.type, type)))
+    || type !== 'number' && (question.rules ?? []).some(rule => rule.kind === 'total' && rule.columnIds.includes(column.id))) {
+    error.value = t('fieldRuleColumnTypeBlocked')
+    return
+  }
+  column.type = type
+  error.value = ''
 }
 /**
  *
@@ -1075,7 +1191,7 @@ watch(() => props.agencyId, () => {
                   <ExtensionAssessmentSchemaPageSection
                     section-id="form-container-details"
                     :title="selected.title || (selected.kind === 'page' ? tr('Untitled page', 'Page sans titre') : tr('Untitled section', 'Section sans titre'))">
-                    <ExtensionAssessmentSchemaAccordionSection :key="selected.id" :title="selected.kind === 'page' ? tr('Page details', 'Détails de la page') : tr('Section details', 'Détails de la section')" :default-open="!selected.item.questionIds.length && !selected.item.groups.length">
+                    <ExtensionAssessmentSchemaAccordionSection :key="selected.id" :title="selected.kind === 'page' ? tr('Page details', 'Détails de la page') : tr('Section details', 'Détails de la section')" :default-open="ruleCorrectionQuestionId === repeatSource?.id || !selected.item.questionIds.length && !selected.item.groups.length">
                       <div class="space-y-3">
                         <div class="grid gap-3 sm:grid-cols-2">
                           <ExtensionFormField :label="tr('Heading · English', 'Titre · anglais')" name="groupTitleEn" required>
@@ -1099,7 +1215,7 @@ watch(() => props.agencyId, () => {
                           <ExtensionSelect
                             :model-value="(selected.item as AdvancedGroup).repeatFor ?? 'none'" name="repeatFor" value-key="value" :disabled="disabled"
                             :items="[{ value: 'none', label: tr('Do not repeat', 'Ne pas répéter') }, ...listOptions]"
-                            @update:model-value="(selected.item as AdvancedGroup).repeatFor = String($event) === 'none' ? undefined : String($event)" />
+                            @update:model-value="updateRepeatSource(selected.id, String($event))" />
                         </ExtensionFormField>
                         <FormDesignHelp v-if="selected.kind === 'group'" topic="Repeats" />
                         <div v-if="repeatSource" class="grid gap-3 sm:grid-cols-2">
@@ -1119,6 +1235,11 @@ watch(() => props.agencyId, () => {
                             </p>
                           </ExtensionFormField>
                           <ExtensionCheckbox v-model="repeatSource.required" :label="tr('At least one required', 'Au moins un élément requis')" :disabled="disabled" />
+                          <ExtensionAssessmentSchemaAccordionSection :title="t('fieldRulesTitle')" level="sub" class="sm:col-span-2" :default-open="ruleCorrectionQuestionId === repeatSource.id">
+                            <FormFieldRules :key="repeatSource.id" :model-value="repeatSource.rules" :question="repeatSource"
+                              :questions="conditionChoicesFor('question', repeatSource.id)" :repeat-questions="repeatFieldRuleSources(definition, repeatSource.id, language)" :locale="language" :disabled="disabled"
+                              @update:model-value="updateRules(repeatSource!, $event)" />
+                          </ExtensionAssessmentSchemaAccordionSection>
                         </div>
                         <div v-if="selected.kind === 'group'">
                           <p class="text-sm font-medium">
@@ -1215,6 +1336,10 @@ watch(() => props.agencyId, () => {
                                     </p>
                                   </ExtensionFormField>
                                 </ExtensionAssessmentSchemaAccordionSection>
+                                <ExtensionAssessmentSchemaAccordionSection v-if="selectedQuestion.type !== 'computed'" :title="t('fieldRulesTitle')" level="sub" :default-open="ruleCorrectionQuestionId === selectedQuestion.id">
+                                  <FormFieldRules :key="selectedQuestion.id" :model-value="selectedQuestion.rules" :question="selectedQuestion" :questions="questionConditionOptions"
+                                    :locale="language" :disabled="disabled" @update:model-value="updateRules(selectedQuestion!, $event)" />
+                                </ExtensionAssessmentSchemaAccordionSection>
                                 <ExtensionAssessmentSchemaAccordionSection :title="t('formQuestionHelp')" level="sub"><div class="grid gap-4 md:grid-cols-2">
                                   <ExtensionFormField :label="tr('Help text · English', 'Texte d’aide · anglais')" name="questionHintEn">
                                     <ExtensionTextarea v-model="selectedQuestion.hint!.en" name="questionHintEn" class="w-full" :rows="3" :required="false" :disabled="disabled" />
@@ -1273,12 +1398,12 @@ watch(() => props.agencyId, () => {
                                   v-if="selectedQuestion.type === 'budget' || selectedQuestion.type === 'activities'"
                                   :key="selectedQuestion.id" :question="selectedQuestion" :agency-id="agencyId" :stream-id="streamId" :disabled="disabled"
                                   @configure="selectedQuestion.config = $event as typeof selectedQuestion.config" /></ExtensionAssessmentSchemaAccordionSection>
-                                <ExtensionAssessmentSchemaAccordionSection v-if="selectedQuestion.type === 'table'" :title="t('formQuestionTable')" level="sub">
+                                <ExtensionAssessmentSchemaAccordionSection v-if="selectedQuestion.type === 'table'" :title="t('formQuestionTable')" level="sub" :default-open="ruleCorrectionQuestionId === selectedQuestion.id">
                                   <div class="designer-settings-body">
                                   <ExtensionFormField :label="tr('Totals', 'Totaux')" name="tableTotals" :description="tr('Only number columns are included. Totals update automatically.', 'Seules les colonnes numériques sont incluses. Les totaux sont recalculés automatiquement.')">
                                     <ExtensionSelect :model-value="'totals' in selectedQuestion ? selectedQuestion.totals ?? 'none' : 'none'" name="tableTotals" value-key="value" :disabled="disabled"
                                       :items="[{ value: 'none', label: tr('None', 'Aucun') }, { value: 'rows', label: tr('Rows', 'Lignes') }, { value: 'columns', label: tr('Columns', 'Colonnes') }, { value: 'both', label: tr('Rows and columns', 'Lignes et colonnes') }]"
-                                      @update:model-value="Object.assign(selectedQuestion!, { totals: $event }); definition.schemaVersion = 4" />
+                                      @update:model-value="Object.assign(selectedQuestion!, { totals: $event }); if (definition.schemaVersion < 4) definition.schemaVersion = 4" />
                                   </ExtensionFormField>
                                   <div class="designer-columns">
                                     <div class="designer-settings-toolbar">
@@ -1290,7 +1415,7 @@ watch(() => props.agencyId, () => {
                                   <div v-for="(column, index) in selectedQuestion.columns" :key="index" class="designer-column">
                                     <div class="designer-settings-toolbar">
                                       <h6 class="font-medium">{{ t('formTableColumnTitle', { number: index + 1 }) }}</h6>
-                                      <ExtensionButton color="error" variant="outline" icon="i-lucide-trash-2" :disabled="disabled || selectedQuestion.columns.length === 1" @click="selectedQuestion.columns.splice(index, 1)">
+                                      <ExtensionButton color="error" variant="outline" icon="i-lucide-trash-2" :disabled="disabled || selectedQuestion.columns.length === 1" @click="removeColumn(index)">
                                         {{ tr('Remove column', 'Retirer la colonne') }}
                                       </ExtensionButton>
                                     </div>
@@ -1303,13 +1428,18 @@ watch(() => props.agencyId, () => {
                                     </ExtensionFormField>
                                     <ExtensionFormField :label="tr('Data type', 'Type de données')" :name="`columnType${index}`">
                                       <ExtensionSelect
-                                        v-model="column.type" :name="`columnType${index}`" value-key="value" :disabled="disabled"
-                                        :items="[{ value: 'text', label: tr('Text', 'Texte') }, { value: 'number', label: tr('Number', 'Nombre') }, { value: 'date', label: tr('Date', 'Date') }]" />
+                                        :model-value="column.type" :name="`columnType${index}`" value-key="value" :disabled="disabled"
+                                        :items="[{ value: 'text', label: tr('Text', 'Texte') }, { value: 'number', label: tr('Number', 'Nombre') }, { value: 'date', label: tr('Date', 'Date') }]"
+                                        @update:model-value="changeColumnType(index, $event as 'text' | 'number' | 'date')" />
                                     </ExtensionFormField>
                                     <div class="designer-column-required">
                                       <ExtensionCheckbox v-model="column.required" :label="tr('Required cell', 'Cellule obligatoire')" :disabled="disabled" />
                                     </div>
                                     </div>
+                                    <ExtensionAssessmentSchemaAccordionSection :title="t('fieldRulesTitle')" level="sub" :default-open="ruleCorrectionQuestionId === selectedQuestion.id">
+                                      <FormFieldRules :key="column.id" :model-value="column.rules" :question="column" :questions="columnRuleSources(selectedQuestion, index)"
+                                        scope="column" :locale="language" :disabled="disabled" @update:model-value="updateColumnRules(selectedQuestion as Extract<AdvancedQuestion, { type: 'table' }>, index, $event)" />
+                                    </ExtensionAssessmentSchemaAccordionSection>
                                   </div>
                                   </div>
                                   </div>
@@ -1483,7 +1613,12 @@ watch(() => props.agencyId, () => {
                 Français
               </button>
             </div>
-            <FormTest :definition="definition" :locale="previewLocale" />
+            <div v-if="invalidRuleQuestions.length" class="space-y-3" role="alert">
+              <p class="font-semibold">{{ t('fieldRuleTestBlocked') }}</p>
+              <p>{{ t('fieldRuleTestReview', { questions: invalidRuleQuestions.map(question => question.label[language] || t('formUntitled')).join(', ') }) }}</p>
+              <ExtensionButton color="neutral" variant="outline" @click="editInvalidRules">{{ t('fieldRuleTestEdit') }}</ExtensionButton>
+            </div>
+            <FormTest v-else :definition="definition" :locale="previewLocale" />
           </div>
           <div v-else class="space-y-5">
             <section class="designer-form-details space-y-3">

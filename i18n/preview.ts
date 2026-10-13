@@ -19,6 +19,7 @@ export const previewMessages = {
     previewError_date: 'Enter a valid date.',
     previewError_choice: 'Choose an available option.',
     previewError_length: 'Check the permitted length or number of entries.',
+    previewError_rule: 'Check the rule for this response.',
     previewError_unknown: 'Check this response.'
   },
   fr: {
@@ -41,6 +42,7 @@ export const previewMessages = {
     previewError_date: 'Saisissez une date valide.',
     previewError_choice: 'Choisissez une option disponible.',
     previewError_length: 'Vérifiez la longueur permise ou le nombre d’entrées.',
+    previewError_rule: 'Vérifiez la règle pour cette réponse.',
     previewError_unknown: 'Vérifiez cette réponse.'
   }
 } as const

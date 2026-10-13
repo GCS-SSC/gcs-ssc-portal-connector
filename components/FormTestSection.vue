@@ -86,7 +86,7 @@ const remove = (field: SurveyField, instanceId?: string) => {
             :fields="fields" :locale="locale" :depth="depth + 1" />
         </section>
         <p v-if="section.source.error" :id="`${section.source.id}-repeat-error`" role="alert" class="text-sm text-error">
-          {{ t(`previewError_${section.source.error ?? 'unknown'}`) }}
+          {{ section.source.errorMessage ?? t(`previewError_${section.source.error ?? 'unknown'}`) }}
         </p>
         <ExtensionButton type="button" color="neutral" variant="outline" :disabled="section.source.disabled || parseList(section.source.value).length >= section.source.question.maxItems" @click="add(section.source)">
           {{ t('previewAddAnother') }}

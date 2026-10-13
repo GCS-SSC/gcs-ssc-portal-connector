@@ -3,10 +3,12 @@ import { importDiagnosticsMessages } from './import-diagnostics.ts'
 import { grantMessages } from './grants.ts'
 import { previewMessages } from './preview.ts'
 import { designHelpMessages } from './design-help.ts'
+import { fieldRuleMessages } from './field-rules.ts'
 import { defineGcsExtensionMessages } from '@gcs-ssc/extensions'
 
 export const messages = defineGcsExtensionMessages({
   en: {
+    ...fieldRuleMessages.en,
     ...importDiagnosticsMessages.en,
     ...receiptAttachmentMessages.en,
     formInstructionsHelp: 'Instructions are optional. If you enter instructions in either language, provide both English and French.',
@@ -234,6 +236,7 @@ export const messages = defineGcsExtensionMessages({
     queuedState: 'Queued', sendingState: 'Sending', deliveredState: 'Delivered', cancelledState: 'Cancelled'
   },
   fr: {
+    ...fieldRuleMessages.fr,
     ...importDiagnosticsMessages.fr,
     ...receiptAttachmentMessages.fr,
     formInstructionsHelp: 'Les instructions sont facultatives. Si vous en saisissez dans une langue, fournissez les versions anglaise et française.',

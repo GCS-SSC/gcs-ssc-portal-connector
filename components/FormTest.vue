@@ -78,7 +78,7 @@ const previous = (back: () => void, complete: boolean, pageIndex: number) => {
             <ul class="space-y-1 text-sm">
               <li v-for="(error, id) in errors" :key="id">
                 <a :href="`#${id}`" class="text-error underline" @click.prevent="focusField(String(id))">
-                  {{ answerLabel(fields, page && 'groups' in page ? page.groups : [], String(id)) }}: {{ t(`previewError_${error}`) }}
+                  {{ answerLabel(fields, page && 'groups' in page ? page.groups : [], String(id)) }}: {{ fields.find(field => field.id === String(id))?.errorMessage ?? t(`previewError_${error}`) }}
                 </a>
               </li>
             </ul>

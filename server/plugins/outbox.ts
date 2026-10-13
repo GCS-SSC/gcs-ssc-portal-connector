@@ -42,7 +42,7 @@ export default defineGcsExtensionNitroPlugin((nitroApp) => {
           await payload.runForAgency(agency.agencyId, async () => {
             const context: GcsExtensionRouteContext = {
               event: { context: { $db: payload.db } }, db: payload.db,
-              params: { agencyId: agency.agencyId }, config: {}, extensionKey: EXTENSION_KEY,
+              params: { agencyId: agency.agencyId }, config: {}, agencyConfig: {}, extensionKey: EXTENSION_KEY,
               writeAuthorization: payload.createWriteAuthorization(EXTENSION_KEY, agency.agencyId),
               readBody: async <T>() => undefined as T, getHeader: () => undefined
             }
