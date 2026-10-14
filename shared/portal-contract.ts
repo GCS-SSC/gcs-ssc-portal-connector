@@ -50,14 +50,15 @@ export const forecastItemSchema = z.object({
   mappingComplete: z.literal(true),
   forecast: z.object({
     agreementId: externalId,
-    header: z.object({ egcs_fc_fiscalyear: externalId }),
-    lineItems: z.array(z.object({
+    header: z.strictObject({ egcs_fc_fiscalyear: externalId }),
+    lineItems: z.array(z.strictObject({
       egcs_fc_fundingagreementbudgetlineitem: externalId,
       egcs_fc_month: z.number().int().min(0).max(11),
       egcs_fc_amount: money,
       egcs_fc_currency: z.string().min(1),
-      egcs_fc_version: externalId.or(z.literal('0'))
-    })).min(1).max(2400)
+      // Retained Portal exports used a fixed zero; discard that transport-only field.
+      egcs_fc_version: z.literal('0').optional()
+    }).transform(({ egcs_fc_version: _legacyVersion, ...line }) => line)).min(1).max(2400)
   })
 })
 export const submissionSchema = z.object({

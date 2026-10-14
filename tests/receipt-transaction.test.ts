@@ -125,6 +125,33 @@ describe('portal Claim receipt transaction', () => {
     expect(portal.consume).toHaveBeenCalledTimes(2)
   })
 
+  it.each([false, true])('imports a Forecast without assigning a version (historical zero: %s)', async legacy => {
+    const createForecast = vi.fn(async () => ({
+      status: 'created', forecastId: '91', version: '3', lineItemIds: ['92'], draftStatusId: '90'
+    }))
+    portal.submission = {
+      ...submission('item-1'),
+      items: [{ kind: 'forecast', itemSubmissionId: 'item-1', mappingComplete: true,
+        forecast: { agreementId: '33', header: { egcs_fc_fiscalyear: '77' },
+          lineItems: [{ egcs_fc_fundingagreementbudgetlineitem: '66', egcs_fc_month: 0,
+            egcs_fc_amount: '1000.00', egcs_fc_currency: 'CAD' }] }
+      }]
+    }
+    if (legacy) {
+      const item = portal.submission.items[0] as unknown as { forecast: { lineItems: object[] } }
+      Object.assign(item.forecast.lineItems[0]!, { egcs_fc_version: '0' })
+    }
+    const { syncPortal } = await import('../server/sync.ts')
+    const result = await syncPortal({ db, params: { agencyId: '11' },
+      writeAuthorization: { createAgreementForecast: createForecast } } as never)
+    expect(result.imported).toEqual([{ itemSubmissionId: 'item-1', kind: 'forecast', entityId: '91' }])
+    expect(createForecast).toHaveBeenCalledWith(expect.anything(), {
+      agreementId: '33', streamId: '44', fiscalYearId: '77', applicantRecipientId: '55',
+      lineItems: [{ budgetLineItemId: '66', month: 0, amount: '1000.00', currency: 'CAD' }]
+    })
+    expect(portal.consume).toHaveBeenCalledWith('12', '91')
+  })
+
   it('uses the verified organization identity on a multi-Proponent Agreement and rejects an alternative submitting Proponent', async () => {
     await engine.exec(`INSERT INTO "Funding_Case_Agreement_Applicant_Recipient" VALUES ('2','33','56',false);`)
     const original = submission('item-1')

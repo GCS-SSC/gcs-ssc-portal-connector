@@ -146,8 +146,7 @@ const importForecast = async (
         budgetLineItemId: line.egcs_fc_fundingagreementbudgetlineitem,
         month: line.egcs_fc_month,
         amount: line.egcs_fc_amount,
-        currency: line.egcs_fc_currency,
-        version: line.egcs_fc_version
+        currency: line.egcs_fc_currency
       }))
     })
     if (result.status !== 'created') throw new Error(`Forecast cannot be imported: ${result.status}.`)
