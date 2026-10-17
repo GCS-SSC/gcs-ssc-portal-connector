@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { feedback, useLocalizedFeedback } from './localized-feedback'
 import { computed, ref, watch } from 'vue'
 import type { ExtensionEntityTabContext } from '@gcs-ssc/extensions'
 import { ExtensionBadge, ExtensionButton, ExtensionResourceLayoutCard, useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
@@ -17,7 +18,7 @@ const writeEndpoint = computed(() => `/agencies/${agencyId.value}/opportunities/
 const forms = ref<Form[]>([])
 const search = ref('')
 const pagination = ref({ pageIndex: 0, pageSize: 10 })
-const language = computed(() => locale.value === 'fr' ? 'fr' : 'en')
+const language = computed(() => /^fr(?:-|$)/i.test(locale.value) ? 'fr' : 'en')
 const writable = computed(() => canWrite.value && !props.disabled)
 const editable = computed(() => writable.value && !published.value && !loading.value && !busy.value)
 const titleFor = (form: Form) => form.title[language.value] || form.title.en || form.surveyId
@@ -44,8 +45,8 @@ const canWrite = ref(false)
 const editing = ref<string | null>(null)
 const loading = ref(false)
 const busy = ref(false)
-const error = ref('')
-const message = ref('')
+const error = useLocalizedFeedback(t)
+const message = useLocalizedFeedback(t)
 let sequence = 0
 const load = async () => {
   const current = ++sequence
@@ -57,7 +58,7 @@ const load = async () => {
     published.value = result.published
     canWrite.value = result.canWrite
   } catch {
-    if (current === sequence) error.value = t('opportunityFormsLoadFailed')
+    if (current === sequence) error.value = feedback('opportunityFormsLoadFailed')
   } finally { if (current === sequence) loading.value = false }
 }
 watch(() => [agencyId.value, opportunityId.value], () => {
@@ -71,9 +72,9 @@ const changeForms = async (next: Form[]) => {
     await api.post(writeEndpoint.value, { action: 'saveForms', forms: next.map(form => ({
       surveyId: form.surveyId, revision: form.revision
     })) })
-    message.value = t('opportunityFormsOrderSaved')
+    message.value = feedback('opportunityFormsOrderSaved')
     await load()
-  } catch { error.value = t('opportunityFormsSaveFailed') }
+  } catch { error.value = feedback('opportunityFormsSaveFailed') }
   finally { busy.value = false }
 }
 const move = (index: number, direction: -1 | 1) => {
@@ -89,13 +90,13 @@ const act = async (action: 'publish' | 'withdraw') => {
   try {
     await api.post(writeEndpoint.value, { action })
     message.value = action === 'publish'
-      ? t('opportunityFormsPublished')
-      : t('opportunityFormsWithdrawn')
+      ? feedback('opportunityFormsPublished')
+      : feedback('opportunityFormsWithdrawn')
     await load()
   } catch {
     error.value = action === 'publish'
-      ? t('opportunityFormsPublishFailed')
-      : t('opportunityFormsWithdrawFailed')
+      ? feedback('opportunityFormsPublishFailed')
+      : feedback('opportunityFormsWithdrawFailed')
   } finally { busy.value = false }
 }
 </script>

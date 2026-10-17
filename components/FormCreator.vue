@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { feedback, useLocalizedFeedback } from './localized-feedback'
 import { computed, nextTick, onMounted, ref, useId, watch } from 'vue'
 import { customAlphabet } from 'nanoid'
 import { grantConfigurationReady, emptyBudgetConfig, emptyActivityConfig, designerSurveySchema, upgradeToAdvancedSurvey, type AdvancedGroup, type AdvancedQuestion,
@@ -23,10 +24,9 @@ const props = defineProps<{ agencyId: string; disabled?: boolean; selectedFormId
   opportunityId?: string; streamId?: string; standalone?: boolean; flowOnly?: boolean; initialView?: 'edit' | 'test' | 'publish' }>()
 const emit = defineEmits<{ flow: [view: 'edit' | 'flow' | 'test' | 'publish']; close: []; saved: [id: string] }>()
 const { locale, t } = useExtensionI18n(messages)
-const language = computed<'en' | 'fr'>(() => locale.value === 'fr' ? 'fr' : 'en')
+const language = computed<'en' | 'fr'>(() => /^fr(?:-|$)/i.test(locale.value) ? 'fr' : 'en')
 const previewLocale = ref<'en' | 'fr'>(language.value)
 const ruleCorrectionQuestionId = ref('')
-const tr = (en: string, fr: string) => language.value === 'fr' ? fr : en
 const api = useExtensionApi('gcs-ssc-portal-connector')
 const draftOwner = computed(() => props.opportunityId
   ? `${props.agencyId}:opportunity:${props.opportunityId}`
@@ -49,11 +49,11 @@ const workflowTabs = computed(() => [
   ...(!props.intakeId && !props.opportunityId ? [{ key: 'publish', value: 'publish', label: t('formPublishTab'), icon: 'i-lucide-send' }] : []),
   { key: 'flow', value: 'flow', label: t('formFlowTab'), icon: 'i-lucide-git-branch' }
 ])
-const busy = ref(false), loading = ref(false), error = ref(''), message = ref('')
+const busy = ref(false), loading = ref(false), error = useLocalizedFeedback(t), message = useLocalizedFeedback(t)
 const attachmentPending = ref(false)
 const syncPending = ref(false)
 const detailsOpen = ref(false)
-const detailsError = ref('')
+const detailsError = useLocalizedFeedback(t)
 const detailsDraft = ref({ titleEn: '', titleFr: '', introductionEn: '', introductionFr: '' })
 const introductionRequired = computed(() => Boolean(detailsDraft.value.introductionEn.trim() || detailsDraft.value.introductionFr.trim()))
 const detailsValid = computed(() => Boolean(
@@ -139,11 +139,11 @@ const applyDetails = async () => {
       syncPending.value = false
       saved.value = JSON.stringify(definition.value)
       clearFormDraft(draftOwner.value)
-      message.value = t('formDetailsCreated')
+      message.value = feedback('formDetailsCreated')
       detailsOpen.value = false
       emit('saved', formId.value)
       await load()
-    } catch { detailsError.value = t('formDetailsCreateFailed') } finally { busy.value = false }
+    } catch { detailsError.value = feedback('formDetailsCreateFailed') } finally { busy.value = false }
     return
   }
   definition.value.title = title
@@ -159,7 +159,7 @@ const heroActions = computed(() => props.disabled
   : [
       { label: t('formDetailsEdit'), icon: 'i-lucide-edit-3', color: 'neutral' as const,
         variant: 'outline' as const, disabled: busy.value, onClick: openDetails },
-      { label: tr('Save revision', 'Enregistrer la version'), icon: 'i-lucide-save',
+      { label: t('interfaceSaveRevision'), icon: 'i-lucide-save',
         disabled: disabled.value, loading: busy.value, onClick: () => { void save() } }
     ])
 const heroBadges = computed(() => [...(formId.value
@@ -261,17 +261,17 @@ const areaQuestions = computed(() => selected.value?.item.questionIds
   .filter((question): question is AdvancedQuestion => question !== undefined && question.type !== 'repeat') ?? [])
 const questionTypes = computed(() => [
   { value: 'textarea', label: t('formLongAnswer'), glyph: '¶' },
-  { value: 'text', label: tr('Short answer', 'Réponse courte'), glyph: 'T' },
-  { value: 'email', label: tr('Email', 'Courriel'), glyph: '@' },
-  { value: 'number', label: tr('Number', 'Nombre'), glyph: '#' },
-  { value: 'date', label: tr('Date', 'Date'), glyph: '▦' },
-  { value: 'select', label: tr('Dropdown', 'Liste déroulante'), glyph: '▾' },
-  { value: 'checkboxes', label: tr('Checkboxes', 'Cases à cocher'), glyph: '☑' },
-  { value: 'multiselect', label: tr('Multi select', 'Sélection multiple'), glyph: '☷' },
+  { value: 'text', label: t('interfaceShortAnswer'), glyph: 'T' },
+  { value: 'email', label: t('interfaceEmail'), glyph: '@' },
+  { value: 'number', label: t('interfaceNumber'), glyph: '#' },
+  { value: 'date', label: t('interfaceDate'), glyph: '▦' },
+  { value: 'select', label: t('interfaceDropdown'), glyph: '▾' },
+  { value: 'checkboxes', label: t('interfaceCheckboxes'), glyph: '☑' },
+  { value: 'multiselect', label: t('interfaceMultiSelect'), glyph: '☷' },
   { value: 'budget', label: t('grantBudget'), glyph: '$' },
   { value: 'activities', label: t('grantActivities'), glyph: '✓' },
-  { value: 'table', label: tr('Table', 'Tableau'), glyph: '▤' },
-  { value: 'computed', label: tr('Calculated value', 'Valeur calculée'), glyph: '∑' }
+  { value: 'table', label: t('interfaceTable'), glyph: '▤' },
+  { value: 'computed', label: t('interfaceCalculatedValue'), glyph: '∑' }
 ] as const)
 const typeName = (type: AdvancedQuestion['type']) => questionTypes.value.find((item) => item.value === type)?.label ?? type
 const bilingual = (value?: { en: string; fr: string }) => Boolean(value?.en.trim() && value.fr.trim())
@@ -281,23 +281,23 @@ const publicationChecks = computed(() => {
   definition.value.pages.forEach(collect)
   const contentPair = (value?: { en: string; fr: string }) => !value?.en.trim() && !value?.fr.trim() || bilingual(value)
   return [
-    { label: tr('Form title in English and French', 'Titre du formulaire en anglais et en français'), ok: bilingual(definition.value.title), target: 'details' as const },
-    { label: tr('Page and section headings in both languages', 'Titres des pages et des sections dans les deux langues'), ok: allContainers.every((item) => bilingual(item.title)), target: 'edit' as const },
-    { label: tr('Form introduction translated when provided', 'Introduction du formulaire traduite, si elle est fournie'), ok: contentPair(definition.value.description), target: 'details' as const },
-    { label: tr('Page and section instructions translated when provided', 'Instructions des pages et des sections traduites, si elles sont fournies'), ok: allContainers.every((item) => contentPair(item.description)), target: 'edit' as const },
-    { label: tr('At least one question', 'Au moins une question'), ok: definition.value.questions.length > 0, target: 'edit' as const },
-    { label: tr('Questions and help text translated', 'Questions et textes d’aide traduits'), ok: definition.value.questions.every((item) => bilingual(item.label) && contentPair(item.hint)), target: 'edit' as const },
-    { label: tr('Choices and table columns translated', 'Choix et colonnes de tableau traduits'), ok: definition.value.questions.every((item) => (item.type === 'select' || item.type === 'checkboxes' || item.type === 'multiselect')
+    { label: t('interfaceFormTitleInEnglishAndFrench'), ok: bilingual(definition.value.title), target: 'details' as const },
+    { label: t('interfacePageAndSectionHeadingsInBothLanguages'), ok: allContainers.every((item) => bilingual(item.title)), target: 'edit' as const },
+    { label: t('interfaceFormIntroductionTranslatedWhenProvided'), ok: contentPair(definition.value.description), target: 'details' as const },
+    { label: t('interfacePageAndSectionInstructionsTranslatedWhenProvided'), ok: allContainers.every((item) => contentPair(item.description)), target: 'edit' as const },
+    { label: t('interfaceAtLeastOneQuestion'), ok: definition.value.questions.length > 0, target: 'edit' as const },
+    { label: t('interfaceQuestionsAndHelpTextTranslated'), ok: definition.value.questions.every((item) => bilingual(item.label) && contentPair(item.hint)), target: 'edit' as const },
+    { label: t('interfaceChoicesAndTableColumnsTranslated'), ok: definition.value.questions.every((item) => (item.type === 'select' || item.type === 'checkboxes' || item.type === 'multiselect')
       ? item.options.every((option) => bilingual(option.label))
       : item.type === 'table'
         ? item.columns.every((column) => bilingual(column.label))
         : true), target: 'edit' as const },
-    { label: tr('Calculated values use selected fields without fixed text', 'Les valeurs calculées utilisent les champs sélectionnés sans texte fixe'),
+    { label: t('interfaceCalculatedValuesUseSelectedFieldsWithoutFixedText'),
       ok: definition.value.questions.every((item) => item.type !== 'computed' || computedTemplateReady(item.template, item.sourceIds)), target: 'edit' as const },
     { label: t('grantReadyBudget'), ok: definition.value.questions.every(item => item.type !== 'budget' || grantConfigurationReady(item)), target: 'edit' as const },
     { label: t('grantReadyActivities'), ok: definition.value.questions.every(item => item.type !== 'activities' || grantConfigurationReady(item)), target: 'edit' as const },
     { label: t('fieldRuleReady'), ok: !invalidRuleQuestions.value.length, target: 'edit' as const },
-    { label: tr('Latest revision saved', 'Dernière version enregistrée'), ok: Boolean(formId.value) && revision.value > 0 && !dirty.value, target: 'edit' as const },
+    { label: t('interfaceLatestRevisionSaved'), ok: Boolean(formId.value) && revision.value > 0 && !dirty.value, target: 'edit' as const },
     { label: t('formSyncPendingCheck'),
       ok: !syncPending.value, target: 'edit' as const }
   ]
@@ -416,10 +416,10 @@ const sourceChoices = computed(() => selectedDependency.value?.type === 'select'
  * @param includeNext
  */
 const pageDestinations = (page: AdvancedSurvey['pages'][number], includeNext = false) => [
-  ...(includeNext ? [{ value: 'next', label: tr('Next page in order', 'Page suivante dans l’ordre') }] : []),
+  ...(includeNext ? [{ value: 'next', label: t('interfaceNextPageInOrder') }] : []),
   ...definition.value.pages.slice(definition.value.pages.findIndex((item) => item.id === page.id) + 1)
     .map((item) => ({ value: item.id, label: item.title[language.value] || item.id })),
-  { value: 'end', label: tr('End form', 'Terminer le formulaire') }
+  { value: 'end', label: t('interfaceEndForm') }
 ]
 /**
  *
@@ -434,7 +434,7 @@ const load = async () => {
     const current = surveys.value.find(item => item.id === formId.value)
     if (current) syncPending.value = current.revision > 0 && current.synced === false
     formsLoaded.value = true
-  } catch { error.value = t('formLibraryLoadFailed') } finally { loading.value = false }
+  } catch { error.value = feedback('formLibraryLoadFailed') } finally { loading.value = false }
 }
 /**
  *
@@ -451,7 +451,7 @@ const resetForm = () => {
  * @param id
  */
 const selectForm = async (id: string) => {
-  if (dirty.value && !confirm(tr('Discard unsaved form changes?', 'Abandonner les modifications non enregistrées?'))) return
+  if (dirty.value && !confirm(t('interfaceDiscardUnsavedFormChanges'))) return
   error.value = ''; message.value = ''
   if (!id) {
     resetForm()
@@ -466,13 +466,13 @@ const selectForm = async (id: string) => {
     collapsedNodeIds.value = new Set<string>()
     selectedContainerId.value = definition.value.pages[0]!.id; selectedQuestionId.value = ''; tab.value = 'edit'
     saved.value = JSON.stringify(definition.value)
-  } catch { error.value = tr('The form could not be opened.', 'Impossible d’ouvrir le formulaire.') } finally { loading.value = false }
+  } catch { error.value = feedback('interfaceTheFormCouldNotBeOpened') } finally { loading.value = false }
 }
 /**
  *
  */
 const closeDesigner = () => {
-  if (dirty.value && !confirm(tr('Discard unsaved form changes?', 'Abandonner les modifications non enregistrées?'))) return
+  if (dirty.value && !confirm(t('interfaceDiscardUnsavedFormChanges'))) return
   if (dirty.value && attachmentPending.value) definition.value = JSON.parse(saved.value) as AdvancedSurvey
   if (attachmentPending.value) persistDraft()
   else clearFormDraft(draftOwner.value)
@@ -499,7 +499,7 @@ const save = async () => {
       }
       return t('formInvalidStructure')
     }))].slice(0, 4)
-    error.value = t('formInvalidDefinition', { fields: fields.join(' · ') })
+    error.value = feedback('formInvalidDefinition', { fields: fields.join(' · ') })
     if (parsed.error.issues.some((issue) => issue.path[0] === 'title' || issue.path[0] === 'description')) openDetails()
     else tab.value = 'edit'
     return
@@ -522,12 +522,12 @@ const save = async () => {
     message.value = attachmentPending.value
       ? ''
       : result.queued
-        ? t('formQueuedSave')
-        : tr('Form revision saved.', 'Version du formulaire enregistrée.')
+        ? feedback('formQueuedSave')
+        : feedback('interfaceFormRevisionSaved')
     emit('saved', formId.value)
     await load()
-    if (attachmentPending.value) error.value = t('intakeAttachFailed')
-  } catch { error.value = tr('Save failed. Reload if another editor saved a newer revision.', 'Échec de l’enregistrement. Rechargez si une autre version a été enregistrée.') } finally { busy.value = false }
+    if (attachmentPending.value) error.value = feedback('intakeAttachFailed')
+  } catch { error.value = feedback('interfaceSaveFailedReloadIfAnotherEditorSavedANewerRevision') } finally { busy.value = false }
 }
 /**
  *
@@ -540,9 +540,9 @@ const retryAttachment = async () => {
       surveyId: formId.value, revision: revision.value })
     attachmentPending.value = false
     clearFormDraft(draftOwner.value)
-    message.value = t('intakeAttachSuccess')
+    message.value = feedback('intakeAttachSuccess')
     emit('saved', formId.value)
-  } catch { error.value = t('intakeAttachFailed') } finally { busy.value = false }
+  } catch { error.value = feedback('intakeAttachFailed') } finally { busy.value = false }
 }
 /**
  *
@@ -560,9 +560,9 @@ const publish = async (action: 'publishAgreement' | 'publishScope' | 'publishOrg
         ? { action, ...common, organizationId: organizationId.value }
         : { action, ...common, scope: publicationScope.value, scopeId: publicationScope.value === 'program' ? programId.value : batchStreamId.value }
     await api.post(endpoint.value, body)
-    message.value = t('formPublished')
+    message.value = feedback('formPublished')
     await load()
-  } catch { error.value = tr('Publication failed. Check the selected target, dates, and saved revision.', 'Échec de la publication. Vérifiez la cible, les dates et la version enregistrée.') } finally { busy.value = false }
+  } catch { error.value = feedback('interfacePublicationFailedCheckTheSelectedTargetDatesAndSavedRevision') } finally { busy.value = false }
 }
 /**
  *
@@ -711,18 +711,17 @@ const removeQuestion = (id = selectedQuestionId.value) => {
   if (!id) return
   const dependent = ruleDependent([id])
   if (dependent) {
-    error.value = t('fieldRuleDeleteBlocked', { question: definition.value.questions.find(question => question.id === id)?.label[language.value] || id,
+    error.value = feedback('fieldRuleDeleteBlocked', { question: definition.value.questions.find(question => question.id === id)?.label[language.value] || id,
       dependent: dependent.label[language.value] || dependent.id })
     return
   }
   if (nodes.value.some((node) => node.repeatFor === id)) {
-    error.value = t('formRemoveRepeatSourceFirst')
+    error.value = feedback('formRemoveRepeatSourceFirst')
     return
   }
   removeQuestionById(id)
   error.value = ''
-  message.value = tr('Question removed. Rules and dependencies using it were updated; check any calculated values.',
-    'Question retirée. Les règles et dépendances qui l’utilisaient ont été mises à jour; vérifiez les valeurs calculées.')
+  message.value = feedback('interfaceQuestionRemovedRulesAndDependenciesUsingItWereUpdatedCheckAnyCalculatedValues')
 }
 /**
  *
@@ -766,8 +765,7 @@ const canMoveQuestion = (direction: -1 | 1) => {
  */
 const moveQuestion = (direction: -1 | 1) => {
   if (!canMoveQuestion(direction)) {
-    error.value = tr('This move would put a question before a rule or dependency it needs.',
-      'Ce déplacement placerait une question avant une règle ou une dépendance nécessaire.')
+    error.value = feedback('interfaceThisMoveWouldPutAQuestionBeforeARuleOrDependencyItNeeds')
     return
   }
   const ids = selected.value?.item.questionIds
@@ -798,8 +796,7 @@ const placeQuestion = (targetId: string) => {
   if (!trialTarget) return
   trialTarget.questionIds.push(questionId)
   if (!referencesValid(trial)) {
-    error.value = tr('This placement would break an existing rule or dependency. Move its source question first.',
-      'Cet emplacement invaliderait une règle ou une dépendance. Déplacez d’abord la question source.')
+    error.value = feedback('interfaceThisPlacementWouldBreakAnExistingRuleOrDependencyMoveItsSourceQuestionFirst')
     return
   }
   for (const node of nodes.value) node.item.questionIds = node.item.questionIds.filter((id) => id !== questionId)
@@ -815,7 +812,7 @@ const removeContainer = () => {
   const node = selected.value
   if (!node) return
   if (node.kind === 'page' && (node.item.questionIds.length || node.item.groups.length)) {
-    error.value = tr('Move or remove this container’s questions and groups first.', 'Déplacez ou retirez d’abord les questions et les groupes de ce conteneur.')
+    error.value = feedback('interfaceMoveOrRemoveThisContainerSQuestionsAndGroupsFirst')
     return
   }
   if (node.kind === 'page') {
@@ -826,7 +823,7 @@ const removeContainer = () => {
       for (const branch of page.branches) if (branch.destination.kind === 'page' && branch.destination.pageId === node.id)
         branch.destination = { kind: 'end' }
     }
-    message.value = tr('Page removed. Navigation to that page was updated.', 'Page retirée. La navigation vers cette page a été mise à jour.')
+    message.value = feedback('interfacePageRemovedNavigationToThatPageWasUpdated')
   } else {
     const group = node.item as AdvancedGroup
     const parentId = nodes.value.find((item) => item.item.groups.some((child) => child.id === node.id))?.id
@@ -845,11 +842,11 @@ const removeContainer = () => {
     const removedIds = [...questionIds, ...(group.repeatFor && !nodes.value.some(item => item.id !== group.id && item.repeatFor === group.repeatFor) ? [group.repeatFor] : [])]
     const dependent = ruleDependent(removedIds)
     if (dependent) {
-      error.value = t('fieldRuleDeleteBlocked', { question: node.title || node.id, dependent: dependent.label[language.value] || dependent.id })
+      error.value = feedback('fieldRuleDeleteBlocked', { question: node.title || node.id, dependent: dependent.label[language.value] || dependent.id })
       return
     }
     if (nodes.value.some((item) => item.repeatFor && questionIds.includes(item.repeatFor) && !groupIds.has(item.id))) {
-      error.value = t('formRemoveDependentSetFirst')
+      error.value = feedback('formRemoveDependentSetFirst')
       return
     }
     if (questionIds.length || group.groups.length) {
@@ -861,7 +858,7 @@ const removeContainer = () => {
       && !nodes.value.some((item) => item.id !== group.id && item.repeatFor === group.repeatFor))
       removeQuestionById(group.repeatFor)
     for (const parent of nodes.value) parent.item.groups = parent.item.groups.filter((item) => item.id !== node.id)
-    message.value = t('formSetRemoved')
+    message.value = feedback('formSetRemoved')
     selectedContainerId.value = parentId ?? definition.value.pages[0]!.id
   }
   error.value = ''
@@ -879,7 +876,7 @@ const updateChoices = (options: { value: string; label: { en: string; fr: string
     ? rule.when.conditions.some(condition => condition.questionId === question.id && 'value' in condition && removed.includes(condition.value))
     : rule.kind === 'choice' && item.id === question.id && removed.includes(rule.value)))
   if (dependent) {
-    error.value = t('fieldRuleChoiceBlocked', { dependent: dependent.label[language.value] || dependent.id })
+    error.value = feedback('fieldRuleChoiceBlocked', { dependent: dependent.label[language.value] || dependent.id })
     return
   }
   updateFormChoices(definition.value, selectedQuestionId.value, options)
@@ -927,7 +924,7 @@ const updateRepeatSource = (groupId: string, sourceId: string) => {
   if (!group) return
   group.repeatFor = sourceId === 'none' ? undefined : sourceId
   if (!referencesValid(trial)) {
-    error.value = t('fieldRuleRepeatSourceBlocked')
+    error.value = feedback('fieldRuleRepeatSourceBlocked')
     return
   }
   const current = containerIn(definition.value, groupId) as AdvancedGroup
@@ -949,7 +946,7 @@ const removeColumn = (index: number) => {
   const id = question.columns[index]!.id
   if ((question.rules ?? []).some(rule => (rule.kind === 'total' || rule.kind === 'unique') && rule.columnIds?.includes(id))
     || question.columns.some(column => column.id !== id && (column.rules ?? []).some(rule => rule.kind === 'compare' && rule.target.kind === 'column' && rule.target.columnId === id))) {
-    error.value = t('fieldRuleColumnBlocked')
+    error.value = feedback('fieldRuleColumnBlocked')
     return
   }
   question.columns.splice(index, 1)
@@ -963,7 +960,7 @@ const changeColumnType = (index: number, type: 'text' | 'number' | 'date') => {
     || question.columns.some(other => (other.rules ?? []).some(rule => rule.kind === 'compare' && rule.target.kind === 'column'
       && rule.target.columnId === column.id && !comparisonCompatible(other.type, type)))
     || type !== 'number' && (question.rules ?? []).some(rule => rule.kind === 'total' && rule.columnIds.includes(column.id))) {
-    error.value = t('fieldRuleColumnTypeBlocked')
+    error.value = feedback('fieldRuleColumnTypeBlocked')
     return
   }
   column.type = type
@@ -1130,34 +1127,34 @@ watch(() => props.agencyId, () => {
 </script>
 
 <template>
-  <section class="designer space-y-5" :aria-label="tr('Form designer', 'Concepteur de formulaires')">
+  <section class="designer space-y-5" :aria-label="t('interfaceFormDesigner')">
     <button v-if="!standalone" type="button" class="designer-back" @click="closeDesigner">
-      ← {{ props.opportunityId ? tr('Back to opportunity', 'Retour à l’occasion') : props.intakeId ? tr('Back to intake', 'Retour à l’appel') : tr('All forms', 'Tous les formulaires') }}
+      ← {{ props.opportunityId ? t('interfaceBackToOpportunity') : props.intakeId ? t('interfaceBackToIntake') : t('interfaceAllForms') }}
     </button>
     <ExtensionEntityHero
       icon="i-lucide-list" :title="definition.title[language] || t('formUntitled')"
       :description="definition.description?.[language] || undefined" :badges="heroBadges" :actions="heroActions" />
     <p v-if="loading" role="status">
-      {{ tr('Loading forms…', 'Chargement des formulaires…') }}
+      {{ t('interfaceLoadingForms') }}
     </p>
     <ExtensionEntityEditorWorkspace content-test-id="form-detail-content">
       <template #sidebar>
         <ExtensionRouteTabs
           v-model="tab" :items="workflowTabs" :external-panel-id="editorPanelId" :priority-values="['edit', 'test', 'publish', 'flow']" orientation="vertical"
           :ui="{ root: 'w-full', list: 'w-full flex-col items-stretch p-0', trigger: 'w-full justify-start' }" />
-        <nav class="designer-sidebar-outline" :aria-label="tr('Form pages and sections', 'Pages et sections du formulaire')">
+        <nav class="designer-sidebar-outline" :aria-label="t('interfaceFormPagesAndSections')">
           <h4 class="designer-eyebrow px-3">
-            {{ tr('PAGES & SECTIONS', 'PAGES ET SECTIONS') }}
+            {{ t('interfacePagesSections') }}
           </h4>
           <ul class="mt-2 space-y-1 text-sm">
             <li v-for="node in visibleNodes" :key="node.id">
               <div
                 class="designer-sidebar-row" :class="{ 'designer-sidebar-row--active': tab === 'edit' && selectedContainerId === node.id }"
                 :style="{ paddingInlineStart: `${8 + Math.min(node.depth, 4) * 8}px` }">
-                <ExtensionTooltip v-if="expandableNodeIds.has(node.id)" :text="`${collapsedNodeIds.has(node.id) ? tr('Expand', 'Développer') : tr('Collapse', 'Réduire')} ${node.title || node.id}`">
+                <ExtensionTooltip v-if="expandableNodeIds.has(node.id)" :text="`${collapsedNodeIds.has(node.id) ? t('interfaceExpand') : t('interfaceCollapse')} ${node.title || node.id}`">
                   <button
                     type="button" class="designer-sidebar-disclosure"
-                    :aria-label="`${collapsedNodeIds.has(node.id) ? tr('Expand', 'Développer') : tr('Collapse', 'Réduire')} ${node.title || node.id}`"
+                    :aria-label="`${collapsedNodeIds.has(node.id) ? t('interfaceExpand') : t('interfaceCollapse')} ${node.title || node.id}`"
                     :aria-expanded="!collapsedNodeIds.has(node.id)" @click="toggleNode(node)">
                     <ExtensionIcon
                       :name="collapsedNodeIds.has(node.id) ? 'i-lucide-chevron-right' : 'i-lucide-chevron-down'"
@@ -1180,7 +1177,7 @@ watch(() => props.agencyId, () => {
           <ExtensionButton
             color="neutral" variant="ghost" icon="i-lucide-plus"
             class="designer-outline-add mt-2 w-full justify-start" :disabled="disabled" @click="tab = 'edit'; addPage()">
-            {{ tr('Add page', 'Ajouter une page') }}
+            {{ t('interfaceAddPage') }}
           </ExtensionButton>
         </nav>
       </template>
@@ -1192,42 +1189,42 @@ watch(() => props.agencyId, () => {
                 <div class="designer-canvas space-y-6">
                   <ExtensionAssessmentSchemaPageSection
                     section-id="form-container-details"
-                    :title="selected.title || (selected.kind === 'page' ? tr('Untitled page', 'Page sans titre') : tr('Untitled section', 'Section sans titre'))">
-                    <ExtensionAssessmentSchemaAccordionSection :key="selected.id" :title="selected.kind === 'page' ? tr('Page details', 'Détails de la page') : tr('Section details', 'Détails de la section')" :default-open="ruleCorrectionQuestionId === repeatSource?.id || !selected.item.questionIds.length && !selected.item.groups.length">
+                    :title="selected.title || (selected.kind === 'page' ? t('interfaceUntitledPage') : t('interfaceUntitledSection'))">
+                    <ExtensionAssessmentSchemaAccordionSection :key="selected.id" :title="selected.kind === 'page' ? t('interfacePageDetails') : t('interfaceSectionDetails')" :default-open="ruleCorrectionQuestionId === repeatSource?.id || !selected.item.questionIds.length && !selected.item.groups.length">
                       <div class="space-y-3">
                         <div class="grid gap-3 sm:grid-cols-2">
-                          <ExtensionFormField :label="tr('Heading · English', 'Titre · anglais')" name="groupTitleEn" required>
+                          <ExtensionFormField :label="t('interfaceHeadingEnglish')" name="groupTitleEn" required>
                             <ExtensionInput v-model="selected.item.title.en" name="groupTitleEn" required :disabled="disabled" />
                           </ExtensionFormField>
-                          <ExtensionFormField :label="tr('Heading · French', 'Titre · français')" name="groupTitleFr" required>
+                          <ExtensionFormField :label="t('interfaceHeadingFrench')" name="groupTitleFr" required>
                             <ExtensionInput v-model="selected.item.title.fr" name="groupTitleFr" required :disabled="disabled" />
                           </ExtensionFormField>
-                          <ExtensionFormField :label="tr('Instructions · English', 'Instructions · anglais')" name="groupDescriptionEn" :required="instructionsRequired"
+                          <ExtensionFormField :label="t('interfaceInstructionsEnglish')" name="groupDescriptionEn" :required="instructionsRequired"
                             :description="t('formInstructionsHelp')"
                             :error="instructionsRequired && !selected.item.description!.en.trim() ? t('formInstructionsPairRequired') : undefined">
                             <ExtensionTextarea v-model="selected.item.description!.en" name="groupDescriptionEn" class="w-full" :rows="3" :required="instructionsRequired" :disabled="disabled" />
                           </ExtensionFormField>
-                          <ExtensionFormField :label="tr('Instructions · French', 'Instructions · français')" name="groupDescriptionFr" :required="instructionsRequired"
+                          <ExtensionFormField :label="t('interfaceInstructionsFrench')" name="groupDescriptionFr" :required="instructionsRequired"
                             :description="t('formInstructionsHelp')"
                             :error="instructionsRequired && !selected.item.description!.fr.trim() ? t('formInstructionsPairRequired') : undefined">
                             <ExtensionTextarea v-model="selected.item.description!.fr" name="groupDescriptionFr" class="w-full" :rows="3" :required="instructionsRequired" :disabled="disabled" />
                           </ExtensionFormField>
                         </div>
-                        <ExtensionFormField v-if="selected.kind === 'group'" :label="tr('Repeat this group for each item in', 'Répéter ce groupe pour chaque élément de')" name="repeatFor">
+                        <ExtensionFormField v-if="selected.kind === 'group'" :label="t('interfaceRepeatThisGroupForEachItemIn')" name="repeatFor">
                           <ExtensionSelect
                             :model-value="(selected.item as AdvancedGroup).repeatFor ?? 'none'" name="repeatFor" value-key="value" :disabled="disabled"
-                            :items="[{ value: 'none', label: tr('Do not repeat', 'Ne pas répéter') }, ...listOptions]"
+                            :items="[{ value: 'none', label: t('interfaceDoNotRepeat') }, ...listOptions]"
                             @update:model-value="updateRepeatSource(selected.id, String($event))" />
                         </ExtensionFormField>
                         <FormDesignHelp v-if="selected.kind === 'group'" topic="Repeats" />
                         <div v-if="repeatSource" class="grid gap-3 sm:grid-cols-2">
-                          <ExtensionFormField :label="tr('Set label · English', 'Libellé de la série · anglais')" name="repeatLabelEn" required>
+                          <ExtensionFormField :label="t('interfaceSetLabelEnglish')" name="repeatLabelEn" required>
                             <ExtensionInput v-model="repeatSource.label.en" name="repeatLabelEn" required :disabled="disabled" />
                           </ExtensionFormField>
-                          <ExtensionFormField :label="tr('Set label · French', 'Libellé de la série · français')" name="repeatLabelFr" required>
+                          <ExtensionFormField :label="t('interfaceSetLabelFrench')" name="repeatLabelFr" required>
                             <ExtensionInput v-model="repeatSource.label.fr" name="repeatLabelFr" required :disabled="disabled" />
                           </ExtensionFormField>
-                          <ExtensionFormField :label="tr('Maximum repetitions', 'Nombre maximal de répétitions')" name="maxItems" required>
+                          <ExtensionFormField :label="t('interfaceMaximumRepetitions')" name="maxItems" required>
                             <ExtensionInput
                               :model-value="repeatSource.maxItems || ''" name="maxItems" type="number" min="1" max="50" required :disabled="disabled"
                               :aria-invalid="invalidLimit(repeatSource.maxItems, 50)" :aria-describedby="invalidLimit(repeatSource.maxItems, 50) ? 'maxItems-error' : undefined"
@@ -1236,7 +1233,7 @@ watch(() => props.agencyId, () => {
                               {{ t('maxItemsInvalid') }}
                             </p>
                           </ExtensionFormField>
-                          <ExtensionCheckbox v-model="repeatSource.required" :label="tr('At least one required', 'Au moins un élément requis')" :disabled="disabled" />
+                          <ExtensionCheckbox v-model="repeatSource.required" :label="t('interfaceAtLeastOneRequired')" :disabled="disabled" />
                           <ExtensionAssessmentSchemaAccordionSection :title="t('fieldRulesTitle')" level="sub" class="sm:col-span-2" :default-open="ruleCorrectionQuestionId === repeatSource.id">
                             <FormFieldRules :key="repeatSource.id" :model-value="repeatSource.rules" :question="repeatSource"
                               :questions="conditionChoicesFor('question', repeatSource.id)" :repeat-questions="repeatFieldRuleSources(definition, repeatSource.id, language)" :locale="language" :disabled="disabled"
@@ -1245,57 +1242,57 @@ watch(() => props.agencyId, () => {
                         </div>
                         <div v-if="selected.kind === 'group'">
                           <p class="text-sm font-medium">
-                            {{ tr('Show this group when', 'Afficher ce groupe lorsque') }}
+                            {{ t('interfaceShowThisGroupWhen') }}
                           </p>
                           <FormDesignHelp topic="Visibility" />
                           <FormCondition v-model="(selected.item as AdvancedGroup).visibleWhen" :questions="groupConditionOptions" :locale="language" :disabled="disabled" />
                         </div>
                         <div class="flex flex-wrap gap-2 pt-2">
                           <ExtensionButton color="neutral" variant="outline" :disabled="disabled" @click="addGroup">
-                            {{ tr('Add nested section', 'Ajouter une section imbriquée') }}
+                            {{ t('interfaceAddNestedSection') }}
                           </ExtensionButton>
                           <ExtensionButton color="neutral" variant="outline" :disabled="disabled" @click="addRepeatingSet">
                             {{ selected.kind === 'page' ? t('formAddRepeatSet') : t('formAddNestedRepeatSet') }}
                           </ExtensionButton>
                           <ExtensionButton color="neutral" variant="ghost" :disabled="disabled || (selected.kind === 'page' && definition.pages.length === 1)" @click="removeContainer">
-                            {{ selected.kind === 'group' ? t('formRemoveSet') : tr('Remove empty group or page', 'Retirer le groupe ou la page vide') }}
+                            {{ selected.kind === 'group' ? t('formRemoveSet') : t('interfaceRemoveEmptyGroupOrPage') }}
                           </ExtensionButton>
                         </div>
                       </div>
                     </ExtensionAssessmentSchemaAccordionSection>
                   </ExtensionAssessmentSchemaPageSection>
-                  <ExtensionAssessmentSchemaPageSection section-id="form-questions" :title="`${tr('Questions', 'Questions')} · ${areaQuestions.length}`">
+                  <ExtensionAssessmentSchemaPageSection section-id="form-questions" :title="`${t('interfaceQuestions')} · ${areaQuestions.length}`">
                     <div class="designer-question-stack">
                       <p v-if="selected.kind === 'group' && selected.repeatFor" class="text-sm text-muted">
                         {{ t('formRepeatSetHelp') }}
                       </p>
                       <p v-if="!areaQuestions.length" class="designer-empty">
-                        {{ selected.kind === 'group' && selected.repeatFor ? t('formEmptyRepeatSet') : tr('Start with a question. Select a type below to add it to this page.', 'Commencez par une question. Sélectionnez un type ci-dessous pour l’ajouter à cette page.') }}
+                        {{ selected.kind === 'group' && selected.repeatFor ? t('formEmptyRepeatSet') : t('interfaceStartWithAQuestionSelectATypeBelowToAddItToThisPage') }}
                       </p>
                       <ol class="space-y-3">
                         <li v-for="(question, index) in areaQuestions" :key="question.id" class="relative">
                           <div class="designer-question" :data-question-id="question.id" @click="selectQuestion(question.id)">
                             <ExtensionAssessmentSchemaAccordionSection
                               :key="`${question.id}:${selectedQuestionId === question.id}`"
-                              :title="`${index + 1}. ${question.label[language] || tr('Untitled question', 'Question sans titre')}${question.required ? ' *' : ''} · ${typeName(question.type)}`"
+                              :title="`${index + 1}. ${question.label[language] || t('interfaceUntitledQuestion')}${question.required ? ' *' : ''} · ${typeName(question.type)}`"
                               :default-open="selectedQuestionId === question.id">
                               <div v-if="selectedQuestion && selectedQuestion.id === question.id" class="space-y-4">
                                 <p class="designer-eyebrow">
                                   {{ typeName(selectedQuestion.type) }}
                                 </p>
                                 <div class="grid gap-4 md:grid-cols-2">
-                                  <ExtensionFormField :label="tr('Question in English', 'Question en anglais')" name="questionEn" required>
+                                  <ExtensionFormField :label="t('interfaceQuestionInEnglish')" name="questionEn" required>
                                     <ExtensionInput v-model="selectedQuestion.label.en" name="questionEn" required :disabled="disabled" />
                                   </ExtensionFormField>
-                                  <ExtensionFormField :label="tr('Question in French', 'Question en français')" name="questionFr" required>
+                                  <ExtensionFormField :label="t('interfaceQuestionInFrench')" name="questionFr" required>
                                     <ExtensionInput v-model="selectedQuestion.label.fr" name="questionFr" required :disabled="disabled" />
                                   </ExtensionFormField>
                                 </div>
 
-                                <ExtensionCheckbox v-if="selectedQuestion.type !== 'computed'" v-model="selectedQuestion.required" :label="tr('Required response', 'Réponse obligatoire')" :disabled="disabled" />
+                                <ExtensionCheckbox v-if="selectedQuestion.type !== 'computed'" v-model="selectedQuestion.required" :label="t('interfaceRequiredResponse')" :disabled="disabled" />
                                 <div class="question-settings-disclosures">
                                 <ExtensionAssessmentSchemaAccordionSection :title="t('formQuestionPosition')" level="sub">
-<ExtensionFormField :label="tr('Place in', 'Placer dans')" name="questionPlacement">
+<ExtensionFormField :label="t('interfacePlaceIn')" name="questionPlacement">
                                   <ExtensionSelect
                                     :model-value="selected.id" name="questionPlacement" value-key="value" :disabled="disabled"
                                     :items="nodes.map((node) => ({ value: node.id, label: `${'· '.repeat(node.depth)}${node.title}` }))"
@@ -1303,14 +1300,14 @@ watch(() => props.agencyId, () => {
                                 </ExtensionFormField>
                                 <div class="designer-position-actions">
                                   <ExtensionButton color="neutral" variant="outline" :disabled="disabled || !canMoveQuestion(-1)" @click="moveQuestion(-1)">
-                                    {{ tr('Move up', 'Monter') }}
+                                    {{ t('interfaceMoveUp') }}
                                   </ExtensionButton>
                                   <ExtensionButton color="neutral" variant="outline" :disabled="disabled || !canMoveQuestion(1)" @click="moveQuestion(1)">
-                                    {{ tr('Move down', 'Descendre') }}
+                                    {{ t('interfaceMoveDown') }}
                                   </ExtensionButton>
 
                                 </div>
-                                <ExtensionFormField v-if="selectedQuestion.type === 'text' || selectedQuestion.type === 'textarea'" :label="tr('Maximum characters', 'Nombre maximal de caractères')" name="maxLength" required>
+                                <ExtensionFormField v-if="selectedQuestion.type === 'text' || selectedQuestion.type === 'textarea'" :label="t('interfaceMaximumCharacters')" name="maxLength" required>
                                   <ExtensionInput
                                     :model-value="selectedQuestion.maxLength || ''" name="maxLength" type="number" min="1" max="5000" required :disabled="disabled"
                                     :aria-invalid="invalidLimit(selectedQuestion.maxLength, 5000)" :aria-describedby="invalidLimit(selectedQuestion.maxLength, 5000) ? 'maxLength-error' : undefined"
@@ -1319,7 +1316,7 @@ watch(() => props.agencyId, () => {
                                     {{ t('maxLengthInvalid') }}
                                   </p>
                                 </ExtensionFormField>
-                                <ExtensionFormField v-if="selectedQuestion.type === 'list'" :label="tr('Maximum items', 'Nombre maximal d’éléments')" name="maxItems" required>
+                                <ExtensionFormField v-if="selectedQuestion.type === 'list'" :label="t('interfaceMaximumItems')" name="maxItems" required>
                                   <ExtensionInput
                                     :model-value="selectedQuestion.maxItems || ''" name="maxItems" type="number" min="1" max="50" required :disabled="disabled"
                                     :aria-invalid="invalidLimit(selectedQuestion.maxItems, 50)" :aria-describedby="invalidLimit(selectedQuestion.maxItems, 50) ? 'maxItems-error' : undefined"
@@ -1328,7 +1325,7 @@ watch(() => props.agencyId, () => {
                                     {{ t('maxItemsInvalid') }}
                                   </p>
                                 </ExtensionFormField>
-                                <ExtensionFormField v-if="selectedQuestion.type === 'table'" :label="tr('Maximum rows', 'Nombre maximal de lignes')" name="maxRows" required>
+                                <ExtensionFormField v-if="selectedQuestion.type === 'table'" :label="t('interfaceMaximumRows')" name="maxRows" required>
                                     <ExtensionInput
                                       :model-value="selectedQuestion.maxRows || ''" name="maxRows" type="number" min="1" max="100" required :disabled="disabled"
                                       :aria-invalid="invalidLimit(selectedQuestion.maxRows, 100)" :aria-describedby="invalidLimit(selectedQuestion.maxRows, 100) ? 'maxRows-error' : undefined"
@@ -1343,10 +1340,10 @@ watch(() => props.agencyId, () => {
                                     :locale="language" :disabled="disabled" @update:model-value="updateRules(selectedQuestion!, $event)" />
                                 </ExtensionAssessmentSchemaAccordionSection>
                                 <ExtensionAssessmentSchemaAccordionSection :title="t('formQuestionHelp')" level="sub"><div class="grid gap-4 md:grid-cols-2">
-                                  <ExtensionFormField :label="tr('Help text · English', 'Texte d’aide · anglais')" name="questionHintEn">
+                                  <ExtensionFormField :label="t('interfaceHelpTextEnglish')" name="questionHintEn">
                                     <ExtensionTextarea v-model="selectedQuestion.hint!.en" name="questionHintEn" class="w-full" :rows="3" :required="false" :disabled="disabled" />
                                   </ExtensionFormField>
-                                  <ExtensionFormField :label="tr('Help text · French', 'Texte d’aide · français')" name="questionHintFr">
+                                  <ExtensionFormField :label="t('interfaceHelpTextFrench')" name="questionHintFr">
                                     <ExtensionTextarea v-model="selectedQuestion.hint!.fr" name="questionHintFr" class="w-full" :rows="3" :required="false" :disabled="disabled" />
                                   </ExtensionFormField>
                                 </div></ExtensionAssessmentSchemaAccordionSection>
@@ -1363,10 +1360,10 @@ watch(() => props.agencyId, () => {
                                     <FormChoiceEditor :question-id="selectedQuestion.id" :options="selectedQuestion.options" :disabled="Boolean(disabled)" @update:options="updateChoices" />
                                   </ExtensionAssessmentSchemaAccordionSection>
 <ExtensionAssessmentSchemaAccordionSection v-if="selectedQuestion.type === 'select'" :title="t('formQuestionDependencies')" level="sub">
-                                  <ExtensionFormField :label="tr('Choices depend on', 'Choix selon la réponse à')" name="choiceDependency">
+                                  <ExtensionFormField :label="t('interfaceChoicesDependOn')" name="choiceDependency">
                                     <ExtensionSelect
                                       :model-value="selectedQuestion.dependsOn?.questionId ?? 'none'" name="choiceDependency" value-key="value" :disabled="disabled"
-                                      :items="[{ value: 'none', label: tr('No dependency', 'Aucune dépendance') }, ...selectOptions.filter((item) => item.value !== selectedQuestion!.id)]"
+                                      :items="[{ value: 'none', label: t('interfaceNoDependency') }, ...selectOptions.filter((item) => item.value !== selectedQuestion!.id)]"
                                       @update:model-value="setDependency(String($event))" />
                                   </ExtensionFormField>
                                   <FormDesignHelp topic="Dependencies" />
@@ -1375,11 +1372,11 @@ watch(() => props.agencyId, () => {
                                   </p>
                                   <div v-if="selectedQuestion.dependsOn" class="space-y-3">
                                     <p class="text-sm text-muted">
-                                      {{ tr('Choose which answers applicants can select for each answer to the earlier question.', 'Choisissez les réponses que les demandeurs pourront sélectionner pour chaque réponse à la question précédente.') }}
+                                      {{ t('interfaceChooseWhichAnswersApplicantsCanSelectForEachAnswerToTheEarlierQuestion') }}
                                     </p>
                                     <div v-for="source in sourceChoices" :key="source.value" class="rounded-md border border-default p-3">
                                       <p class="mb-2 text-sm font-semibold">
-                                        {{ tr('If the earlier answer is', 'Si la réponse précédente est') }} “{{ source.label[language] }}”
+                                        {{ t('interfaceIfTheEarlierAnswerIs') }} “{{ source.label[language] }}”
                                       </p>
                                       <p v-if="!selectedQuestion.dependsOn.optionsByValue[source.value]?.length" class="mb-2 text-sm text-warning">
                                         {{ t('designNoMappedChoices') }}
@@ -1402,40 +1399,40 @@ watch(() => props.agencyId, () => {
                                   @configure="selectedQuestion.config = $event as typeof selectedQuestion.config" /></ExtensionAssessmentSchemaAccordionSection>
                                 <ExtensionAssessmentSchemaAccordionSection v-if="selectedQuestion.type === 'table'" :title="t('formQuestionTable')" level="sub" :default-open="ruleCorrectionQuestionId === selectedQuestion.id">
                                   <div class="designer-settings-body">
-                                  <ExtensionFormField :label="tr('Totals', 'Totaux')" name="tableTotals" :description="tr('Only number columns are included. Totals update automatically.', 'Seules les colonnes numériques sont incluses. Les totaux sont recalculés automatiquement.')">
+                                  <ExtensionFormField :label="t('interfaceTotals')" name="tableTotals" :description="t('interfaceOnlyNumberColumnsAreIncludedTotalsUpdateAutomatically')">
                                     <ExtensionSelect :model-value="'totals' in selectedQuestion ? selectedQuestion.totals ?? 'none' : 'none'" name="tableTotals" value-key="value" :disabled="disabled"
-                                      :items="[{ value: 'none', label: tr('None', 'Aucun') }, { value: 'rows', label: tr('Rows', 'Lignes') }, { value: 'columns', label: tr('Columns', 'Colonnes') }, { value: 'both', label: tr('Rows and columns', 'Lignes et colonnes') }]"
+                                      :items="[{ value: 'none', label: t('interfaceNone') }, { value: 'rows', label: t('interfaceRows') }, { value: 'columns', label: t('interfaceColumns') }, { value: 'both', label: t('interfaceRowsAndColumns') }]"
                                       @update:model-value="Object.assign(selectedQuestion!, { totals: $event }); if (definition.schemaVersion < 4) definition.schemaVersion = 4" />
                                   </ExtensionFormField>
                                   <div class="designer-columns">
                                     <div class="designer-settings-toolbar">
-                                      <h5 class="font-medium">{{ tr('Table columns', 'Colonnes du tableau') }}</h5>
+                                      <h5 class="font-medium">{{ t('interfaceTableColumns') }}</h5>
                                       <ExtensionButton color="neutral" variant="outline" icon="i-lucide-plus" :disabled="disabled || selectedQuestion.columns.length >= 20" @click="addColumn">
-                                        {{ tr('Add column', 'Ajouter une colonne') }}
+                                        {{ t('interfaceAddColumn') }}
                                       </ExtensionButton>
                                     </div>
                                   <div v-for="(column, index) in selectedQuestion.columns" :key="index" class="designer-column">
                                     <div class="designer-settings-toolbar">
                                       <h6 class="font-medium">{{ t('formTableColumnTitle', { number: index + 1 }) }}</h6>
                                       <ExtensionButton color="error" variant="outline" icon="i-lucide-trash-2" :disabled="disabled || selectedQuestion.columns.length === 1" @click="removeColumn(index)">
-                                        {{ tr('Remove column', 'Retirer la colonne') }}
+                                        {{ t('interfaceRemoveColumn') }}
                                       </ExtensionButton>
                                     </div>
                                     <div class="designer-column-fields">
-                                    <ExtensionFormField :label="tr('Column in English', 'Colonne en anglais')" :name="`columnEn${index}`" required>
+                                    <ExtensionFormField :label="t('interfaceColumnInEnglish')" :name="`columnEn${index}`" required>
                                       <ExtensionInput v-model="column.label.en" :name="`columnEn${index}`" required :disabled="disabled" />
                                     </ExtensionFormField>
-                                    <ExtensionFormField :label="tr('Column in French', 'Colonne en français')" :name="`columnFr${index}`" required>
+                                    <ExtensionFormField :label="t('interfaceColumnInFrench')" :name="`columnFr${index}`" required>
                                       <ExtensionInput v-model="column.label.fr" :name="`columnFr${index}`" required :disabled="disabled" />
                                     </ExtensionFormField>
-                                    <ExtensionFormField :label="tr('Data type', 'Type de données')" :name="`columnType${index}`">
+                                    <ExtensionFormField :label="t('interfaceDataType')" :name="`columnType${index}`">
                                       <ExtensionSelect
                                         :model-value="column.type" :name="`columnType${index}`" value-key="value" :disabled="disabled"
-                                        :items="[{ value: 'text', label: tr('Text', 'Texte') }, { value: 'number', label: tr('Number', 'Nombre') }, { value: 'date', label: tr('Date', 'Date') }]"
+                                        :items="[{ value: 'text', label: t('interfaceText') }, { value: 'number', label: t('interfaceNumber') }, { value: 'date', label: t('interfaceDate') }]"
                                         @update:model-value="changeColumnType(index, $event as 'text' | 'number' | 'date')" />
                                     </ExtensionFormField>
                                     <div class="designer-column-required">
-                                      <ExtensionCheckbox v-model="column.required" :label="tr('Required cell', 'Cellule obligatoire')" :disabled="disabled" />
+                                      <ExtensionCheckbox v-model="column.required" :label="t('interfaceRequiredCell')" :disabled="disabled" />
                                     </div>
                                     </div>
                                     <ExtensionAssessmentSchemaAccordionSection :title="t('fieldRulesTitle')" level="sub" :default-open="ruleCorrectionQuestionId === selectedQuestion.id">
@@ -1504,7 +1501,7 @@ watch(() => props.agencyId, () => {
                                 </ExtensionAssessmentSchemaAccordionSection>
                                 <ExtensionAssessmentSchemaAccordionSection :title="t('formQuestionVisibility')" level="sub">
                                   <div class="designer-settings-body">
-                                    <p class="text-sm font-medium">{{ tr('Show this question when', 'Afficher cette question lorsque') }}</p>
+                                    <p class="text-sm font-medium">{{ t('interfaceShowThisQuestionWhen') }}</p>
                                     <FormCondition v-model="selectedQuestion.visibleWhen" :questions="questionConditionOptions" :locale="language" :disabled="disabled" />
                                     <FormDesignHelp topic="Visibility" />
                                   </div>
@@ -1521,7 +1518,7 @@ watch(() => props.agencyId, () => {
                       </ol>
                       <div class="designer-add">
                         <p class="designer-eyebrow">
-                          {{ selected.kind === 'group' && selected.repeatFor ? t('formAddQuestionToSet') : tr('ADD A QUESTION', 'AJOUTER UNE QUESTION') }}
+                          {{ selected.kind === 'group' && selected.repeatFor ? t('formAddQuestionToSet') : t('interfaceAddAQuestion') }}
                         </p>
                         <div class="designer-type-grid">
                           <button v-for="type in questionTypes" :key="type.value" type="button" :disabled="disabled" class="designer-type" @click="addQuestion(type.value)">
@@ -1533,24 +1530,24 @@ watch(() => props.agencyId, () => {
                   </ExtensionAssessmentSchemaPageSection>
                 </div>
                 <div class="designer-inspector space-y-5">
-                  <ExtensionAssessmentSchemaPageSection v-if="selected.kind === 'page'" section-id="form-navigation-rules" :title="tr('Navigation rules', 'Règles de navigation')">
-                    <ExtensionAssessmentSchemaAccordionSection v-if="selected.kind === 'page'" :key="`${selected.id}:navigation`" :title="tr('Page navigation', 'Navigation entre les pages')">
+                  <ExtensionAssessmentSchemaPageSection v-if="selected.kind === 'page'" section-id="form-navigation-rules" :title="t('interfaceNavigationRules')">
+                    <ExtensionAssessmentSchemaAccordionSection v-if="selected.kind === 'page'" :key="`${selected.id}:navigation`" :title="t('interfacePageNavigation')">
                       <div v-if="selected.kind === 'page'" class="space-y-3 border-t border-default pt-4">
                         <p class="text-sm text-muted">
-                          {{ tr('Choose where applicants go next. The first matching rule wins; otherwise use the default destination.', 'Choisissez la page suivante. La première règle qui correspond s’applique; sinon, la destination par défaut est utilisée.') }}
+                          {{ t('interfaceChooseWhereApplicantsGoNextTheFirstMatchingRuleWinsOtherwiseUseTheDefaultDestination') }}
                         </p>
                         <FormDesignHelp topic="Branching" />
                         <p v-if="!branchConditionOptions.length" class="text-sm text-muted">
-                          {{ tr('Add a question to this or an earlier page before creating a rule.', 'Ajoutez une question à cette page ou à une page précédente avant de créer une règle.') }}
+                          {{ t('interfaceAddAQuestionToThisOrAnEarlierPageBeforeCreatingARule') }}
                         </p>
                         <div v-for="(branch, index) in (selected.item as AdvancedSurvey['pages'][number]).branches" :key="index" class="space-y-2 border-l-2 border-primary/50 pl-4">
                           <p class="text-xs font-semibold uppercase tracking-wide text-muted">
-                            {{ tr('If rule', 'Si la règle') }} {{ index + 1 }}
+                            {{ t('interfaceIfRule') }} {{ index + 1 }}
                           </p>
                           <FormCondition
                             purpose="branch" :model-value="branch.when" :questions="branchConditionOptions" :locale="language" :disabled="disabled"
                             @update:model-value="setBranchCondition(selected!.item as AdvancedSurvey['pages'][number], index, $event)" />
-                          <ExtensionFormField :label="tr('Then go to', 'Aller à')" :name="`branchDestination${index}`">
+                          <ExtensionFormField :label="t('interfaceThenGoTo')" :name="`branchDestination${index}`">
                             <ExtensionSelect
                               :model-value="branch.destination.kind === 'end' ? 'end' : branch.destination.pageId"
                               :name="`branchDestination${index}`" value-key="value" :disabled="disabled" :items="pageDestinations(selected.item as AdvancedSurvey['pages'][number])"
@@ -1568,14 +1565,14 @@ watch(() => props.agencyId, () => {
                               {{ t('designMoveRouteDown') }}
                             </ExtensionButton>
                             <ExtensionButton color="neutral" variant="ghost" :disabled="disabled" @click="(selected.item as AdvancedSurvey['pages'][number]).branches.splice(index, 1)">
-                              {{ tr('Remove branch', 'Retirer l’embranchement') }}
+                              {{ t('interfaceRemoveBranch') }}
                             </ExtensionButton>
                           </div>
                         </div>
                         <ExtensionButton color="neutral" variant="outline" :disabled="disabled || !branchConditionOptions.length" @click="addBranch(selected.item as AdvancedSurvey['pages'][number])">
-                          {{ tr('Add an if rule', 'Ajouter une règle si') }}
+                          {{ t('interfaceAddAnIfRule') }}
                         </ExtensionButton>
-                        <ExtensionFormField :label="tr('Otherwise, go to', 'Sinon, aller à')" name="pageNext">
+                        <ExtensionFormField :label="t('interfaceOtherwiseGoTo')" name="pageNext">
                           <ExtensionSelect
                             :model-value="destinationValue((selected.item as AdvancedSurvey['pages'][number]).next)"
                             name="pageNext" value-key="value" :disabled="disabled" :items="pageDestinations(selected.item as AdvancedSurvey['pages'][number], true)"
@@ -1609,7 +1606,7 @@ watch(() => props.agencyId, () => {
           <FormFlowMap v-else-if="tab === 'flow'" :definition="definition" :locale="language" />
           <div v-else-if="tab === 'test'" class="space-y-4">
             <div class="flex items-center justify-end gap-2 text-sm">
-              <span class="text-muted">{{ tr('Preview language', 'Langue de l’aperçu') }}</span><button type="button" class="designer-language" :aria-pressed="previewLocale === 'en'" @click="previewLocale = 'en'">
+              <span class="text-muted">{{ t('interfacePreviewLanguage') }}</span><button type="button" class="designer-language" :aria-pressed="previewLocale === 'en'" @click="previewLocale = 'en'">
                 English
               </button><button type="button" class="designer-language" :aria-pressed="previewLocale === 'fr'" @click="previewLocale = 'fr'">
                 Français
@@ -1625,26 +1622,26 @@ watch(() => props.agencyId, () => {
           <div v-else class="space-y-5">
             <section class="designer-form-details space-y-3">
               <h4 class="text-lg font-semibold">
-                {{ tr('Ready to publish?', 'Prêt à publier?') }}
+                {{ t('interfaceReadyToPublish') }}
               </h4>
               <p class="text-sm text-muted">
-                {{ tr('Complete each item, then test the form in both languages before publishing.', 'Complétez chaque élément, puis testez le formulaire dans les deux langues avant de le publier.') }}
+                {{ t('interfaceCompleteEachItemThenTestTheFormInBothLanguagesBeforePublishing') }}
               </p>
               <ul class="space-y-2">
                 <li v-for="check in publicationChecks" :key="check.label" class="flex items-start gap-2 text-sm">
                   <span :class="check.ok ? 'text-success' : 'text-warning'" aria-hidden="true">{{ check.ok ? '✓' : '○' }}</span>
-                  <button type="button" class="text-left hover:underline" :aria-label="`${check.label} — ${check.ok ? tr('complete', 'terminé') : tr('needs attention', 'à compléter')}`" @click="check.target === 'details' ? openDetails() : tab = check.target">
+                  <button type="button" class="text-left hover:underline" :aria-label="`${check.label} — ${check.ok ? t('interfaceComplete') : t('interfaceNeedsAttention')}`" @click="check.target === 'details' ? openDetails() : tab = check.target">
                     {{ check.label }}
                   </button>
                 </li>
               </ul>
             </section>
             <p v-if="dirty || !formId" class="text-sm text-muted">
-              {{ tr('Save the form before publishing.', 'Enregistrez le formulaire avant de le publier.') }}
+              {{ t('interfaceSaveTheFormBeforePublishing') }}
             </p>
             <section class="space-y-3 border-t border-default pt-4">
               <h4 class="font-semibold">
-                {{ tr('Publish to portal', 'Publier dans le portail') }}
+                {{ t('interfacePublishToPortal') }}
               </h4>
               <p class="text-sm text-muted">
                 {{ t('formDestinationsHelp') }}
@@ -1659,7 +1656,7 @@ watch(() => props.agencyId, () => {
                     { value: 'organization', label: t('formScopeOrganization') }
                   ]" />
               </ExtensionFormField>
-              <ExtensionFormField v-if="publicationScope === 'agreement'" :label="tr('Agreement and organization', 'Accord et organisme')" name="formAgreement" required>
+              <ExtensionFormField v-if="publicationScope === 'agreement'" :label="t('interfaceAgreementAndOrganization')" name="formAgreement" required>
                 <ExtensionSelect
                   v-model="agreementId" name="formAgreement" value-key="value" :disabled="disabled" required
                   :items="agreements.map((item) => ({ value: item.id, label: `${item.agreementNumber} · ${item[locale === 'fr' ? 'nameFr' : 'nameEn']} · ${item.organizationId}` }))" />

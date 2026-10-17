@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { feedback, useLocalizedFeedback } from './localized-feedback'
 import { computed, onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import { nanoid } from 'nanoid'
 import type { ActivityConfig, AdvancedQuestion, BudgetConfig, GrantOption } from '@gcs-ssc/survey'
@@ -14,11 +15,11 @@ const api = useExtensionApi('gcs-ssc-portal-connector')
 const streams: Ref<Array<{ id: string; label: { en: string; fr: string } }>> = ref([])
 const stream: Ref<string> = ref(question.value.config.source.streamId ?? props.streamId ?? '')
 const busy: Ref<boolean> = ref(false)
-const error: Ref<string> = ref('')
+const error = useLocalizedFeedback(t)
 const locked = computed(() => props.disabled || busy.value || question.value.config.source.mode === 'stream')
 const budget = computed(() => question.value.type === 'budget' ? question.value.config : null)
 const activities = computed(() => question.value.type === 'activities' ? question.value.config : null)
-const items = (options: GrantOption[]) => options.map(option => ({ value: option.id, label: option.label[locale.value === 'fr' ? 'fr' : 'en'] }))
+const items = (options: GrantOption[]) => options.map(option => ({ value: option.id, label: option.label[/^fr(?:-|$)/i.test(locale.value) ? 'fr' : 'en'] }))
 const uid = () => `custom_${nanoid(10)}`
 const base = (): GrantOption => ({ id: uid(), label: { en: 'New option', fr: 'Nouveau choix' } })
 let request = 0
@@ -33,7 +34,7 @@ watch(() => props.agencyId, async agencyId => {
   try {
     const result = await api.get<{ streams: typeof streams.value }>(`/agencies/${agencyId}/form-options`)
     if (current === request) streams.value = result.streams
-  } catch { if (current === request) error.value = t('grantLoadFailed') }
+  } catch { if (current === request) error.value = feedback('grantLoadFailed') }
 }, { immediate: true })
 /**
  * Copies a stream snapshot into this question after checking the request identity.
@@ -50,7 +51,7 @@ const sync = async () => {
       maxRows: question.value.config.maxRows, currencies: question.value.config.currencies })
     else emit('configure', { ...question.value.config, source: result.activities.source, outcomes: result.activities.outcomes })
   } catch {
-    if (alive && props.agencyId === agencyId && question.value.id === questionId) error.value = t('grantLoadFailed')
+    if (alive && props.agencyId === agencyId && question.value.id === questionId) error.value = feedback('grantLoadFailed')
   } finally { busy.value = false }
 }
 type Catalog = 'categories' | 'fiscalYears' | 'costItems' | 'fundingTypes' | 'fundingSubtypes' | 'outcomes' | 'responsibleParties'
@@ -78,7 +79,7 @@ const remove = (catalog: Catalog, id: string) => {
   const hasDependents = budget.value && ((catalog === 'categories' && budget.value.costItems.some(item => item.categoryId === id || item.calculation.sourceCategoryId === id))
     || (catalog === 'fundingTypes' && budget.value.fundingSubtypes.some(item => item.typeId === id)))
   if (hasDependents) {
-    error.value = t('grantRemoveBlocked')
+    error.value = feedback('grantRemoveBlocked')
     return
   }
   const config = question.value.config as unknown as Record<string, GrantOption[]>

@@ -3,10 +3,16 @@ import { reactive } from 'vue'
 import { FetchResponseError, translateGcsExtensionMessage, type GcsExtensionMessages } from '@gcs-ssc/extensions'
 import { instanceKey, resolveAdvancedSurvey, surveyV3Schema, surveyV5Schema, type AdvancedSurvey } from '@gcs-ssc/survey'
 import { flushPromises, mount } from '@vue/test-utils'
-import { defineComponent, h } from 'vue'
+import { defineComponent, h, isVNode } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const state = vi.hoisted(() => ({ locale: 'en' as 'en' | 'fr', toastAdd: vi.fn() }))
+const initialState = vi.hoisted(() => ({ locale: 'en' as 'en' | 'fr', toastAdd: vi.fn() }))
+const state = reactive(initialState)
+const retainedToasts: Record<string, unknown>[] = []
+const toastText = (value: unknown) => {
+  const rendered = typeof value === 'function' ? value() : value
+  return isVNode(rendered) ? rendered.children : rendered
+}
 const get = vi.fn()
 const post = vi.fn()
 const put = vi.fn()
@@ -117,9 +123,13 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
   return {
     useExtensionI18n: (messages: GcsExtensionMessages) => ({
       locale: { get value() { return state.locale } },
+      n: (value: number) => new Intl.NumberFormat(state.locale).format(value),
       t: (key: string, values?: Record<string, string | number>) => translateGcsExtensionMessage(messages, state.locale, key, values)
     }),
-    useExtensionToast: () => ({ add: state.toastAdd }),
+    useExtensionToast: () => ({ add: (notification: Record<string, unknown>) => {
+      retainedToasts.push(notification)
+      state.toastAdd({ ...notification, title: toastText(notification.title), description: toastText(notification.description) })
+    } }),
     useExtensionApi: () => ({ get, post, put }), useHostApi: () => ({ get: hostGet, patch: vi.fn() }),
     ExtensionFormField: field, ExtensionInput: input, ExtensionSelect: select, ExtensionSelectMenu: select,
     ExtensionTooltip: defineComponent({ inheritAttrs: false, setup(_, { slots }) { return () => slots.default?.() } }),
@@ -158,6 +168,7 @@ beforeEach(() => {
   window.sessionStorage.clear()
   state.locale = 'en'
   state.toastAdd.mockReset()
+  retainedToasts.length = 0
   get.mockReset().mockImplementation(async (path: string) => {
     if (path.endsWith('/forms')) return { surveys: [], streams: [], agreements: [], calls: [] }
     if (path.endsWith('/intake-group-settings')) return { groups: [], intakeGroupId: null, ready: false }
@@ -390,6 +401,11 @@ describe('connector form requirements', () => {
     await flushPromises()
     expect(wrapper.emitted('open')).toBeUndefined()
     expect(wrapper.get('[role="dialog"] [role="alert"]').text()).toContain('could not be created')
+    state.locale = 'fr'
+    await flushPromises()
+    expect(wrapper.get('[role="dialog"] [role="alert"]').text()).toContain('Impossible de créer le formulaire')
+    state.locale = 'en'
+    await flushPromises()
     await submit().trigger('click')
     await flushPromises()
     expect(wrapper.emitted('open')?.[0]).toEqual(['V-ABCDE'])
@@ -486,6 +502,26 @@ describe('connector form requirements', () => {
     expect(state.toastAdd).toHaveBeenCalledWith({
       title: 'Success', description: 'Items imported: 1. Items still pending: 0.', color: 'success'
     })
+  })
+
+  it.each([false, true])('retranslates a retained Portal toast after the editor unmounts (failure=%s)', async failure => {
+    if (failure) put.mockRejectedValue(new Error('offline'))
+    const wrapper = mount(PortalConnection, { props: { agencyId: '1', section: 'connection', enabled: true } })
+    await flushPromises()
+    await button(wrapper, 'Save connection').trigger('click')
+    await flushPromises()
+    const notification = retainedToasts.find(item => item.color === (failure ? 'error' : 'success'))!
+    const title = notification.title
+    const description = notification.description
+    if (typeof title !== 'function' || typeof description !== 'function') throw new Error('Expected reactive toast renderers')
+    const retained = mount(defineComponent({ setup: () => () => h('div', [title(), description()]) }))
+    expect(retained.text()).toContain(failure ? 'Error' : 'Success')
+    wrapper.unmount()
+    state.locale = 'fr'
+    await flushPromises()
+    expect(retained.text()).toContain(failure ? 'Erreur' : 'Succès')
+    expect(retained.text()).not.toContain(failure ? 'could not' : 'Connection saved')
+    retained.unmount()
   })
 
   it('shows a rejected Portal credential in the host error toast', async () => {
@@ -1456,6 +1492,17 @@ describe('Proponent verification entry', () => {
     expect(state.toastAdd).toHaveBeenCalledWith({
       title: 'Success', description: 'Portal organization linked to this Proponent.', color: 'success'
     })
+    const notification = retainedToasts[retainedToasts.length - 1]!
+    const title = notification.title
+    const description = notification.description
+    if (typeof title !== 'function' || typeof description !== 'function') throw new Error('Expected reactive toast renderers')
+    const retained = mount(defineComponent({ setup: () => () => h('div', [title(), description()]) }))
+    wrapper.unmount()
+    state.locale = 'fr'
+    await flushPromises()
+    expect(retained.text()).toContain('Succès')
+    expect(retained.text()).not.toContain('Portal organization linked')
+    retained.unmount()
   })
 
   it('hides linking from a Contributor when the setting allows Managers only', async () => {

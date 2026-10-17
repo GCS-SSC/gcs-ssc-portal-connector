@@ -1,3 +1,4 @@
+import { interfaceMessages } from './interface.ts'
 import { receiptAttachmentMessages } from './receipt-attachments.ts'
 import { importDiagnosticsMessages } from './import-diagnostics.ts'
 import { grantMessages } from './grants.ts'
@@ -8,6 +9,7 @@ import { defineGcsExtensionMessages } from '@gcs-ssc/extensions'
 
 export const messages = defineGcsExtensionMessages({
   en: {
+    ...interfaceMessages.en,
     ...fieldRuleMessages.en,
     ...importDiagnosticsMessages.en,
     ...receiptAttachmentMessages.en,
@@ -235,6 +237,7 @@ export const messages = defineGcsExtensionMessages({
     queuedState: 'Queued', sendingState: 'Sending', deliveredState: 'Delivered', cancelledState: 'Cancelled'
   },
   fr: {
+    ...interfaceMessages.fr,
     ...fieldRuleMessages.fr,
     ...importDiagnosticsMessages.fr,
     ...receiptAttachmentMessages.fr,

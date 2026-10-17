@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch, type Ref } from 'vue'
+import { feedback, useLocalizedFeedback } from './localized-feedback'
+import { computed, h, onMounted, ref, watch, type Ref } from 'vue'
 import type { ExtensionEntityTabContext } from '@gcs-ssc/extensions'
 import {
   ExtensionBadge, ExtensionButton, ExtensionFormField, ExtensionInput, ExtensionModal,
@@ -54,10 +55,10 @@ const open = ref(false)
 const busy = ref(false)
 const loading = ref(true)
 const canLink = ref(false)
-const error = ref('')
+const error = useLocalizedFeedback(t)
 const agencyName = (id: string) => {
   const agency = agencies.value.find(item => item.agencyId === id)
-  return agency ? locale.value === 'fr' ? agency.nameFr : agency.nameEn : null
+  return agency ? /^fr(?:-|$)/i.test(locale.value) ? agency.nameFr : agency.nameEn : null
 }
 const search = () => {
   const term = searchQuery.value.trim()
@@ -75,7 +76,7 @@ const load = async () => {
   loading.value = true; error.value = ''; canLink.value = false
   organizations.value = []; verifications.value = []; searchedTerm.value = null
   if (!agencies.value.length || !proponentId.value) {
-    error.value = t('proponentVerificationLoadFailed'); loading.value = false; return
+    error.value = feedback('proponentVerificationLoadFailed'); loading.value = false; return
   }
   try {
     const firstAgencyId = agencies.value[0]!.agencyId
@@ -111,7 +112,7 @@ const load = async () => {
       if (!previous || !previous.canLink && organization.canLink) byId.set(organization.id, organization)
     }
     organizations.value = [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, locale.value))
-  } catch { error.value = t('proponentVerificationLoadFailed') }
+  } catch { error.value = feedback('proponentVerificationLoadFailed') }
   finally { loading.value = false }
 }
 const select = (item: Organization) => {
@@ -126,9 +127,9 @@ const verify = async () => {
       organizationId: selected.value.id, proponentId: proponentId.value, note: note.value.trim()
     })
     open.value = false; selected.value = null; note.value = ''
-    toast.add({ title: t('successNotice'), description: t('proponentVerified'), color: 'success' })
+    toast.add({ title: () => h('span', t('successNotice')), description: () => h('span', t('proponentVerified')), color: 'success' })
     await load()
-  } catch { toast.add({ title: t('errorNotice'), description: t('verifyFailed'), color: 'error' }) }
+  } catch { toast.add({ title: () => h('span', t('errorNotice')), description: () => h('span', t('verifyFailed')), color: 'error' }) }
   finally { busy.value = false }
 }
 onMounted(load)

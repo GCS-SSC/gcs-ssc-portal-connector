@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { feedback, useLocalizedFeedback } from './localized-feedback'
 import { computed, onMounted, ref, watch, type Ref } from 'vue'
 import type { ExtensionEntityTabContext } from '@gcs-ssc/extensions'
 import {
@@ -37,13 +38,13 @@ const recipientId = ref('')
 const organizationId = ref('')
 const busy = ref(false)
 const loading = ref(true)
-const error = ref('')
-const message = ref('')
+const error = useLocalizedFeedback(t)
+const message = useLocalizedFeedback(t)
 const agreementId = computed(() => props.context?.agreementId ?? props.agreementId ?? '')
 const agencyId = computed(() => props.context?.agencyId ?? props.agencyId ?? '')
 const recipientOptions = computed(() => recipients.value.map((item) => ({
   value: item.egcs_fc_applicantrecipient,
-  label: locale.value === 'fr' ? item.applicant_recipient_name_fr : item.applicant_recipient_name_en
+  label: /^fr(?:-|$)/i.test(locale.value) ? item.applicant_recipient_name_fr : item.applicant_recipient_name_en
 })))
 const valid = computed(() => !props.disabled && connected.value && recipientId.value !== ''
   && /^N-[A-HJKMNP-Z2-9]{5,}$/.test(organizationId.value))
@@ -69,8 +70,8 @@ const load = async () => {
     recipients.value = recipientResult.items
     if (!recipients.value.some((item) => item.egcs_fc_applicantrecipient === recipientId.value))
       recipientId.value = recipients.value.length === 1 ? recipients.value[0]!.egcs_fc_applicantrecipient : ''
-  } catch { error.value = t('recipientLoadFailed') }
-  try { await refreshPublications() } catch { error.value = t('publicationLoadFailed') }
+  } catch { error.value = feedback('recipientLoadFailed') }
+  try { await refreshPublications() } catch { error.value = feedback('publicationLoadFailed') }
   finally { loading.value = false }
 }
 const publish = async () => {
@@ -81,10 +82,10 @@ const publish = async () => {
       `/agencies/${agencyId.value}/publish-agreement`,
       { agreementId: agreementId.value, proponentId: recipientId.value, portalOrganizationId: organizationId.value }
     )
-    message.value = t('published', { agreement: result.agreementId, count: result.setIds.length,
+    message.value = feedback('published', { agreement: result.agreementId, count: result.setIds.length,
       organization: organizationId.value })
     await refreshPublications()
-  } catch { error.value = t('publishFailed') }
+  } catch { error.value = feedback('publishFailed') }
   finally { busy.value = false }
 }
 onMounted(load)

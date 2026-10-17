@@ -7,8 +7,8 @@ import { messages } from '../i18n/messages'
 import { receiptAttachmentSchema } from '../shared/receipt-attachments'
 import FormTestSection from './FormTestSection.vue'
 const props = defineProps<{ source: unknown; agencyId?: string; receiptId?: string }>()
-const { locale, t } = useExtensionI18n(messages)
-const language = computed(() => locale.value === 'fr' ? 'fr' as const : 'en' as const)
+const { locale, t, n } = useExtensionI18n(messages)
+const language = computed(() => /^fr(?:-|$)/i.test(locale.value) ? 'fr' as const : 'en' as const)
 const attachments = computed(() => {
   const source = props.source as { attachments?: unknown[] } | null
   return (Array.isArray(source?.attachments) ? source.attachments : []).flatMap(value => {
@@ -34,7 +34,7 @@ const forms = computed(() => {
       <h3 class="text-base font-semibold">{{ t('receiptAttachments') }}</h3>
       <p class="text-sm text-muted">{{ t('receiptAttachmentsHelp') }}</p>
       <ul class="space-y-2"><li v-for="attachment in attachments" :key="attachment.id" class="flex items-center justify-between gap-3">
-        <span class="text-sm">{{ attachment.filename }} · {{ attachment.size }} {{ t('receiptAttachmentBytes') }}</span>
+        <span class="text-sm">{{ attachment.filename }} · {{ n(attachment.size) }} {{ t('receiptAttachmentBytes') }}</span>
         <ExtensionButton v-if="agencyId && receiptId" icon="i-lucide-download" color="neutral" variant="outline" external
           :href="`/api/extensions/gcs-ssc-portal-connector/agencies/${encodeURIComponent(agencyId)}/receipts/${encodeURIComponent(receiptId)}/attachments/${encodeURIComponent(attachment.id)}`">
           {{ t('receiptAttachmentDownload') }}

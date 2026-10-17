@@ -23,7 +23,7 @@ const noGroup = '__none__'
 const options = computed(() => [
   { value: noGroup, label: t('none') },
   ...(groupId.value !== null && !selectedAvailable.value ? [{ value: groupId.value, label: t('unavailable') }] : []),
-  ...groups.value.map(group => ({ value: group.id, label: locale.value === 'fr' ? group.nameFr : group.nameEn }))
+  ...groups.value.map(group => ({ value: group.id, label: /^fr(?:-|$)/i.test(locale.value) ? group.nameFr : group.nameEn }))
 ])
 const updateSelection = (value: unknown) => {
   groupId.value = typeof value === 'string' && value !== '' && value !== noGroup ? value : null

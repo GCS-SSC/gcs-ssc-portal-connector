@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { feedback, useLocalizedFeedback } from './localized-feedback'
 import { computed, ref, watch, type Ref } from 'vue'
 import { ExtensionButton, ExtensionFormField, ExtensionInput, ExtensionSaveButton, ExtensionSelect,
   useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
@@ -26,10 +27,10 @@ const requestKey = ref('')
 const editingForm = ref(false)
 const busy = ref(false)
 const loading = ref(false)
-const error = ref('')
-const message = ref('')
+const error = useLocalizedFeedback(t)
+const message = useLocalizedFeedback(t)
 const search = ref('')
-const fieldErrors: Ref<Partial<Record<keyof IntakeDraft, string>>> = ref({})
+const fieldErrors: Ref<Partial<Record<keyof IntakeDraft, 'intakeDateOrder' | 'intakeRequired' | 'intakeInvalidField'>>> = ref({})
 const filtered = computed(() => {
   const query = search.value.trim().toLocaleLowerCase(locale.value)
   if (!query) return intakes.value
@@ -37,7 +38,7 @@ const filtered = computed(() => {
     .some((value) => value.toLocaleLowerCase(locale.value).includes(query)))
 })
 const localized = (item: { nameEn: string; nameFr: string }) =>
-  locale.value === 'fr' ? item.nameFr || item.nameEn : item.nameEn || item.nameFr
+  /^fr(?:-|$)/i.test(locale.value) ? item.nameFr || item.nameEn : item.nameEn || item.nameFr
 let loadSequence = 0
 const load = async () => {
   const sequence = ++loadSequence
@@ -51,7 +52,7 @@ const load = async () => {
     if (selected.value?.published) editingForm.value = false
     if (selectedId.value && !result.intakes.some((item) => item.id === selectedId.value)) selectedId.value = null
   } catch {
-    if (sequence === loadSequence) error.value = t('intakeLoadFailed')
+    if (sequence === loadSequence) error.value = feedback('intakeLoadFailed')
   } finally {
     if (sequence === loadSequence) loading.value = false
   }
@@ -105,14 +106,14 @@ const save = async () => {
   if (revisionConflict.value) return
   const parsed = intakeDraftSchema.safeParse(draft.value)
   if (!parsed.success) {
-    const errors: Partial<Record<keyof IntakeDraft, string>> = {}
+    const errors: Partial<Record<keyof IntakeDraft, 'intakeDateOrder' | 'intakeRequired' | 'intakeInvalidField'>> = {}
     for (const issue of parsed.error.issues) {
       const path = issue.path[0] as keyof IntakeDraft
       if (path && !errors[path]) {
         const value = draft.value[path]
         errors[path] = path === 'endDate' && draft.value.endDate && draft.value.startDate
           && draft.value.endDate < draft.value.startDate
-          ? t('intakeDateOrder') : !value.trim() ? t('intakeRequired') : t('intakeInvalidField')
+          ? 'intakeDateOrder' : !value.trim() ? 'intakeRequired' : 'intakeInvalidField'
       }
     }
     fieldErrors.value = errors
@@ -128,7 +129,7 @@ const save = async () => {
     selectedId.value = result.intakeId
     draft.value = null
     editingRevision.value = null
-    message.value = t('intakeSaved')
+    message.value = feedback('intakeSaved')
     await load()
   } catch (failure) {
     const payload = failure instanceof FetchResponseError ? failure.data : null
@@ -140,9 +141,9 @@ const save = async () => {
       await load()
       if (selected.value?.id === editedId) {
         revisionConflict.value = true
-        error.value = t('intakeRevisionConflict')
+        error.value = feedback('intakeRevisionConflict')
       }
-    } else error.value = t('intakeSaveFailed')
+    } else error.value = feedback('intakeSaveFailed')
   }
   finally { busy.value = false }
 }
@@ -158,10 +159,10 @@ const act = async (action: 'publish' | 'withdraw' | 'delete') => {
     await api.post(endpoint.value, { action, intakeId: item.id })
     editingForm.value = false
     if (action === 'delete') selectedId.value = null
-    message.value = action === 'publish' ? t('intakePublishedNotice')
-      : action === 'withdraw' ? t('intakeWithdrawnNotice') : t('intakeDeletedNotice')
+    message.value = action === 'publish' ? feedback('intakePublishedNotice')
+      : action === 'withdraw' ? feedback('intakeWithdrawnNotice') : feedback('intakeDeletedNotice')
     await load()
-  } catch { error.value = t('intakeActionFailed') }
+  } catch { error.value = feedback('intakeActionFailed') }
   finally { busy.value = false }
 }
 const returnToList = () => {
@@ -196,26 +197,26 @@ const returnToList = () => {
         <ExtensionButton :disabled="busy || loading" @click="acceptLatestRevision">{{ t('intakeUseLatestRevision') }}</ExtensionButton>
       </div>
       <div class="grid gap-4 sm:grid-cols-2">
-        <ExtensionFormField :label="t('intakeNameEn')" name="intakeNameEn" required :error="fieldErrors.nameEn">
+        <ExtensionFormField :label="t('intakeNameEn')" name="intakeNameEn" required :error="fieldErrors.nameEn ? t(fieldErrors.nameEn) : undefined">
           <ExtensionInput v-model="draft.nameEn" name="intakeNameEn" required :disabled="disabled || busy"
             :aria-invalid="Boolean(fieldErrors.nameEn)" />
         </ExtensionFormField>
-        <ExtensionFormField :label="t('intakeNameFr')" name="intakeNameFr" required :error="fieldErrors.nameFr">
+        <ExtensionFormField :label="t('intakeNameFr')" name="intakeNameFr" required :error="fieldErrors.nameFr ? t(fieldErrors.nameFr) : undefined">
           <ExtensionInput v-model="draft.nameFr" name="intakeNameFr" required :disabled="disabled || busy"
             :aria-invalid="Boolean(fieldErrors.nameFr)" />
         </ExtensionFormField>
-        <ExtensionFormField :label="t('intakeStream')" name="intakeStream" :required="!selected" :error="fieldErrors.streamId">
+        <ExtensionFormField :label="t('intakeStream')" name="intakeStream" :required="!selected" :error="fieldErrors.streamId ? t(fieldErrors.streamId) : undefined">
           <ExtensionSelect v-model="draft.streamId" name="intakeStream" value-key="value" :required="!selected"
             :disabled="disabled || busy || Boolean(selected)" :aria-required="!selected"
             :aria-invalid="Boolean(fieldErrors.streamId)"
             :items="streams.map((item) => ({ value: item.id, label: localized(item) }))" />
         </ExtensionFormField>
         <div />
-        <ExtensionFormField :label="t('intakeOpens')" name="intakeStartDate" required :error="fieldErrors.startDate">
+        <ExtensionFormField :label="t('intakeOpens')" name="intakeStartDate" required :error="fieldErrors.startDate ? t(fieldErrors.startDate) : undefined">
           <ExtensionInput v-model="draft.startDate" name="intakeStartDate" type="date" required
             :disabled="disabled || busy" :aria-invalid="Boolean(fieldErrors.startDate)" />
         </ExtensionFormField>
-        <ExtensionFormField :label="t('intakeCloses')" name="intakeEndDate" required :error="fieldErrors.endDate">
+        <ExtensionFormField :label="t('intakeCloses')" name="intakeEndDate" required :error="fieldErrors.endDate ? t(fieldErrors.endDate) : undefined">
           <ExtensionInput v-model="draft.endDate" name="intakeEndDate" type="date" required
             :disabled="disabled || busy" :aria-invalid="Boolean(fieldErrors.endDate)" />
         </ExtensionFormField>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { feedback, useLocalizedFeedback, type Feedback } from './localized-feedback'
 import { FetchResponseError } from '@gcs-ssc/extensions'
-import { computed, onMounted, ref, watch, type Ref } from 'vue'
+import { computed, h, onMounted, ref, watch, type Ref } from 'vue'
 import {
   ExtensionAlert, ExtensionBadge, ExtensionButton, ExtensionCheckbox, ExtensionFormField, ExtensionInput, ExtensionSaveButton,
   ExtensionModal, ExtensionResourceLayoutCard, ExtensionSelect, ExtensionTextarea,
@@ -59,7 +60,7 @@ const section = computed(() => props.section ?? 'connection')
 const formsVisited = ref(section.value === 'forms')
 watch(section, (value) => {
   if (value === 'forms') formsVisited.value = true
-  if (value === 'queue') void loadManagement().catch(() => { error.value = t('loadFailed') })
+  if (value === 'queue') void loadManagement().catch(() => { error.value = feedback('loadFailed') })
 })
 watch(() => props.agencyId, () => {
   formsVisited.value = section.value === 'forms'
@@ -69,8 +70,14 @@ watch(() => [props.detailFormId, t('formsAll')] as const, ([detailFormId, label]
   if (detailFormId !== undefined) emit('formCollectionLabel', label)
 }, { immediate: true })
 const toast = useExtensionToast()
-const showSuccess = (description: string) => toast.add({ title: t('successNotice'), description, color: 'success' })
-const showError = (description: string) => toast.add({ title: t('errorNotice'), description, color: 'error' })
+const toastDescription = (description: string | Feedback) => () => h('span',
+  typeof description === 'string' ? description : t(description.key, description.values))
+const showSuccess = (description: Feedback) => toast.add({
+  title: () => h('span', t('successNotice')), description: toastDescription(description), color: 'success'
+})
+const showError = (description: string | Feedback) => toast.add({
+  title: () => h('span', t('errorNotice')), description: toastDescription(description), color: 'error'
+})
 const api = useExtensionApi('gcs-ssc-portal-connector')
 const hostApi = useHostApi()
 const connection: Ref<Connection | null> = ref(null)
@@ -84,7 +91,7 @@ const openReceipt = async (receipt: Receipt) => {
     selectedReceipt.value = receipt
     receiptSource.value = result.receipt.source_export
     receiptEvidenceOpen.value = true
-  } catch { showError(t('loadFailed')) }
+  } catch { showError(feedback('loadFailed')) }
 }
 const receiptSearch = ref('')
 const receiptPagination = ref({ pageIndex: 0, pageSize: 10 })
@@ -98,7 +105,7 @@ const receiptColumns = computed(() => [
 const filteredReceipts = computed(() => {
   const search = receiptSearch.value.trim().toLocaleLowerCase(locale.value)
   if (!search) return receipts.value
-  return receipts.value.filter(item => [receiptKind(item.kind), item.submission_id, item.form_title?.[locale.value === 'fr' ? 'fr' : 'en'], item.gcs_entity_id,
+  return receipts.value.filter(item => [receiptKind(item.kind), item.submission_id, item.form_title?.[/^fr(?:-|$)/i.test(locale.value) ? 'fr' : 'en'], item.gcs_entity_id,
     queueState(item.state), new Date(item.created_at).toLocaleString(locale.value)]
     .some(value => value?.toLocaleLowerCase(locale.value).includes(search)))
 })
@@ -275,7 +282,7 @@ const form = ref({ portalUrl: '', portalAgencyId: '', portalKey: '' })
 const portalKeyFormatValid = computed(() => /^gcs_[A-Za-z0-9_-]{43}$/.test(form.value.portalKey))
 const busy = ref(false)
 const loading = ref(true)
-const error = ref('')
+const error = useLocalizedFeedback(t)
 const pending = ref<Array<{ eventId: string; reason: string; code?: 'forecastPending' | 'documentationPending' | 'unsupportedPending'; submissionId?: string; organizationId?: string }>>([])
 const receiptKind = (kind: string) => kind === 'claim' ? t('claimKind')
   : kind === 'forecast' ? t('forecastKind')
@@ -301,12 +308,12 @@ const locked = computed(() => props.enabled === false || props.disabled === true
 const connectionValidationError = () => {
   const { portalUrl, portalAgencyId, portalKey } = form.value
   let url: URL
-  try { url = new URL(portalUrl) } catch { return t('portalUrlInvalid') }
+  try { url = new URL(portalUrl) } catch { return feedback('portalUrlInvalid') }
   if (!(url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))
-    || url.pathname !== '/' || url.search || url.hash || url.username || url.password) return t('portalUrlInvalid')
-  if (!/^G-[A-HJKMNP-Z2-9]{5,}$/.test(portalAgencyId)) return t('portalAgencyInvalid')
-  if (!portalKey && !connection.value?.hasCredential) return t('portalKeyRequired')
-  if (portalKey && !portalKeyFormatValid.value) return t('portalKeyInvalid')
+    || url.pathname !== '/' || url.search || url.hash || url.username || url.password) return feedback('portalUrlInvalid')
+  if (!/^G-[A-HJKMNP-Z2-9]{5,}$/.test(portalAgencyId)) return feedback('portalAgencyInvalid')
+  if (!portalKey && !connection.value?.hasCredential) return feedback('portalKeyRequired')
+  if (portalKey && !portalKeyFormatValid.value) return feedback('portalKeyInvalid')
   return null
 }
 const connectionFailure = (cause: unknown, fallback: 'saveFailed' | 'connectionTestFailed') => {
@@ -317,12 +324,12 @@ const connectionFailure = (cause: unknown, fallback: 'saveFailed' | 'connectionT
       return cause.message
     }
   }
-  return t(fallback)
+  return feedback(fallback)
 }
 const endpoint = computed(() => `/agencies/${props.agencyId}`)
 const proponentOptions = computed(() => proponents.value.map(item => ({
   value: item.id,
-  label: `${locale.value === 'fr' ? item.egcs_ar_legalname_fr : item.egcs_ar_legalname_en} (#${item.id})`
+  label: `${/^fr(?:-|$)/i.test(locale.value) ? item.egcs_ar_legalname_fr : item.egcs_ar_legalname_en} (#${item.id})`
 })))
 const loadManagement = async () => {
   const agencyId = props.agencyId
@@ -352,7 +359,7 @@ const searchProponents = async () => {
     const params = new URLSearchParams({ limit: '20',
       ...(proponentSearch.value.trim() ? { search: proponentSearch.value.trim() } : {}) })
     proponents.value = (await hostApi.get<{ items: typeof proponents.value }>(`/api/applicant-recipients?${params}`)).items
-  } catch { error.value = t('proponentSearchFailed') }
+  } catch { error.value = feedback('proponentSearchFailed') }
 }
 const verifyOrganization = async () => {
   if (locked.value || busy.value || !validOrganizationId.value || !selectedProponentId.value || !verificationNote.value.trim()) return
@@ -367,8 +374,8 @@ const verifyOrganization = async () => {
     selectedProponentId.value = ''
     verificationNote.value = ''
     await loadManagement()
-    showSuccess(t('verifiedQueued', { count: result.queued }))
-  } catch { error.value = t('verifyFailed') }
+    showSuccess(feedback('verifiedQueued', { count: result.queued }))
+  } catch { error.value = feedback('verifyFailed') }
   finally { busy.value = false }
 }
 const refreshOrganizationChoices = async () => {
@@ -377,8 +384,8 @@ const refreshOrganizationChoices = async () => {
   try {
     await api.post(`${endpoint.value}/organization-sync`)
     await loadManagement()
-    showSuccess(t('organizationsSynced'))
-  } catch { error.value = t('organizationSyncFailed') }
+    showSuccess(feedback('organizationsSynced'))
+  } catch { error.value = feedback('organizationSyncFailed') }
   finally { busy.value = false }
 }
 const saveProponentVerificationAccess = async () => {
@@ -389,8 +396,8 @@ const saveProponentVerificationAccess = async () => {
       extensionKey: 'gcs-ssc-portal-connector', enabled: true,
       config: { ...props.config, portalProponentVerificationAccess: proponentVerificationAccess.value }
     })
-    showSuccess(t('proponentVerificationSaved'))
-  } catch { error.value = t('proponentVerificationSaveFailed') }
+    showSuccess(feedback('proponentVerificationSaved'))
+  } catch { error.value = feedback('proponentVerificationSaveFailed') }
   finally { busy.value = false }
 }
 const openVerification = (item: PortalOrganization) => {
@@ -406,8 +413,8 @@ const initialSync = async () => {
   try {
     const result = await api.post<{ queued: number }>(`${endpoint.value}/initial-sync`)
     await loadManagement()
-    showSuccess(t('initialQueued', { count: result.queued }))
-  } catch { error.value = t('initialFailed') }
+    showSuccess(feedback('initialQueued', { count: result.queued }))
+  } catch { error.value = feedback('initialFailed') }
   finally { busy.value = false }
 }
 const pushBacklog = async () => {
@@ -417,9 +424,9 @@ const pushBacklog = async () => {
   try {
     const result = await api.post<{ results: Array<{ delivered: boolean }> }>(`${endpoint.value}/backlog`, { limit })
     await loadManagement()
-    showSuccess(t('pushed', { count: result.results.filter(item => item.delivered).length,
+    showSuccess(feedback('pushed', { count: result.results.filter(item => item.delivered).length,
       failed: result.results.filter(item => !item.delivered).length }))
-  } catch { error.value = t('pushFailed') }
+  } catch { error.value = feedback('pushFailed') }
   finally { busy.value = false }
 }
 const pushAllBacklog = async () => {
@@ -428,8 +435,8 @@ const pushAllBacklog = async () => {
   try {
     const result = await api.post<{ queued: number; results: Array<{ delivered: boolean }> }>(`${endpoint.value}/backlog`, { all: true })
     await loadManagement()
-    showSuccess(t('allPushed', { queued: result.queued, delivered: result.results.filter(item => item.delivered).length }))
-  } catch { error.value = t('pushFailed') }
+    showSuccess(feedback('allPushed', { queued: result.queued, delivered: result.results.filter(item => item.delivered).length }))
+  } catch { error.value = feedback('pushFailed') }
   finally { busy.value = false }
 }
 const saveSettings = async () => {
@@ -441,8 +448,8 @@ const saveSettings = async () => {
       entityStatusIds: entityStatusIds.value,
       pullIntervalMinutes: pullInterval.value === 'manual' ? null : Number(pullInterval.value)
     })
-    showSuccess(t('settingsSaved'))
-  } catch { error.value = t('settingsFailed') }
+    showSuccess(feedback('settingsSaved'))
+  } catch { error.value = feedback('settingsFailed') }
   finally { busy.value = false }
 }
 const toggleStatus = (id: string, enabled: boolean) => {
@@ -479,8 +486,8 @@ const load = async () => {
     await loadManagement()
   } catch {
     if (sequence !== loadSequence) return
-    if (section.value === 'connection') showError(t('loadFailed'))
-    else error.value = t('loadFailed')
+    if (section.value === 'connection') showError(feedback('loadFailed'))
+    else error.value = feedback('loadFailed')
   } finally { if (sequence === loadSequence) loading.value = false }
 }
 const save = async () => {
@@ -494,11 +501,11 @@ const save = async () => {
     const result = await api.put<{ connection: Connection }>(`${endpoint.value}/connection`, input)
     connection.value = result.connection
     form.value.portalKey = ''
-    showSuccess(t('connected'))
+    showSuccess(feedback('connected'))
     try {
       await api.post(`${endpoint.value}/organization-sync`)
       await loadManagement()
-    } catch { showError(t('organizationSyncFailed')) }
+    } catch { showError(feedback('organizationSyncFailed')) }
   } catch (cause) { showError(connectionFailure(cause, 'saveFailed')) }
   finally { busy.value = false }
 }
@@ -513,7 +520,7 @@ const test = async () => {
       portalAgencyId: form.value.portalAgencyId,
       ...(form.value.portalKey ? { portalKey: form.value.portalKey } : {})
     })
-    showSuccess(t('connectionTestPassed'))
+    showSuccess(feedback('connectionTestPassed'))
   } catch (cause) { showError(connectionFailure(cause, 'connectionTestFailed')) }
   finally { busy.value = false }
 }
@@ -526,7 +533,7 @@ const sync = async () => {
       pending: Array<{ eventId: string; reason: string }>
     }>(`${endpoint.value}/sync`)
     pending.value = result.pending
-    showSuccess(t('syncDone', { count: result.imported.length, pending: result.pending.length }))
+    showSuccess(feedback('syncDone', { count: result.imported.length, pending: result.pending.length }))
     try {
       const [history, deliveryBacklog] = await Promise.all([
         api.get<{ receipts: Receipt[] }>(`${endpoint.value}/receipts`),
@@ -534,8 +541,8 @@ const sync = async () => {
       ])
       receipts.value = history.receipts
       inbound.value = deliveryBacklog.inbound
-    } catch { error.value = t('deliveryRefreshFailed') }
-  } catch { error.value = t('syncFailed') }
+    } catch { error.value = feedback('deliveryRefreshFailed') }
+  } catch { error.value = feedback('syncFailed') }
   finally { busy.value = false }
 }
 onMounted(load)

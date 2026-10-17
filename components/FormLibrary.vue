@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { feedback, useLocalizedFeedback } from './localized-feedback'
 import { computed, ref, watch } from 'vue'
 import { FetchResponseError } from '@gcs-ssc/extensions'
 import { ExtensionBadge, ExtensionButton, ExtensionFormField, ExtensionInput, ExtensionModal, ExtensionResourceLayoutCard, ExtensionTextarea, useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
@@ -20,15 +21,15 @@ type Publication = {
 const props = defineProps<{ agencyId: string; disabled?: boolean }>()
 const emit = defineEmits<{ open: [formId: string] }>()
 const { locale, t } = useExtensionI18n(messages)
-const language = computed<'en' | 'fr'>(() => locale.value === 'fr' ? 'fr' : 'en')
+const language = computed<'en' | 'fr'>(() => /^fr(?:-|$)/i.test(locale.value) ? 'fr' : 'en')
 const api = useExtensionApi('gcs-ssc-portal-connector')
 const forms = ref<FormSummary[]>([])
 const publications = ref<Publication[]>([])
 const loading = ref(true)
-const error = ref('')
+const error = useLocalizedFeedback(t)
 const createOpen = ref(false)
 const createBusy = ref(false)
-const createError = ref('')
+const createError = useLocalizedFeedback(t)
 const createDraft = ref({ titleEn: '', titleFr: '', introductionEn: '', introductionFr: '' })
 const introductionRequired = computed(() => Boolean(createDraft.value.introductionEn.trim() || createDraft.value.introductionFr.trim()))
 const createValid = computed(() => Boolean(
@@ -56,8 +57,8 @@ const createForm = async () => {
     emit('open', result.survey.id)
   } catch (error) {
     createError.value = error instanceof FetchResponseError
-      ? `${t('formDetailsCreateFailed')} ${error.message} (HTTP ${error.response.status})`
-      : t('formDetailsCreateFailed')
+      ? feedback('formDetailsCreateFailedWithApi', { message: error.message, status: error.response.status })
+      : feedback('formDetailsCreateFailed')
   } finally {
     createBusy.value = false
   }
@@ -122,7 +123,7 @@ watch(() => filteredForms.value.length, length => {
 })
 const dateLabel = (value: string) => {
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '—' : new Intl.DateTimeFormat(locale.value === 'fr' ? 'fr-CA' : 'en-CA', {
+  return Number.isNaN(date.getTime()) ? '—' : new Intl.DateTimeFormat(/^fr(?:-|$)/i.test(locale.value) ? 'fr-CA' : 'en-CA', {
     year: 'numeric', month: 'short', day: 'numeric'
   }).format(date)
 }
@@ -138,7 +139,7 @@ const load = async () => {
     publications.value = result.publications ?? []
   } catch {
     if (sequence !== loadSequence) return
-    error.value = t('formLibraryLoadFailed')
+    error.value = feedback('formLibraryLoadFailed')
   } finally {
     if (sequence === loadSequence) loading.value = false
   }
