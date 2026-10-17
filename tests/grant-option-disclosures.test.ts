@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { mount } from '@vue/test-utils'
-import { defineComponent, h, reactive, ref } from 'vue'
+import { defineComponent, h, nextTick, reactive, ref } from 'vue'
 import { expect, it } from 'vitest'
 import { createExtensionTestUiRuntime } from '@gcs-ssc/extensions/testing'
 import { setExtensionUiRuntime } from '@gcs-ssc/extensions/ui'
 import GrantOptionEditor from '../components/GrantOptionEditor.vue'
+import FormChoiceEditor from '../components/FormChoiceEditor.vue'
 
 const locale = ref('en')
 const runtime = createExtensionTestUiRuntime()
@@ -43,6 +44,7 @@ const button = (wrapper: ReturnType<typeof mount>, label: string) => wrapper.fin
     locale.value = 'fr'
     await wrapper.setProps({ title: 'Catégories de coûts', disabled: true })
     expect(wrapper.findAll('h3').map(heading => heading.text())).toEqual(['Catégories de coûts (1)', 'Déplacements'])
+    expect(wrapper.find('button[aria-label="Retirer le choix: Déplacements"]').exists()).toBe(true)
     expect(wrapper.findAll('input').every(input => input.attributes('disabled') !== undefined)).toBe(true)
     expect(wrapper.findAll('button').every(control => control.attributes('disabled') !== undefined)).toBe(true)
     await wrapper.setProps({ options: [] })
@@ -50,3 +52,19 @@ const button = (wrapper: ReturnType<typeof mount>, label: string) => wrapper.fin
     expect(wrapper.text()).toContain('Ajouter un choix')
     wrapper.unmount()
   })
+
+it('updates choice action names with the active locale and keeps the record context', async () => {
+  locale.value = 'en'
+  runtime.components.UTable = runtime.components.CommonCompactTable
+  const wrapper = mount(FormChoiceEditor, { props: {
+    options: [{ value: 'travel', label: { en: 'Travel', fr: 'Déplacements' } }], disabled: false, questionId: 'cost'
+  } })
+  expect(wrapper.get('button[aria-label="Edit choice: Travel"]').attributes('disabled')).toBeUndefined()
+  expect(wrapper.find('button[aria-label="Delete choice: Travel"]').exists()).toBe(true)
+  locale.value = 'fr'
+  await nextTick()
+  expect(wrapper.find('button[aria-label="Modifier le choix: Déplacements"]').exists()).toBe(true)
+  expect(wrapper.find('button[aria-label="Supprimer le choix: Déplacements"]').exists()).toBe(true)
+  expect(wrapper.find('button[aria-label="Edit choice: Travel"]').exists()).toBe(false)
+  wrapper.unmount()
+})
