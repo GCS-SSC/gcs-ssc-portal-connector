@@ -7,7 +7,7 @@ import { messages } from '../i18n/messages'
 type Choice = { value: string; label: { en: string; fr: string } }
 const props = defineProps<{ options: Choice[]; disabled: boolean; questionId: string }>()
 const emit = defineEmits<{ 'update:options': [options: Choice[]] }>()
-const { t } = useExtensionI18n(messages)
+const { locale, t } = useExtensionI18n(messages)
 const draft: Ref<Choice | null> = ref(null)
 const removing: Ref<Choice | null> = ref(null)
 const isNew: Ref<boolean> = ref(false)
@@ -49,8 +49,8 @@ watch(() => props.questionId, () => {
     <ExtensionTable :data="rows" :columns="columns" class="rounded-lg border border-default">
       <template #actions-cell="{ row }">
         <div class="flex justify-end gap-1">
-          <ExtensionButton type="button" icon="i-lucide-pencil" color="neutral" variant="ghost" :disabled="disabled" :aria-label="`${t('formChoiceEdit')}: ${row.original.label.en}`" @click="edit(row.original)" />
-          <ExtensionButton type="button" icon="i-lucide-trash-2" color="error" variant="ghost" :disabled="disabled || options.length === 1" :aria-label="`${t('formChoiceDelete')}: ${row.original.label.en}`" @click="removing = row.original" />
+          <ExtensionButton type="button" icon="i-lucide-pencil" color="neutral" variant="ghost" :disabled="disabled" :aria-label="`${t('formChoiceEdit')}: ${row.original.label[locale === 'fr' ? 'fr' : 'en'] || row.original.label.en || row.original.label.fr}`" @click="edit(row.original)" />
+          <ExtensionButton type="button" icon="i-lucide-trash-2" color="error" variant="ghost" :disabled="disabled || options.length === 1" :aria-label="`${t('formChoiceDelete')}: ${row.original.label[locale === 'fr' ? 'fr' : 'en'] || row.original.label.en || row.original.label.fr}`" @click="removing = row.original" />
         </div>
       </template>
     </ExtensionTable>

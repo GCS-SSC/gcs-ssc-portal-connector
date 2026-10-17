@@ -122,6 +122,7 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
     useExtensionToast: () => ({ add: state.toastAdd }),
     useExtensionApi: () => ({ get, post, put }), useHostApi: () => ({ get: hostGet, patch: vi.fn() }),
     ExtensionFormField: field, ExtensionInput: input, ExtensionSelect: select, ExtensionSelectMenu: select,
+    ExtensionTooltip: defineComponent({ inheritAttrs: false, setup(_, { slots }) { return () => slots.default?.() } }),
     ExtensionCheckbox: checkbox, ExtensionButton: button, ExtensionSaveButton: button,
     ExtensionIcon: defineComponent({ setup() { return () => h('span') } }),
     ExtensionTable: resourceTable, ExtensionTextarea: textarea, ExtensionModal: modal, ExtensionResourceLayoutCard: resourceTable,

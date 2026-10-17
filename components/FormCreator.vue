@@ -5,7 +5,7 @@ import { grantConfigurationReady, emptyBudgetConfig, emptyActivityConfig, design
   type AdvancedSurvey, type FieldRule, type SurveyCondition } from '@gcs-ssc/survey'
 import { ExtensionAssessmentSchemaAccordionSection, ExtensionAssessmentSchemaPageSection, ExtensionButton, ExtensionCheckbox, ExtensionEntityEditorWorkspace, ExtensionEntityHero,
   ExtensionFormField, ExtensionIcon, ExtensionInput, ExtensionModal, ExtensionRouteTabs, ExtensionSaveButton,
-  ExtensionSelect, ExtensionTextarea, useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
+  ExtensionSelect, ExtensionTextarea, ExtensionTooltip, useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
 import { messages } from '../i18n/messages'
 import { updateFormChoices } from '../shared/form-choices'
 import { computedTemplateReady } from '../shared/form-localization'
@@ -1154,14 +1154,16 @@ watch(() => props.agencyId, () => {
               <div
                 class="designer-sidebar-row" :class="{ 'designer-sidebar-row--active': tab === 'edit' && selectedContainerId === node.id }"
                 :style="{ paddingInlineStart: `${8 + Math.min(node.depth, 4) * 8}px` }">
-                <button
-                  v-if="expandableNodeIds.has(node.id)" type="button" class="designer-sidebar-disclosure"
-                  :aria-label="`${collapsedNodeIds.has(node.id) ? tr('Expand', 'Développer') : tr('Collapse', 'Réduire')} ${node.title || node.id}`"
-                  :aria-expanded="!collapsedNodeIds.has(node.id)" @click="toggleNode(node)">
-                  <ExtensionIcon
-                    :name="collapsedNodeIds.has(node.id) ? 'i-lucide-chevron-right' : 'i-lucide-chevron-down'"
-                    class="size-4" aria-hidden="true" />
-                </button>
+                <ExtensionTooltip v-if="expandableNodeIds.has(node.id)" :text="`${collapsedNodeIds.has(node.id) ? tr('Expand', 'Développer') : tr('Collapse', 'Réduire')} ${node.title || node.id}`">
+                  <button
+                    type="button" class="designer-sidebar-disclosure"
+                    :aria-label="`${collapsedNodeIds.has(node.id) ? tr('Expand', 'Développer') : tr('Collapse', 'Réduire')} ${node.title || node.id}`"
+                    :aria-expanded="!collapsedNodeIds.has(node.id)" @click="toggleNode(node)">
+                    <ExtensionIcon
+                      :name="collapsedNodeIds.has(node.id) ? 'i-lucide-chevron-right' : 'i-lucide-chevron-down'"
+                      class="size-4" aria-hidden="true" />
+                  </button>
+                </ExtensionTooltip>
                 <span v-else class="designer-sidebar-disclosure" aria-hidden="true" />
                 <button
                   type="button" class="designer-sidebar-item" :title="node.title || node.id"

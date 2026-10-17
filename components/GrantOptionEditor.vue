@@ -35,7 +35,7 @@ const { locale, t } = useExtensionI18n(messages)
               {{ option.gcsId ? t('grantMapped') : t('grantUnmapped') }}
             </p>
             <ExtensionButton
-              type="button" color="neutral" variant="ghost" icon="i-lucide-trash-2" :aria-label="`${t('grantRemoveOption')}: ${option.label.en}`"
+              type="button" color="neutral" variant="ghost" icon="i-lucide-trash-2" :aria-label="`${t('grantRemoveOption')}: ${option.label[locale === 'fr' ? 'fr' : 'en'] || option.label.en || option.label.fr || t('grantOption')}`"
               :disabled="disabled" @click="emit('remove', option.id)" />
           </div>
         </div>
