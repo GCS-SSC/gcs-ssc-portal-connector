@@ -20,8 +20,8 @@ import FormTest from './FormTest.vue'
 import { clearFormDraft, readFormDraft, writeFormDraft, writeFormSelection } from './form-draft-session'
 
 const props = defineProps<{ agencyId: string; disabled?: boolean; selectedFormId?: string; intakeId?: string;
-  opportunityId?: string; streamId?: string; standalone?: boolean }>()
-const emit = defineEmits<{ close: []; saved: [id: string] }>()
+  opportunityId?: string; streamId?: string; standalone?: boolean; flowOnly?: boolean; initialView?: 'edit' | 'test' | 'publish' }>()
+const emit = defineEmits<{ flow: [view: 'edit' | 'flow' | 'test' | 'publish']; close: []; saved: [id: string] }>()
 const { locale, t } = useExtensionI18n(messages)
 const language = computed<'en' | 'fr'>(() => locale.value === 'fr' ? 'fr' : 'en')
 const previewLocale = ref<'en' | 'fr'>(language.value)
@@ -40,13 +40,14 @@ const surveys = ref<Summary[]>([]), programs = ref<Program[]>([]), streams = ref
 const formsLoaded = ref(false)
 const agreements = ref<Agreement[]>([]), organizations = ref<Organization[]>([])
 const formId = ref(''), revision = ref(0), selectedContainerId = ref('page_1'), selectedQuestionId = ref('')
+const routeReady = ref(false)
 const tab = ref<'edit' | 'flow' | 'test' | 'publish'>('edit')
 const editorPanelId = useId()
 const workflowTabs = computed(() => [
   { key: 'edit', value: 'edit', label: t('formEditTab'), icon: 'i-lucide-pencil' },
-  { key: 'flow', value: 'flow', label: t('formFlowTab'), icon: 'i-lucide-git-branch' },
   { key: 'test', value: 'test', label: t('formTestTab'), icon: 'i-lucide-flask-conical' },
-  ...(!props.intakeId && !props.opportunityId ? [{ key: 'publish', value: 'publish', label: t('formPublishTab'), icon: 'i-lucide-send' }] : [])
+  ...(!props.intakeId && !props.opportunityId ? [{ key: 'publish', value: 'publish', label: t('formPublishTab'), icon: 'i-lucide-send' }] : []),
+  { key: 'flow', value: 'flow', label: t('formFlowTab'), icon: 'i-lucide-git-branch' }
 ])
 const busy = ref(false), loading = ref(false), error = ref(''), message = ref('')
 const attachmentPending = ref(false)
@@ -420,16 +421,6 @@ const pageDestinations = (page: AdvancedSurvey['pages'][number], includeNext = f
     .map((item) => ({ value: item.id, label: item.title[language.value] || item.id })),
   { value: 'end', label: tr('End form', 'Terminer le formulaire') }
 ]
-/**
- *
- * @param pageId
- */
-const openFlowPage = (pageId: string) => {
-  selectedContainerId.value = pageId
-  selectedQuestionId.value = ''
-  tab.value = 'edit'
-}
-
 /**
  *
  */
@@ -1118,10 +1109,19 @@ onMounted(async () => {
   }
   await load()
   if (!restoreDraft()) await selectForm(props.selectedFormId)
+  tab.value = props.flowOnly ? 'flow' : props.initialView ?? (tab.value === 'flow' ? 'edit' : tab.value)
+  await nextTick()
+  routeReady.value = true
 })
 watch([definition, formId, revision, saved, selectedContainerId, selectedQuestionId, tab,
   publicationScope, agreementId, organizationId, programId, batchStreamId, attachmentPending],
 persistDraft, { deep: true })
+watch(tab, value => {
+  if (routeReady.value && props.standalone && Boolean(props.flowOnly) !== (value === 'flow')) {
+    persistDraft()
+    emit('flow', value)
+  }
+})
 watch(language, (value) => { previewLocale.value = value })
 watch(() => props.agencyId, () => {
   resetForm(); surveys.value = []; programs.value = []; streams.value = []
@@ -1143,7 +1143,7 @@ watch(() => props.agencyId, () => {
     <ExtensionEntityEditorWorkspace content-test-id="form-detail-content">
       <template #sidebar>
         <ExtensionRouteTabs
-          v-model="tab" :items="workflowTabs" :external-panel-id="editorPanelId" :priority-values="['edit', 'flow', 'test', 'publish']" orientation="vertical"
+          v-model="tab" :items="workflowTabs" :external-panel-id="editorPanelId" :priority-values="['edit', 'test', 'publish', 'flow']" orientation="vertical"
           :ui="{ root: 'w-full', list: 'w-full flex-col items-stretch p-0', trigger: 'w-full justify-start' }" />
         <nav class="designer-sidebar-outline" :aria-label="tr('Form pages and sections', 'Pages et sections du formulaire')">
           <h4 class="designer-eyebrow px-3">
@@ -1604,7 +1604,7 @@ watch(() => props.agencyId, () => {
               </ExtensionAssessmentSchemaAccordionSection>
             </ExtensionAssessmentSchemaPageSection>
           </template>
-          <FormFlowMap v-else-if="tab === 'flow'" :definition="definition" :locale="language" :selected-page-id="selected?.pageId" @select-page="openFlowPage" />
+          <FormFlowMap v-else-if="tab === 'flow'" :definition="definition" :locale="language" />
           <div v-else-if="tab === 'test'" class="space-y-4">
             <div class="flex items-center justify-end gap-2 text-sm">
               <span class="text-muted">{{ tr('Preview language', 'Langue de l’aperçu') }}</span><button type="button" class="designer-language" :aria-pressed="previewLocale === 'en'" @click="previewLocale = 'en'">

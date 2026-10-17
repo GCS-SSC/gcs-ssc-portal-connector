@@ -53,7 +53,7 @@ export const createFormFlowDiagram = (
     return {
       id: `page:${page.id}`, kind: 'step', title,
       eyebrow: `${t('formFlowPageSingular')} ${index + 1}`,
-      selectLabel: t('formFlowEditPage', { number: index + 1, name: title }), routes
+      routes
     }
   })
   const ruleCount = pages.reduce((count, page) => count + page.branches.length, 0)

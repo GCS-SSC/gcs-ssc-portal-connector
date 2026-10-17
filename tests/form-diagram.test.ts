@@ -40,7 +40,8 @@ describe('portal declarative form diagrams', () => {
     expect(result.nodes.map(node => node.id)).toEqual(['form:start', 'page:first', 'page:end', 'page:last', 'form:end'])
     expect(result.nodes.map(node => node.routes?.[0]?.targetId)).toEqual(['page:first', 'page:last', 'form:end', 'form:end', undefined])
     expect(result.stats).toEqual(['3 pages', '0 rules'])
-    expect(result.nodes[1]).toMatchObject({ eyebrow: 'page 1', title: 'Eligibility', selectLabel: 'Edit page 1: Eligibility' })
+    expect(result.nodes[1]).toMatchObject({ eyebrow: 'page 1', title: 'Eligibility' })
+    expect(result.nodes.every(node => node.selectLabel === undefined)).toBe(true)
     expect(definition).toEqual(original)
     delete definition.pages[0]!.next
     expect(diagram(definition).nodes[1]!.routes).toEqual([{ targetId: 'page:end', kind: 'direct' }])
@@ -102,28 +103,29 @@ describe('portal declarative form diagrams', () => {
     expect(diagram(definition).stats).toEqual(['1 page', '1 rule'])
   })
 
-  it('hands reactive markup and selection to the SDK while retaining select-page navigation', async () => {
+  it('hands reactive read-only markup to the SDK without page navigation', async () => {
     const runtime = createExtensionTestUiRuntime()
     const locale = ref('en')
     runtime.composables.useI18n = () => ({ locale, n: value => String(value) })
     const renderer = defineComponent({
-      props: ['definition', 'selectedNodeId', 'filename'], emits: ['select-node'],
+      props: ['definition', 'selectedNodeId', 'filename', 'direction'], emits: ['select-node'],
       setup() { return () => h('div') }
     })
     runtime.components.CommonFlowDiagram = renderer
     setExtensionUiRuntime(runtime)
-    const wrapper = mount(FormFlowMap, { props: { definition: survey(), locale: 'en', selectedPageId: 'end' } })
+    const wrapper = mount(FormFlowMap, { props: { definition: survey(), locale: 'en' } })
     const host = wrapper.findComponent(renderer)
-    expect(host.props('selectedNodeId')).toBe('page:end')
+    expect(host.props('selectedNodeId')).toBeUndefined()
     expect(host.props('filename')).toBe('form-page-flow')
+    expect(host.props('direction')).toBe('vertical')
     host.vm.$emit('select-node', 'page:end')
-    expect(wrapper.emitted('select-page')).toEqual([['end']])
+    expect(wrapper.emitted('select-page')).toBeUndefined()
     locale.value = 'fr'
-    await wrapper.setProps({ locale: 'fr', selectedPageId: 'last' })
+    await wrapper.setProps({ locale: 'fr' })
     const translated = host.props('definition') as FlowDiagramDefinition
     expect(translated.title).toBe('Demande · Parcours des pages')
     expect(translated.nodes[1]!.title).toBe('Admissibilité')
-    expect(host.props('selectedNodeId')).toBe('page:last')
+    expect(translated.nodes.every(node => node.selectLabel === undefined)).toBe(true)
     wrapper.unmount()
   })
 })

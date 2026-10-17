@@ -209,11 +209,11 @@ describe('connector form requirements', () => {
       expect(wrapper.find('.designer-back').exists()).toBe(!('standalone' in scope))
       const nav = wrapper.get('[data-form-workspace] nav')
       expect(nav.findAll('[role="tab"]')).toHaveLength('standalone' in scope ? 4 : 3)
-      await nav.findAll('[role="tab"]')[1]!.trigger('click')
+      await nav.findAll('[role="tab"]').at(-1)!.trigger('click')
       expect(wrapper.findComponent({ name: 'ExtensionFlowDiagram' }).exists()).toBe(true)
       const panel = wrapper.get('[role="tabpanel"]')
-      expect(nav.findAll('[role="tab"]')[1]!.attributes('aria-controls')).toBe(panel.attributes('id'))
-      expect(panel.attributes('aria-label')).toBe(nav.findAll('[role="tab"]')[1]!.text())
+      expect(nav.findAll('[role="tab"]').at(-1)!.attributes('aria-controls')).toBe(panel.attributes('id'))
+      expect(panel.attributes('aria-label')).toBe(nav.findAll('[role="tab"]').at(-1)!.text())
       await wrapper.get('.designer-sidebar-item').trigger('click')
       expect(nav.findAll('[role="tab"]')[0]!.attributes('aria-selected')).toBe('true')
       await button(wrapper, locale === 'fr' ? 'Ajouter une page' : 'Add page').trigger('click')
@@ -1267,7 +1267,7 @@ describe('connector form requirements', () => {
     expect(wrapper.text()).toContain('Navigation to that page was updated')
   })
 
-  it('opens Flow as a separate view and selects a page for editing', async () => {
+  it('opens Flow as a separate read-only view and retains separate page editing', async () => {
     const wrapper = mount(FormCreator, { props: { agencyId: '1' } })
     await flushPromises()
     await button(wrapper, 'Edit').trigger('click')
@@ -1281,8 +1281,42 @@ describe('connector form requirements', () => {
     expect(wrapper.find('.designer-workspace').exists()).toBe(false)
     renderer.vm.$emit('select-node', pageNodes[0]!.id)
     await flushPromises()
+    expect(diagram.nodes.every(node => node.selectLabel === undefined)).toBe(true)
+    expect(button(wrapper, 'Flow').attributes('aria-selected')).toBe('true')
+    await wrapper.findAll('.designer-sidebar-item')[0]!.trigger('click')
     expect(button(wrapper, 'Edit').attributes('aria-selected')).toBe('true')
     expect(wrapper.findAll('.designer-sidebar-item')[0]!.attributes('aria-current')).toBe('location')
+  })
+
+  it('opens a direct Flow route and preserves unsaved edits when returning to the editor', async () => {
+    const definition = {
+      schemaVersion: 3, title: { en: 'Saved form', fr: 'Formulaire enregistré' }, questions: [],
+      pages: [{ id: 'page_1', title: { en: 'Dates', fr: 'Dates' }, questionIds: [], groups: [], branches: [] }]
+    }
+    get.mockImplementation(async (path: string) => path.endsWith('/forms')
+      ? { surveys: [{ id: 'form_1', revision: 1 }], streams: [], agreements: [] }
+      : { survey: { id: 'form_1', revision: 1, definition } })
+    const props = { agencyId: '1', selectedFormId: 'form_1', standalone: true }
+    const editor = mount(FormCreator, { props })
+    await flushPromises()
+    await editor.get('input[name="groupTitleEn"]').setValue('Unsaved dates')
+    await button(editor, 'Flow').trigger('click')
+    expect(editor.emitted('flow')).toEqual([['flow']])
+    editor.unmount()
+    const flow = mount(FormCreator, { props: { ...props, flowOnly: true } })
+    await flushPromises()
+    expect(button(flow, 'Flow').attributes('aria-selected')).toBe('true')
+    const diagram = flow.findComponent({ name: 'ExtensionFlowDiagram' }).props('definition') as FlowDiagramDefinition
+    expect(diagram.nodes.find(node => node.id === 'page:page_1')!.title).toBe('Unsaved dates')
+    expect(flow.emitted('flow')).toBeUndefined()
+    await button(flow, 'Edit').trigger('click')
+    expect(flow.emitted('flow')).toEqual([['edit']])
+    flow.unmount()
+    const restored = mount(FormCreator, { props })
+    await flushPromises()
+    expect(button(restored, 'Edit').attributes('aria-selected')).toBe('true')
+    expect((restored.get('input[name="groupTitleEn"]').element as HTMLInputElement).value).toBe('Unsaved dates')
+    restored.unmount()
   })
 
   it('requires a selected synchronized organization, Proponent and note before irreversible verification', async () => {

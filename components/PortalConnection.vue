@@ -51,8 +51,10 @@ const props = defineProps<{
   disabled?: boolean
   readOnly?: boolean
   detailFormId?: string
+  formFlowOnly?: boolean
+  formEditorView?: 'edit' | 'test' | 'publish'
 }>()
-const emit = defineEmits<{ openForm: [formId: string]; savedForm: [formId: string]; closeForm: []; formCollectionLabel: [label: string] }>()
+const emit = defineEmits<{ formFlow: [view: 'edit' | 'flow' | 'test' | 'publish']; openForm: [formId: string]; savedForm: [formId: string]; closeForm: []; formCollectionLabel: [label: string] }>()
 const section = computed(() => props.section ?? 'connection')
 const formsVisited = ref(section.value === 'forms')
 watch(section, (value) => {
@@ -591,7 +593,7 @@ watch(() => props.agencyId, searchProponents)
       <FormLibrary v-if="detailFormId === undefined" :agency-id="agencyId" :disabled="locked"
         @open="emit('openForm', $event)" />
       <FormCreator v-else :key="agencyId" :agency-id="agencyId" :disabled="locked"
-        :selected-form-id="detailFormId" standalone @saved="emit('savedForm', $event)"
+        :selected-form-id="detailFormId" :flow-only="formFlowOnly" :initial-view="formEditorView" standalone @flow="emit('formFlow', $event)" @saved="emit('savedForm', $event)"
         @close="emit('closeForm')" />
     </section>
     <section v-if="section === 'intakes'" class="space-y-4">
