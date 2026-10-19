@@ -2,7 +2,7 @@ import { defineGcsAuditOwnership, defineGcsExtension } from '@gcs-ssc/extensions
 
 export default defineGcsExtension({
   key: 'gcs-ssc-portal-connector',
-  sdkVersion: '^0.3.18',
+  sdkVersion: '^0.3.19',
   name: { en: 'Organization portal', fr: 'Portail des organismes' },
   description: {
     en: 'Publishes funding data and receives organization submissions.',
@@ -14,11 +14,12 @@ export default defineGcsExtension({
     'agency-only-configuration', 'configuration-access', 'server-handlers',
     'server-handler-rbac', 'migrations', 'extension-secrets', 'audit-ownership',
     'agency-config', 'extension-ui', 'extension-api-client', 'host-api-client',
-    'scheduled-agreement-import', 'scheduled-intake-import', 'l1-queue', 'extension-lifecycle-hooks', 'agency-workspace', 'entity-tabs'
+    'scheduled-agreement-import', 'scheduled-intake-import', 'l1-queue', 'extension-lifecycle-hooks', 'agency-workspace', 'agency-workspace-navigation', 'entity-tabs'
   ],
   admin: {
     agency: { path: './components/PortalConnection.vue' },
     agencyWorkspace: {
+      navigation: { category: 'management', order: 80 },
       label: { en: 'Portal', fr: 'Portail' }, icon: 'i-lucide-panel-left',
       tabs: [
         { id: 'connection', label: { en: 'Connection', fr: 'Connexion' }, icon: 'i-lucide-plug' },
