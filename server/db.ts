@@ -2,7 +2,7 @@ import type { Generated, Kysely, Transaction } from 'kysely'
 import type { ExtensionSecretDatabase } from '@gcs-ssc/extensions/server'
 
 export interface ConnectorDatabase extends ExtensionSecretDatabase {
-  'extensions.gcs_portal_form': {
+  'extensions.gcs_ssc_portal_connector_form': {
     id: string
     agency_id: string
     definition: unknown
@@ -11,7 +11,7 @@ export interface ConnectorDatabase extends ExtensionSecretDatabase {
     portal_revision: number | null
     updated_at: Generated<Date>
   }
-  'extensions.gcs_portal_operation': {
+  'extensions.gcs_ssc_portal_connector_operation': {
     id: Generated<string>
     idempotency_key: Generated<string>
     deduplication_key: Generated<string | null>
@@ -30,7 +30,7 @@ export interface ConnectorDatabase extends ExtensionSecretDatabase {
     updated_at: Generated<Date>
     delivered_at: Date | null
   }
-  'extensions.gcs_portal_connection': {
+  'extensions.gcs_ssc_portal_connector_connection': {
     agency_id: string
     portal_agency_id: string
     portal_url: string
@@ -44,7 +44,7 @@ export interface ConnectorDatabase extends ExtensionSecretDatabase {
     revision: Generated<number>
     updated_at: Date
   }
-  'extensions.gcs_portal_receipt': {
+  'extensions.gcs_ssc_portal_connector_receipt': {
     id: Generated<string>
     agency_id: string
     event_id: string
@@ -58,7 +58,7 @@ export interface ConnectorDatabase extends ExtensionSecretDatabase {
     created_at: Generated<Date>
     updated_at: Generated<Date>
   }
-  'extensions.gcs_portal_publication': {
+  'extensions.gcs_ssc_portal_connector_publication': {
     id: Generated<string>
     agency_id: string
     gcs_agreement_id: string
@@ -69,13 +69,13 @@ export interface ConnectorDatabase extends ExtensionSecretDatabase {
     source_digest: string
     published_at: Generated<Date>
   }
-  'extensions.gcs_portal_identity': {
+  'extensions.gcs_ssc_portal_connector_identity': {
     agency_id: string
     portal_organization_id: string
     proponent_id: string
     verified_at: Generated<Date>
   }
-  'extensions.gcs_portal_organization': {
+  'extensions.gcs_ssc_portal_connector_organization': {
     agency_id: string
     portal_organization_id: string
     name: string
@@ -87,7 +87,7 @@ export interface ConnectorDatabase extends ExtensionSecretDatabase {
     active: boolean
     synced_at: Generated<Date>
   }
-  'extensions.gcs_portal_verification': {
+  'extensions.gcs_ssc_portal_connector_verification': {
     portal_organization_id: string
     proponent_id: string
     origin_agency_id: string
@@ -96,7 +96,7 @@ export interface ConnectorDatabase extends ExtensionSecretDatabase {
     verified_at: Generated<Date>
     portal_active: Generated<boolean>
   }
-  'extensions.gcs_portal_outbox': {
+  'extensions.gcs_ssc_portal_connector_outbox': {
     id: Generated<string>
     agency_id: string
     agreement_id: string
@@ -111,7 +111,7 @@ export interface ConnectorDatabase extends ExtensionSecretDatabase {
     delivered_at: Date | null
     delivery_payload: unknown | null
   }
-  'extensions.gcs_portal_inbox': {
+  'extensions.gcs_ssc_portal_connector_inbox': {
     agency_id: string
     event_id: string
     kind: string
@@ -121,7 +121,7 @@ export interface ConnectorDatabase extends ExtensionSecretDatabase {
     created_at: Date
     first_seen_at: Generated<Date>
   }
-  'extensions.gcs_portal_outcome_outbox': {
+  'extensions.gcs_ssc_portal_connector_outcome_outbox': {
     id: Generated<string>
     agency_id: string
     receipt_id: string

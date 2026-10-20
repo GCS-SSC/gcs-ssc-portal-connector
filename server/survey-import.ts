@@ -44,10 +44,10 @@ export const importSurvey = async (context: GcsExtensionRouteContext, agencyId: 
   if (!mapping && submission.sourceSystem !== 'gcs-ssc-form')
     throw new PortalImportDiagnostic('importUnsupportedSource')
   return authorizedWrite(context, async transaction => {
-    const identity = await transaction.selectFrom('extensions.gcs_portal_identity').select('proponent_id')
+    const identity = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_identity').select('proponent_id')
       .where('agency_id', '=', agencyId).where('portal_organization_id', '=', submission.organizationId).executeTakeFirst()
     if (!identity) throw new PortalImportDiagnostic('importUnverifiedOrganization')
-    const existing = await transaction.selectFrom('extensions.gcs_portal_receipt').selectAll()
+    const existing = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_receipt').selectAll()
       .where('agency_id', '=', agencyId).where('item_submission_id', '=', item.itemSubmissionId).forUpdate().executeTakeFirst()
     if (existing && (existing.event_id !== update.eventId || existing.submission_id !== submission.submissionId
       || !isDeepStrictEqual(existing.source_export, submission)))
@@ -83,9 +83,9 @@ export const importSurvey = async (context: GcsExtensionRouteContext, agencyId: 
     const values = { kind, state: mapping ? 'imported' as const : 'received' as const,
       gcs_entity_type: mapping ? 'fundingcaseintake' : null, gcs_entity_id: intakeId, updated_at: new Date() }
     const receipt = existing
-      ? await transaction.updateTable('extensions.gcs_portal_receipt').set(values)
+      ? await transaction.updateTable('extensions.gcs_ssc_portal_connector_receipt').set(values)
         .where('id', '=', String(existing.id)).returning('id').executeTakeFirstOrThrow()
-      : await transaction.insertInto('extensions.gcs_portal_receipt').values({ ...values, agency_id: agencyId,
+      : await transaction.insertInto('extensions.gcs_ssc_portal_connector_receipt').values({ ...values, agency_id: agencyId,
         event_id: update.eventId, submission_id: submission.submissionId, item_submission_id: item.itemSubmissionId,
         source_export: sql`${JSON.stringify(submission)}::jsonb` }).returning('id').executeTakeFirstOrThrow()
     return { kind, entityId: intakeId ?? receiptReference(String(receipt.id)) }

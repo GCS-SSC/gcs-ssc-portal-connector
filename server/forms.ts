@@ -110,7 +110,7 @@ export const formPublications = (
 export const listForms = async (context: GcsExtensionRouteContext) => {
   const agencyId = agencyIdFromContext(context)
   const db = asConnectorDb(context.db)
-  const local = await db.selectFrom('extensions.gcs_portal_form').selectAll()
+  const local = await db.selectFrom('extensions.gcs_ssc_portal_connector_form').selectAll()
     .where('agency_id', '=', agencyId).execute()
   const localSurveys = local.map(form => ({ id: form.id, revision: form.revision,
     title: form.revision === 0 ? z.object({ title: draftTitle }).parse(form.definition).title
@@ -138,13 +138,13 @@ export const listForms = async (context: GcsExtensionRouteContext) => {
   const agreements = remoteAgreements ?? { agreements: [] }
   const sets = remoteSets ?? { sets: [] }
   const [publications, identities] = await Promise.all([
-    db.selectFrom('extensions.gcs_portal_publication').select([
+    db.selectFrom('extensions.gcs_ssc_portal_connector_publication').select([
       'gcs_agreement_id', 'portal_agreement_id', 'portal_organization_id'
     ]).where('agency_id', '=', agencyId).execute(),
-    db.selectFrom('extensions.gcs_portal_identity as identity')
-      .innerJoin('extensions.gcs_portal_verification as verification',
+    db.selectFrom('extensions.gcs_ssc_portal_connector_identity as identity')
+      .innerJoin('extensions.gcs_ssc_portal_connector_verification as verification',
         'verification.portal_organization_id', 'identity.portal_organization_id')
-      .innerJoin('extensions.gcs_portal_organization as organization', (join) => join
+      .innerJoin('extensions.gcs_ssc_portal_connector_organization as organization', (join) => join
         .onRef('organization.agency_id', '=', 'identity.agency_id')
         .onRef('organization.portal_organization_id', '=', 'identity.portal_organization_id'))
       .select(['identity.portal_organization_id', 'identity.proponent_id', 'organization.name'])
@@ -178,7 +178,7 @@ export const getForm = async (context: GcsExtensionRouteContext) => {
   const agencyId = agencyIdFromContext(context)
   const id = formCode.parse(context.params.formId)
   const db = asConnectorDb(context.db)
-  const saved = await db.selectFrom('extensions.gcs_portal_form').selectAll()
+  const saved = await db.selectFrom('extensions.gcs_ssc_portal_connector_form').selectAll()
     .where('agency_id', '=', agencyId).where('id', '=', id).executeTakeFirst()
   if (saved) return { survey: { id: saved.id, revision: saved.revision, definition: saved.definition,
     synced: Boolean(saved.portal_id && saved.portal_revision === saved.revision) } }
@@ -195,7 +195,7 @@ export const manageForm = async (context: GcsExtensionRouteContext) => {
     return authorizedWrite(context, async transaction => {
       const id = newFormId()
       // Revision 0 is a local record. The Portal survey schema needs a question, so its first valid revision is queued later.
-      await transaction.insertInto('extensions.gcs_portal_form').values({
+      await transaction.insertInto('extensions.gcs_ssc_portal_connector_form').values({
         id, agency_id: agencyId, revision: 0, portal_id: null, portal_revision: null,
         definition: { schemaVersion: 3, title: command.title,
           ...(introduction?.en && introduction.fr ? { description: introduction } : {}),
@@ -209,7 +209,7 @@ export const manageForm = async (context: GcsExtensionRouteContext) => {
     if (Boolean(command.surveyId) !== (command.expectedRevision !== undefined))
       throw intakeError('intakeFormRevisionRequired', 400)
     const known = command.surveyId
-      ? await asConnectorDb(context.db).selectFrom('extensions.gcs_portal_form').select('id')
+      ? await asConnectorDb(context.db).selectFrom('extensions.gcs_ssc_portal_connector_form').select('id')
         .where('agency_id', '=', agencyId).where('id', '=', command.surveyId).executeTakeFirst()
       : null
     const remote = command.surveyId && !known
@@ -219,7 +219,7 @@ export const manageForm = async (context: GcsExtensionRouteContext) => {
       throw new Error('Reload the latest saved form revision before editing.')
     return authorizedWrite(context, async transaction => {
       const previous = command.surveyId
-        ? await transaction.selectFrom('extensions.gcs_portal_form').selectAll()
+        ? await transaction.selectFrom('extensions.gcs_ssc_portal_connector_form').selectAll()
           .where('agency_id', '=', agencyId).where('id', '=', command.surveyId).forUpdate().executeTakeFirst()
         : null
       if (command.surveyId && !previous && !remote)
@@ -228,10 +228,10 @@ export const manageForm = async (context: GcsExtensionRouteContext) => {
         throw new Error('Reload the latest saved form revision before editing.')
       const id = previous?.id ?? remote?.id ?? newFormId()
       const revision = (previous?.revision ?? remote?.revision ?? 0) + 1
-      if (previous) await transaction.updateTable('extensions.gcs_portal_form')
+      if (previous) await transaction.updateTable('extensions.gcs_ssc_portal_connector_form')
         .set({ definition: command.definition, revision, updated_at: new Date() })
         .where('id', '=', id).where('agency_id', '=', agencyId).execute()
-      else await transaction.insertInto('extensions.gcs_portal_form').values({
+      else await transaction.insertInto('extensions.gcs_ssc_portal_connector_form').values({
         id, agency_id: agencyId, definition: command.definition, revision,
         portal_id: remote?.id ?? null, portal_revision: remote?.revision ?? null
       }).execute()
@@ -267,7 +267,7 @@ export const manageForm = async (context: GcsExtensionRouteContext) => {
       return { survey, attached: true }
     } catch { return { survey, attached: false } }
   }
-  const savedForm = await asConnectorDb(context.db).selectFrom('extensions.gcs_portal_form').selectAll()
+  const savedForm = await asConnectorDb(context.db).selectFrom('extensions.gcs_ssc_portal_connector_form').selectAll()
     .where('agency_id', '=', agencyId).where('id', '=', command.surveyId).executeTakeFirst()
   if (savedForm && (savedForm.revision !== command.revision || !savedForm.portal_id
     || savedForm.portal_revision !== savedForm.revision))
@@ -279,15 +279,15 @@ export const manageForm = async (context: GcsExtensionRouteContext) => {
   if (translationIssues.length) throw new Error(`Complete both English and French content before publishing: ${translationIssues.join(', ')}.`)
   const db = asConnectorDb(context.db)
   const [identities, publications, agreements, structure, sets] = await Promise.all([
-    db.selectFrom('extensions.gcs_portal_identity as identity')
-      .innerJoin('extensions.gcs_portal_verification as verification',
+    db.selectFrom('extensions.gcs_ssc_portal_connector_identity as identity')
+      .innerJoin('extensions.gcs_ssc_portal_connector_verification as verification',
         'verification.portal_organization_id', 'identity.portal_organization_id')
-      .innerJoin('extensions.gcs_portal_organization as organization', (join) => join
+      .innerJoin('extensions.gcs_ssc_portal_connector_organization as organization', (join) => join
         .onRef('organization.agency_id', '=', 'identity.agency_id')
         .onRef('organization.portal_organization_id', '=', 'identity.portal_organization_id'))
       .select('identity.portal_organization_id').where('identity.agency_id', '=', agencyId)
       .where('verification.portal_active', '=', true).where('organization.active', '=', true).execute(),
-    db.selectFrom('extensions.gcs_portal_publication')
+    db.selectFrom('extensions.gcs_ssc_portal_connector_publication')
       .select(['portal_agreement_id', 'portal_organization_id']).where('agency_id', '=', agencyId).execute(),
     client.agreements(), client.structure(), client.sets()
   ])

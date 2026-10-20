@@ -53,19 +53,19 @@ describe('Health Canada Portal demo seed', () => {
     })
     expect((await sql<{ enabled: boolean }>`SELECT enabled FROM extensions.agency_enablement`.execute(db)).rows)
       .toEqual([{ enabled: true }])
-    await sql`CREATE TABLE extensions.gcs_portal_connection (agency_id bigint PRIMARY KEY)`.execute(db)
-    await sql`CREATE TABLE extensions.gcs_portal_organization (
+    await sql`CREATE TABLE extensions.gcs_ssc_portal_connector_connection (agency_id bigint PRIMARY KEY)`.execute(db)
+    await sql`CREATE TABLE extensions.gcs_ssc_portal_connector_organization (
       agency_id bigint, portal_organization_id text, name text, description text,
       owner_name text, owner_email text, member_count integer, agreement_count integer,
       active boolean, synced_at timestamptz DEFAULT now(), PRIMARY KEY (agency_id,portal_organization_id))`.execute(db)
-    await sql`CREATE TABLE extensions.gcs_portal_verification (portal_organization_id text)`.execute(db)
-    await sql`CREATE TABLE extensions.gcs_portal_identity (portal_organization_id text)`.execute(db)
+    await sql`CREATE TABLE extensions.gcs_ssc_portal_connector_verification (portal_organization_id text)`.execute(db)
+    await sql`CREATE TABLE extensions.gcs_ssc_portal_connector_identity (portal_organization_id text)`.execute(db)
     expect((await seedHealthCanadaPortalConnector(db, options)).phase).toBe('ready')
     expect((await seedHealthCanadaPortalConnector(db, options)).phase).toBe('ready')
-    expect((await sql<{ count: string }>`SELECT count(*)::text AS count FROM extensions.gcs_portal_organization`.execute(db)).rows[0]?.count).toBe('3')
-    expect((await sql<{ count: string }>`SELECT count(*)::text AS count FROM extensions.gcs_portal_connection`.execute(db)).rows[0]?.count).toBe('0')
-    expect((await sql<{ count: string }>`SELECT count(*)::text AS count FROM extensions.gcs_portal_verification`.execute(db)).rows[0]?.count).toBe('0')
-    expect((await sql<{ count: string }>`SELECT count(*)::text AS count FROM extensions.gcs_portal_identity`.execute(db)).rows[0]?.count).toBe('0')
+    expect((await sql<{ count: string }>`SELECT count(*)::text AS count FROM extensions.gcs_ssc_portal_connector_organization`.execute(db)).rows[0]?.count).toBe('3')
+    expect((await sql<{ count: string }>`SELECT count(*)::text AS count FROM extensions.gcs_ssc_portal_connector_connection`.execute(db)).rows[0]?.count).toBe('0')
+    expect((await sql<{ count: string }>`SELECT count(*)::text AS count FROM extensions.gcs_ssc_portal_connector_verification`.execute(db)).rows[0]?.count).toBe('0')
+    expect((await sql<{ count: string }>`SELECT count(*)::text AS count FROM extensions.gcs_ssc_portal_connector_identity`.execute(db)).rows[0]?.count).toBe('0')
   })
 
   it('accepts a showcase Proponent led by another agency', async () => {
@@ -79,12 +79,12 @@ describe('Health Canada Portal demo seed', () => {
 
 const readyFixture = async () => {
   const db = await fixture()
-  await sql`CREATE TABLE extensions.gcs_portal_connection (
+  await sql`CREATE TABLE extensions.gcs_ssc_portal_connector_connection (
     agency_id bigint PRIMARY KEY, portal_agency_id text, portal_url text, scan_cursor text,
     portal_status_ids jsonb, entity_status_ids jsonb, pull_interval_minutes integer,
     last_pull_at timestamptz, last_pull_error text, pull_lease_until timestamptz, updated_at timestamptz
   )`.execute(db)
-  await sql`CREATE TABLE extensions.gcs_portal_organization (agency_id bigint)`.execute(db)
+  await sql`CREATE TABLE extensions.gcs_ssc_portal_connector_organization (agency_id bigint)`.execute(db)
   await sql`CREATE TABLE extensions.secret_entry (
     id bigserial PRIMARY KEY, extension_key text, owner_type text, owner_id text, secret_key text,
     ciphertext text, iv text, auth_tag text, algorithm text, key_version integer,
@@ -105,7 +105,7 @@ describe('automatic local Portal demo', () => {
     const db = await readyFixture()
     await initializeLocalPortalDemo(db)
     await initializeLocalPortalDemo(db)
-    const connection = await db.selectFrom('extensions.gcs_portal_connection').selectAll().executeTakeFirstOrThrow()
+    const connection = await db.selectFrom('extensions.gcs_ssc_portal_connector_connection').selectAll().executeTakeFirstOrThrow()
     expect(connection.portal_url).toBe('http://localhost:3003/')
     expect(connection.portal_agency_id).toBe('G-NFAFV')
     const credential = await getEncryptedExtensionSecret(db, {
@@ -113,19 +113,19 @@ describe('automatic local Portal demo', () => {
       ownerType: 'agency', ownerId: '11', secretKey: 'portal-key'
     })
     expect(credential).toEqual({ key: options.portalKey })
-    const form = await db.selectFrom('extensions.gcs_portal_form').selectAll().executeTakeFirstOrThrow()
+    const form = await db.selectFrom('extensions.gcs_ssc_portal_connector_form').selectAll().executeTakeFirstOrThrow()
     const definition = designerSurveySchema.parse(form.definition)
     expect(definition.pages).toHaveLength(4)
     expect(new Set(definition.questions.map(question => question.type)).size).toBe(14)
     expect(formPublicationIssues(definition)).toEqual([])
     expect(form.id).toBe(DEMO_APPLICATION_FORM_ID)
     expect(form.id).toMatch(/^V-[A-HJKMNP-Z2-9]{5,}$/)
-    expect(await db.selectFrom('extensions.gcs_portal_operation').selectAll().execute()).toHaveLength(1)
-    await db.updateTable('extensions.gcs_portal_form').set({ revision: 2 }).where('id', '=', form.id).execute()
-    await db.updateTable('extensions.gcs_portal_connection').set({ portal_url: 'http://localhost:4003/' }).execute()
+    expect(await db.selectFrom('extensions.gcs_ssc_portal_connector_operation').selectAll().execute()).toHaveLength(1)
+    await db.updateTable('extensions.gcs_ssc_portal_connector_form').set({ revision: 2 }).where('id', '=', form.id).execute()
+    await db.updateTable('extensions.gcs_ssc_portal_connector_connection').set({ portal_url: 'http://localhost:4003/' }).execute()
     await initializeLocalPortalDemo(db)
-    expect((await db.selectFrom('extensions.gcs_portal_form').select('revision').executeTakeFirstOrThrow()).revision).toBe(2)
-    expect((await db.selectFrom('extensions.gcs_portal_connection').select('portal_url').executeTakeFirstOrThrow()).portal_url).toBe('http://localhost:4003/')
+    expect((await db.selectFrom('extensions.gcs_ssc_portal_connector_form').select('revision').executeTakeFirstOrThrow()).revision).toBe(2)
+    expect((await db.selectFrom('extensions.gcs_ssc_portal_connector_connection').select('portal_url').executeTakeFirstOrThrow()).portal_url).toBe('http://localhost:4003/')
   })
 
   it('retains the queued form while the portal is offline and delivers its full definition on recovery', async () => {
@@ -135,15 +135,15 @@ describe('automatic local Portal demo', () => {
       .mockResolvedValue(Response.json({ survey: { id: 'V-ABCDE', revision: 1 } }))
     vi.stubGlobal('fetch', transport)
     expect((await drainOperations(db, 1)).results[0]?.delivered).toBe(false)
-    expect((await db.selectFrom('extensions.gcs_portal_operation').select('state').executeTakeFirstOrThrow()).state).toBe('pending')
-    await sql`UPDATE extensions.gcs_portal_operation SET next_attempt_at=now()`.execute(db)
+    expect((await db.selectFrom('extensions.gcs_ssc_portal_connector_operation').select('state').executeTakeFirstOrThrow()).state).toBe('pending')
+    await sql`UPDATE extensions.gcs_ssc_portal_connector_operation SET next_attempt_at=now()`.execute(db)
     expect((await drainOperations(db, 1)).results[0]?.delivered).toBe(true)
     expect(String(transport.mock.calls[1]?.[0])).toBe('http://localhost:3003/api/government/surveys')
     const request = JSON.parse(transport.mock.calls[1]?.[1].body as string)
     expect(request.agencyId).toBe('G-NFAFV')
     expect(request.definition.pages).toHaveLength(4)
     expect(request.definition.attachments.enabled).toBe(true)
-    expect((await db.selectFrom('extensions.gcs_portal_form').select(['portal_id', 'portal_revision']).executeTakeFirstOrThrow()))
+    expect((await db.selectFrom('extensions.gcs_ssc_portal_connector_form').select(['portal_id', 'portal_revision']).executeTakeFirstOrThrow()))
       .toEqual({ portal_id: 'V-ABCDE', portal_revision: 1 })
     expect((await drainOperations(db, 1)).results).toEqual([])
   })
@@ -151,10 +151,10 @@ describe('automatic local Portal demo', () => {
   it('replays a committed form with the same key and bytes, then delivers the next saved revision', async () => {
     const db = await readyFixture()
     await initializeLocalPortalDemo(db)
-    const initial = await db.selectFrom('extensions.gcs_portal_form').selectAll().executeTakeFirstOrThrow()
+    const initial = await db.selectFrom('extensions.gcs_ssc_portal_connector_form').selectAll().executeTakeFirstOrThrow()
     const edited = designerSurveySchema.parse(initial.definition)
     edited.title.en = 'Second saved revision'
-    await db.updateTable('extensions.gcs_portal_form').set({ definition: edited, revision: 2 }).execute()
+    await db.updateTable('extensions.gcs_ssc_portal_connector_form').set({ definition: edited, revision: 2 }).execute()
     await enqueueForm(db, '11', initial.id)
     const requests: Array<{ key: string; body: string; url: string }> = []
     const transport = vi.fn(async (url: URL, request: RequestInit) => {
@@ -165,7 +165,7 @@ describe('automatic local Portal demo', () => {
     })
     vi.stubGlobal('fetch', transport)
     expect((await drainOperations(db, 1)).results[0]?.delivered).toBe(false)
-    await sql`UPDATE extensions.gcs_portal_operation SET next_attempt_at=now() WHERE state='pending'`.execute(db)
+    await sql`UPDATE extensions.gcs_ssc_portal_connector_operation SET next_attempt_at=now() WHERE state='pending'`.execute(db)
     expect((await drainOperations(db, 2)).results.map(result => result.delivered)).toEqual([true, true])
     expect(requests[0]).toEqual(requests[1])
     expect(requests[0]!.key).toMatch(/^[0-9a-f-]{36}$/)
@@ -175,25 +175,25 @@ describe('automatic local Portal demo', () => {
     expect(JSON.parse(requests[2]!.body)).toMatchObject({ expectedRevision: 1,
       definition: { title: { en: 'Second saved revision' } } })
     expect(requests[2]!.url).toContain('/surveys/V-ABCDE')
-    expect((await db.selectFrom('extensions.gcs_portal_form').select('portal_revision').executeTakeFirstOrThrow()).portal_revision).toBe(2)
+    expect((await db.selectFrom('extensions.gcs_ssc_portal_connector_form').select('portal_revision').executeTakeFirstOrThrow()).portal_revision).toBe(2)
   })
 
   it('reuses an outer delivery step after its queued mutation recovers', async () => {
     const db = await readyFixture()
     await initializeLocalPortalDemo(db)
-    await db.deleteFrom('extensions.gcs_portal_operation').execute()
+    await db.deleteFrom('extensions.gcs_ssc_portal_connector_operation').execute()
     const transport = vi.fn().mockRejectedValueOnce(new Error('Response lost after commit'))
       .mockImplementation(async () => Response.json({ set: { id: 'S-ABCDE', revision: 1 } }))
     vi.stubGlobal('fetch', transport)
     const connection = { portalUrl: 'http://localhost:3003/', portalAgencyId: 'G-NFAFV', key: options.portalKey }
     const first = queuePortalClient(db, '11', connection, 'agreement-delivery:123')
     await expect(first.createSet({ nameEn: 'Claim set' })).rejects.toThrow('Response lost')
-    await sql`UPDATE extensions.gcs_portal_operation SET next_attempt_at=now()`.execute(db)
+    await sql`UPDATE extensions.gcs_ssc_portal_connector_operation SET next_attempt_at=now()`.execute(db)
     expect((await drainOperations(db, 1)).results[0]?.delivered).toBe(true)
     const retried = queuePortalClient(db, '11', connection, 'agreement-delivery:123')
     expect(await retried.createSet({ nameEn: 'Claim set' })).toEqual({ id: 'S-ABCDE', revision: 1 })
     expect(transport).toHaveBeenCalledTimes(2)
-    expect(await db.selectFrom('extensions.gcs_portal_operation').select('id').execute()).toHaveLength(1)
+    expect(await db.selectFrom('extensions.gcs_ssc_portal_connector_operation').select('id').execute()).toHaveLength(1)
     await queuePortalClient(db, '11', connection, 'agreement-delivery:124').createSet({ nameEn: 'Claim set' })
     expect(transport).toHaveBeenCalledTimes(3)
   })
@@ -204,14 +204,14 @@ describe('automatic local Portal demo', () => {
     const transport = vi.fn()
     vi.stubGlobal('fetch', transport)
     const snapshotWrite = vi.spyOn(UpdateQueryBuilder.prototype, 'executeTakeFirst').mockImplementationOnce(async () => {
-      await sql`UPDATE extensions.gcs_portal_operation SET attempts=attempts+1 WHERE state='leased'`.execute(db)
+      await sql`UPDATE extensions.gcs_ssc_portal_connector_operation SET attempts=attempts+1 WHERE state='leased'`.execute(db)
       return undefined as never
     })
     try {
       expect((await drainOperations(db, 1)).results[0]).toMatchObject({ delivered: false,
         error: 'Portal operation lease expired before delivery.' })
       expect(transport).not.toHaveBeenCalled()
-      const operation = await db.selectFrom('extensions.gcs_portal_operation').selectAll().executeTakeFirstOrThrow()
+      const operation = await db.selectFrom('extensions.gcs_ssc_portal_connector_operation').selectAll().executeTakeFirstOrThrow()
       expect(operation).toMatchObject({ state: 'leased', attempts: 2 })
       expect(operation.body).not.toHaveProperty('request')
     } finally { snapshotWrite.mockRestore() }
@@ -221,13 +221,13 @@ describe('automatic local Portal demo', () => {
     const db = await readyFixture()
     await initializeLocalPortalDemo(db)
     vi.stubGlobal('fetch', vi.fn(async () => {
-      await sql`UPDATE extensions.gcs_portal_operation SET attempts=attempts+1 WHERE state='leased'`.execute(db)
+      await sql`UPDATE extensions.gcs_ssc_portal_connector_operation SET attempts=attempts+1 WHERE state='leased'`.execute(db)
       return Response.json({ survey: { id: 'V-ABCDE', revision: 1 } })
     }))
     expect((await drainOperations(db, 1)).results[0]).toMatchObject({ delivered: false })
-    expect(await db.selectFrom('extensions.gcs_portal_form').select('portal_id').executeTakeFirstOrThrow())
+    expect(await db.selectFrom('extensions.gcs_ssc_portal_connector_form').select('portal_id').executeTakeFirstOrThrow())
       .toEqual({ portal_id: null })
-    expect(await db.selectFrom('extensions.gcs_portal_operation').select(['state', 'attempts']).executeTakeFirstOrThrow())
+    expect(await db.selectFrom('extensions.gcs_ssc_portal_connector_operation').select(['state', 'attempts']).executeTakeFirstOrThrow())
       .toEqual({ state: 'leased', attempts: 2 })
   })
 
@@ -243,7 +243,7 @@ describe('automatic local Portal demo', () => {
     await initializeLocalPortalDemo(db)
     expect((await seedHealthCanadaPortalConnector(db, { ...options, organizations: [], requireEnabled: true })).phase).toBe('disabled')
     expect((await sql<{ enabled: boolean }>`SELECT enabled FROM extensions.agency_enablement`.execute(db)).rows[0]?.enabled).toBe(false)
-    expect(await db.selectFrom('extensions.gcs_portal_form').selectAll().execute()).toEqual([])
-    expect(await db.selectFrom('extensions.gcs_portal_connection').selectAll().execute()).toEqual([])
+    expect(await db.selectFrom('extensions.gcs_ssc_portal_connector_form').selectAll().execute()).toEqual([])
+    expect(await db.selectFrom('extensions.gcs_ssc_portal_connector_connection').selectAll().execute()).toEqual([])
   })
 })

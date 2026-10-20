@@ -40,9 +40,9 @@ describe('agency-scoped frozen attachment route', () => {
   let engine: PGlite; let db: Kysely<unknown>
   beforeEach(async () => {
     engine = new PGlite(); db = new Kysely({ dialect: new KyselyPGlite(engine).dialect })
-    await engine.exec(`CREATE SCHEMA extensions; CREATE TABLE extensions.gcs_portal_receipt(id bigserial,agency_id text,submission_id text,source_export jsonb,kind text,state text); CREATE TABLE extensions.gcs_portal_connection(agency_id text,portal_url text,portal_agency_id text);`)
-    await db.insertInto('extensions.gcs_portal_receipt' as never).values({ agency_id: '1', submission_id: 'K-ABCDE', source_export: { attachments: [metadata, { ...metadata, id: 'X-NOTREADY', status: 'pending' }] }, kind: 'other_form', state: 'received' } as never).execute()
-    await db.insertInto('extensions.gcs_portal_connection' as never).values({ agency_id: '1', portal_url: connection.portalUrl, portal_agency_id: connection.portalAgencyId } as never).execute()
+    await engine.exec(`CREATE SCHEMA extensions; CREATE TABLE extensions.gcs_ssc_portal_connector_receipt(id bigserial,agency_id text,submission_id text,source_export jsonb,kind text,state text); CREATE TABLE extensions.gcs_ssc_portal_connector_connection(agency_id text,portal_url text,portal_agency_id text);`)
+    await db.insertInto('extensions.gcs_ssc_portal_connector_receipt' as never).values({ agency_id: '1', submission_id: 'K-ABCDE', source_export: { attachments: [metadata, { ...metadata, id: 'X-NOTREADY', status: 'pending' }] }, kind: 'other_form', state: 'received' } as never).execute()
+    await db.insertInto('extensions.gcs_ssc_portal_connector_connection' as never).values({ agency_id: '1', portal_url: connection.portalUrl, portal_agency_id: connection.portalAgencyId } as never).execute()
   })
   afterEach(async () => { await db.destroy() })
   const context = (agencyId = '1', attachmentId = metadata.id) => ({ db, params: { agencyId, receiptId: '1', attachmentId } })

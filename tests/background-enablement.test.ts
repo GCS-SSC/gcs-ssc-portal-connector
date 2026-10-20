@@ -45,9 +45,9 @@ describe('disabled Agency background work', () => {
       expect(await drainOutcomeOutbox(db as never, 1)).toEqual({ results: [] })
 
       expect(queries).toHaveLength(3)
-      expectEnabledAgencyLease(queries[0]!, 'gcs_portal_connection')
-      expectEnabledAgencyLease(queries[1]!, 'gcs_portal_outbox')
-      expectEnabledAgencyLease(queries[2]!, 'gcs_portal_outcome_outbox')
+      expectEnabledAgencyLease(queries[0]!, 'gcs_ssc_portal_connector_connection')
+      expectEnabledAgencyLease(queries[1]!, 'gcs_ssc_portal_connector_outbox')
+      expectEnabledAgencyLease(queries[2]!, 'gcs_ssc_portal_connector_outcome_outbox')
       expect(transport).not.toHaveBeenCalled()
     } finally {
       await db.destroy()

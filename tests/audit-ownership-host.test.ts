@@ -13,17 +13,17 @@ const fixture = await import(pathToFileURL(resolve(hostRoot, 'tooling/gcs-ssc/te
 
 // These expected audiences are authored independently of extension.config.ts.
 const concreteRows = [
-  { table: 'extensions.gcs_portal_connection', row: { id: '1001', agency_id: '11' }, agencies: ['11'] },
-  { table: 'extensions.gcs_portal_receipt', row: { id: '1002', agency_id: '22' }, agencies: ['22'] },
-  { table: 'extensions.gcs_portal_publication', row: { id: '1003', agency_id: '11' }, agencies: ['11'] },
-  { table: 'extensions.gcs_portal_identity', row: { id: '1004', agency_id: '22' }, agencies: ['22'] },
-  { table: 'extensions.gcs_portal_organization', row: { id: '1008', agency_id: '11', portal_organization_id: 'N-ABCDE' }, agencies: ['11'] },
-  { table: 'extensions.gcs_portal_verification', row: { id: '1009', portal_organization_id: 'N-ABCDE', proponent_id: '44' }, agencies: [] },
-  { table: 'extensions.gcs_portal_outbox', row: { id: '1005', agency_id: '11' }, agencies: ['11'] },
-  { table: 'extensions.gcs_portal_inbox', row: { id: '1006', agency_id: '22' }, agencies: ['22'] },
-  { table: 'extensions.gcs_portal_outcome_outbox', row: { id: '1007', agency_id: '11' }, agencies: ['11'] },
-  { table: 'extensions.gcs_portal_form', row: { id: 'V-ABCDE', agency_id: '22' }, agencies: ['22'] },
-  { table: 'extensions.gcs_portal_operation', row: { id: '1010', agency_id: '11' }, agencies: ['11'] }
+  { table: 'extensions.gcs_ssc_portal_connector_connection', row: { id: '1001', agency_id: '11' }, agencies: ['11'] },
+  { table: 'extensions.gcs_ssc_portal_connector_receipt', row: { id: '1002', agency_id: '22' }, agencies: ['22'] },
+  { table: 'extensions.gcs_ssc_portal_connector_publication', row: { id: '1003', agency_id: '11' }, agencies: ['11'] },
+  { table: 'extensions.gcs_ssc_portal_connector_identity', row: { id: '1004', agency_id: '22' }, agencies: ['22'] },
+  { table: 'extensions.gcs_ssc_portal_connector_organization', row: { id: '1008', agency_id: '11', portal_organization_id: 'N-ABCDE' }, agencies: ['11'] },
+  { table: 'extensions.gcs_ssc_portal_connector_verification', row: { id: '1009', portal_organization_id: 'N-ABCDE', proponent_id: '44' }, agencies: [] },
+  { table: 'extensions.gcs_ssc_portal_connector_outbox', row: { id: '1005', agency_id: '11' }, agencies: ['11'] },
+  { table: 'extensions.gcs_ssc_portal_connector_inbox', row: { id: '1006', agency_id: '22' }, agencies: ['22'] },
+  { table: 'extensions.gcs_ssc_portal_connector_outcome_outbox', row: { id: '1007', agency_id: '11' }, agencies: ['11'] },
+  { table: 'extensions.gcs_ssc_portal_connector_form', row: { id: 'V-ABCDE', agency_id: '22' }, agencies: ['22'] },
+  { table: 'extensions.gcs_ssc_portal_connector_operation', row: { id: '1010', agency_id: '11' }, agencies: ['11'] }
 ]
 
 fixture.verifyExtensionAuditContract(extension, concreteRows)
@@ -34,7 +34,7 @@ describe('portal audit missing owner', () => {
     const { createAuditOwnershipResolver } = await import(pathToFileURL(resolve(hostRoot, 'server/utils/audit-ownership.ts')).href)
     const registry = mergeExtensionAuditOwnership([extension])
     const resolver = createAuditOwnershipResolver({ registry, actorAgencyIds: async () => ['11'], load: async () => [] })
-    expect(await resolver.resolveRow('extensions.gcs_portal_receipt', { id: '9999', agency_id: '99' }))
+    expect(await resolver.resolveRow('extensions.gcs_ssc_portal_connector_receipt', { id: '9999', agency_id: '99' }))
       .toMatchObject({ type: 'unresolved' })
   })
 })

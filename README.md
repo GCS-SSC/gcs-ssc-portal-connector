@@ -62,7 +62,9 @@ Intake detail edits carry the loaded call revision. A concurrent edit returns a 
 
 GCS Funding Opportunities have a **Portal forms** tab. Staff with the opportunity's Transfer Payment Contributor access can create up to ten forms under the opportunity, reorder or remove them while unpublished, and publish once its agency status is active and every form passes the bilingual readiness check. The connector creates or reconciles a portal funding call with the GCS opportunity ID as its foreign identity. Portal applicants complete every attached form in one application. Publication pins each saved revision; withdraw before changing forms. Viewers can read the attached forms. Existing portal-owned Intakes remain separate from GCS Funding Opportunities.
 
-Run `bun run typecheck` and `bun run test:unit` in this package. The portal and host run their own checks.
+Run `bun run typecheck` and `bun run test:coverage` in this package. Coverage includes server code, shared helpers, components, and translations, with an 80% minimum for each metric. Use `bun run test:unit` for tests without coverage. The portal and host run their own checks.
+
+To check the fresh migration catalog on PostgreSQL, set `PORTAL_NAMING_DATABASE_URL` to an empty disposable database and run `bun run test:unit -- tests/database-naming.test.ts`. The test rolls back its schema and fixture rows after each run. Without that variable, the same test uses PGlite.
 
 The extension and portal each include the same compiled survey provider under `vendor/survey` so workspace and production installs are self-contained. Its editable source remains in `gcs-ssc-survey`; rebuild there and refresh both vendor copies after a provider change. Replace the copies with a pinned Git release when version 3 is published.
 

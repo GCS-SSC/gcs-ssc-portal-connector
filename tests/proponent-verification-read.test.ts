@@ -10,20 +10,20 @@ describe('Proponent verification history', () => {
     try {
       await sql`CREATE SCHEMA extensions`.execute(db)
       await sql`CREATE TABLE "user" (id bigint PRIMARY KEY, name text NOT NULL, email text NOT NULL)`.execute(db)
-      await sql`CREATE TABLE extensions.gcs_portal_verification (
+      await sql`CREATE TABLE extensions.gcs_ssc_portal_connector_verification (
         portal_organization_id text PRIMARY KEY, proponent_id bigint NOT NULL,
         origin_agency_id bigint NOT NULL, verification_note text,
         verified_by_user_id text, verified_at timestamptz NOT NULL, portal_active boolean NOT NULL
       )`.execute(db)
-      await sql`CREATE TABLE extensions.gcs_portal_organization (
+      await sql`CREATE TABLE extensions.gcs_ssc_portal_connector_organization (
         portal_organization_id text NOT NULL, agency_id bigint NOT NULL,
         name text NOT NULL, synced_at timestamptz NOT NULL
       )`.execute(db)
       await sql`INSERT INTO "user" (id, name, email) VALUES (9, 'Alex Manager', 'alex@example.com')`.execute(db)
-      await sql`INSERT INTO extensions.gcs_portal_organization VALUES
+      await sql`INSERT INTO extensions.gcs_ssc_portal_connector_organization VALUES
         ('N-ABCDE', 1, 'Current organization', '2026-09-26'),
         ('N-FGHIJ', 2, 'Previous organization', '2025-09-26')`.execute(db)
-      await sql`INSERT INTO extensions.gcs_portal_verification VALUES
+      await sql`INSERT INTO extensions.gcs_ssc_portal_connector_verification VALUES
         ('N-ABCDE', 7, 1, 'Checked signed records.', '9', '2026-09-26T15:30:00Z', true),
         ('N-FGHIJ', 7, 2, 'Historical link.', null, '2025-09-26T15:30:00Z', false)`.execute(db)
       const result = await listProponentVerifications({ db, params: { proponentId: '7' } } as unknown as GcsExtensionRouteContext)

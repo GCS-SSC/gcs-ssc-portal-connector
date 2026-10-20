@@ -58,7 +58,7 @@ const checkPortalStructure = async (portalUrl: string, portalAgencyId: string, k
 export const getConnection = async (context: GcsExtensionRouteContext) => {
   const agencyId = agencyIdFromContext(context)
   const db = asConnectorDb(context.db)
-  const row = await db.selectFrom('extensions.gcs_portal_connection').selectAll()
+  const row = await db.selectFrom('extensions.gcs_ssc_portal_connector_connection').selectAll()
     .where('agency_id', '=', agencyId).executeTakeFirst()
   if (!row) return { connection: null }
   const credential = await getEncryptedExtensionSecret(db, secretOptions(agencyId))
@@ -76,13 +76,13 @@ export const getConnection = async (context: GcsExtensionRouteContext) => {
 export const saveConnection = async (context: GcsExtensionRouteContext) => {
   const input = connectionInput.parse(await context.readBody())
   const agencyId = agencyIdFromContext(context)
-  const existingConnection = await asConnectorDb(context.db).selectFrom('extensions.gcs_portal_connection')
+  const existingConnection = await asConnectorDb(context.db).selectFrom('extensions.gcs_ssc_portal_connector_connection')
     .select('agency_id').where('agency_id', '=', agencyId).executeTakeFirst()
   if (!existingConnection && !input.portalKey) throw new Error('A portal key is required for a new connection.')
   const key = input.portalKey ?? await readPortalCredential(context, agencyId)
   await checkPortalStructure(input.portalUrl, input.portalAgencyId, key)
   await authorizedWrite(context, async (transaction) => {
-    const existing = await transaction.selectFrom('extensions.gcs_portal_connection')
+    const existing = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_connection')
       .select(['agency_id', 'portal_url', 'portal_agency_id'])
       .where('agency_id', '=', agencyId).forUpdate().executeTakeFirst()
     if (!existing && !input.portalKey) throw new Error('A portal key is required for a new connection.')
@@ -91,24 +91,24 @@ export const saveConnection = async (context: GcsExtensionRouteContext) => {
     })
     if (existing) {
       if (existing.portal_url !== input.portalUrl || existing.portal_agency_id !== input.portalAgencyId) {
-        const linked = await transaction.selectFrom('extensions.gcs_portal_identity').select('agency_id')
+        const linked = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_identity').select('agency_id')
           .where('agency_id', '=', agencyId).executeTakeFirst()
         if (linked) throw new Error('A connected agency with verified organizations cannot switch portals. Rotate its key or migrate the links explicitly.')
-        const pending = await transaction.selectFrom('extensions.gcs_portal_operation').select('id')
+        const pending = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_operation').select('id')
           .where('agency_id', '=', agencyId).where('state', '!=', 'delivered').executeTakeFirst()
         if (pending) throw new Error('Deliver pending Portal operations before changing the Portal URL or agency code.')
       }
-      await transaction.updateTable('extensions.gcs_portal_connection')
+      await transaction.updateTable('extensions.gcs_ssc_portal_connector_connection')
         .set({ portal_url: input.portalUrl, portal_agency_id: input.portalAgencyId,
           scan_cursor: null, revision: (eb) => eb('revision', '+', 1), updated_at: new Date() })
         .where('agency_id', '=', agencyId).execute()
     } else {
-      await transaction.insertInto('extensions.gcs_portal_connection').values({
+      await transaction.insertInto('extensions.gcs_ssc_portal_connector_connection').values({
         agency_id: agencyId, portal_url: input.portalUrl,
         portal_agency_id: input.portalAgencyId, updated_at: new Date()
       }).execute()
     }
-    await transaction.updateTable('extensions.gcs_portal_operation')
+    await transaction.updateTable('extensions.gcs_ssc_portal_connector_operation')
       .set({ next_attempt_at: new Date() })
       .where('agency_id', '=', agencyId).where('kind', '=', 'form').where('state', '=', 'pending').execute()
   })

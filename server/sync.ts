@@ -10,7 +10,7 @@ import { queuePortalClient } from './operations.ts'
 
 const loadConnection = async (context: GcsExtensionRouteContext) => {
   const agencyId = agencyIdFromContext(context)
-  const row = await asConnectorDb(context.db).selectFrom('extensions.gcs_portal_connection').selectAll()
+  const row = await asConnectorDb(context.db).selectFrom('extensions.gcs_ssc_portal_connector_connection').selectAll()
     .where('agency_id', '=', agencyId).executeTakeFirst()
   if (!row) throw new Error('Connect an organization portal before synchronizing.')
   return {
@@ -54,14 +54,14 @@ const importClaim = async (
 ): Promise<string> => {
   const item = claimItemSchema.parse(submission.items.find((candidate) => candidate.itemSubmissionId === update.itemSubmissionId))
   return authorizedWrite(context, async (transaction) => {
-    const identity = await transaction.selectFrom('extensions.gcs_portal_identity').select('proponent_id')
+    const identity = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_identity').select('proponent_id')
       .where('agency_id', '=', agencyId).where('portal_organization_id', '=', submission.organizationId)
       .executeTakeFirst()
     const proponentId = identity?.proponent_id
     if (!proponentId || submission.agreementReference?.externalApplicantRecipientId !== proponentId
       || item.claim.applicantRecipientId !== proponentId)
       throw new Error('The portal organization is not verified for this GCS recipient.')
-    const existing = await transaction.selectFrom('extensions.gcs_portal_receipt').selectAll()
+    const existing = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_receipt').selectAll()
       .where('agency_id', '=', agencyId)
       .where('item_submission_id', '=', item.itemSubmissionId).forUpdate().executeTakeFirst()
     if (existing) {
@@ -95,7 +95,7 @@ const importClaim = async (
       }))
     })
     if (result.status !== 'created') throw new Error(`Claim cannot be imported: ${result.status}.`)
-    await transaction.insertInto('extensions.gcs_portal_receipt').values({
+    await transaction.insertInto('extensions.gcs_ssc_portal_connector_receipt').values({
       agency_id: agencyId,
       event_id: update.eventId,
       submission_id: submission.submissionId,
@@ -120,11 +120,11 @@ const importForecast = async (
   const streamId = submission.agreementReference?.externalStreamId
   if (!proponentId || !streamId) throw new Error('The organization has no verified GCS agreement and proponent mapping.')
   return authorizedWrite(context, async (transaction) => {
-    const identity = await transaction.selectFrom('extensions.gcs_portal_identity').select('proponent_id')
+    const identity = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_identity').select('proponent_id')
       .where('agency_id', '=', agencyId).where('portal_organization_id', '=', submission.organizationId)
       .executeTakeFirst()
     if (identity?.proponent_id !== proponentId) throw new Error('The portal organization is not verified for this GCS recipient.')
-    const existing = await transaction.selectFrom('extensions.gcs_portal_receipt').selectAll()
+    const existing = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_receipt').selectAll()
       .where('agency_id', '=', agencyId)
       .where('item_submission_id', '=', item.itemSubmissionId).forUpdate().executeTakeFirst()
     if (existing) {
@@ -150,7 +150,7 @@ const importForecast = async (
       }))
     })
     if (result.status !== 'created') throw new Error(`Forecast cannot be imported: ${result.status}.`)
-    await transaction.insertInto('extensions.gcs_portal_receipt').values({
+    await transaction.insertInto('extensions.gcs_ssc_portal_connector_receipt').values({
       agency_id: agencyId,
       event_id: update.eventId,
       submission_id: submission.submissionId,
@@ -171,10 +171,10 @@ const retainUnsupported = async (
   update: PortalUpdate, evidence: unknown, kind: string
 ) => authorizedWrite(context, async (transaction) => {
   const itemId = update.itemSubmissionId ?? update.detailId ?? `event:${update.eventId}`
-  const existing = await transaction.selectFrom('extensions.gcs_portal_receipt').select('id')
+  const existing = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_receipt').select('id')
     .where('agency_id', '=', agencyId).where('event_id', '=', update.eventId).executeTakeFirst()
   if (existing) return
-  await transaction.insertInto('extensions.gcs_portal_receipt').values({
+  await transaction.insertInto('extensions.gcs_ssc_portal_connector_receipt').values({
     agency_id: agencyId, event_id: update.eventId, submission_id: update.submissionId,
     item_submission_id: itemId, kind,
     source_export: sql`${JSON.stringify(evidence)}::jsonb`,
@@ -194,7 +194,7 @@ export const syncPortal = async (context: GcsExtensionRouteContext) => {
     const batch = await client.updates(after)
     hasMore = batch.nextCursor !== null
     for (const update of batch.updates) {
-      await asConnectorDb(context.db).insertInto('extensions.gcs_portal_inbox').values({
+      await asConnectorDb(context.db).insertInto('extensions.gcs_ssc_portal_connector_inbox').values({
         agency_id: agencyId, event_id: update.eventId, kind: update.kind,
         submission_id: update.submissionId, item_submission_id: update.itemSubmissionId,
         created_at: new Date(update.createdAt), last_error: null
@@ -212,7 +212,7 @@ export const syncPortal = async (context: GcsExtensionRouteContext) => {
           const result = await importSurvey(context, agencyId, update, submission, client, sourceSystem)
           await client.publishItemReference(update.submissionId, item.itemSubmissionId, result.entityId)
           await client.consume(update.eventId, result.entityId)
-          await asConnectorDb(context.db).updateTable('extensions.gcs_portal_inbox')
+          await asConnectorDb(context.db).updateTable('extensions.gcs_ssc_portal_connector_inbox')
             .set({ last_error: null }).where('agency_id', '=', agencyId).where('event_id', '=', update.eventId).execute()
           imported.push({ itemSubmissionId: item.itemSubmissionId, ...result })
           continue
@@ -232,13 +232,13 @@ export const syncPortal = async (context: GcsExtensionRouteContext) => {
           : await importForecast(context, agencyId, update, submission)
         await client.publishItemReference(update.submissionId, item.itemSubmissionId, entityId)
         await client.consume(update.eventId, entityId)
-        await asConnectorDb(context.db).updateTable('extensions.gcs_portal_inbox')
+        await asConnectorDb(context.db).updateTable('extensions.gcs_ssc_portal_connector_inbox')
           .set({ last_error: null }).where('agency_id', '=', agencyId)
           .where('event_id', '=', update.eventId).execute()
         imported.push({ itemSubmissionId: item.itemSubmissionId, kind: item.kind, entityId })
       } catch (error) {
         const reason = error instanceof Error ? error.message : 'Import failed.'
-        await asConnectorDb(context.db).updateTable('extensions.gcs_portal_inbox')
+        await asConnectorDb(context.db).updateTable('extensions.gcs_ssc_portal_connector_inbox')
           .set({ last_error: reason.slice(0, 500) }).where('agency_id', '=', agencyId)
           .where('event_id', '=', update.eventId).execute()
         pending.push({ eventId: update.eventId, reason })
@@ -248,7 +248,7 @@ export const syncPortal = async (context: GcsExtensionRouteContext) => {
     after = batch.nextCursor
   }
   await authorizedWrite(context, async (transaction) => {
-    await transaction.updateTable('extensions.gcs_portal_connection')
+    await transaction.updateTable('extensions.gcs_ssc_portal_connector_connection')
       .set({ scan_cursor: hasMore ? after ?? null : null })
       .where('agency_id', '=', agencyId).execute()
   })
@@ -257,7 +257,7 @@ export const syncPortal = async (context: GcsExtensionRouteContext) => {
 
 export const listReceipts = async (context: GcsExtensionRouteContext) => {
   const agencyId = agencyIdFromContext(context)
-  const rows = await asConnectorDb(context.db).selectFrom('extensions.gcs_portal_receipt')
+  const rows = await asConnectorDb(context.db).selectFrom('extensions.gcs_ssc_portal_connector_receipt')
     .select(['id', 'event_id', 'submission_id', 'item_submission_id', 'kind', 'state', 'gcs_entity_id', 'created_at'])
     .select(sql<string | null>`source_export->>'organizationId'`.as('organization_id'))
     .select(sql<unknown>`(SELECT item->'definition'->'title' FROM jsonb_array_elements(source_export->'items') item
@@ -272,7 +272,7 @@ export const getReceipt = async (context: GcsExtensionRouteContext) => {
   if (!receiptId || !/^[1-9]\d{0,18}$/.test(receiptId) || BigInt(receiptId) > BigInt('9223372036854775807'))
     throw createGcsExtensionUserError({ code: 'GCS_PORTAL_RECEIPT_INVALID_ID', statusCode: 400,
       message: { en: 'Choose a valid Portal delivery.', fr: 'Choisissez une livraison au portail valide.' } })
-  const receipt = await asConnectorDb(context.db).selectFrom('extensions.gcs_portal_receipt')
+  const receipt = await asConnectorDb(context.db).selectFrom('extensions.gcs_ssc_portal_connector_receipt')
     .select(['id', 'submission_id', 'source_export', 'kind', 'state']).where('agency_id', '=', agencyId)
     .where('id', '=', receiptId).executeTakeFirst()
   if (!receipt) throw createGcsExtensionUserError({ code: 'GCS_PORTAL_RECEIPT_NOT_FOUND', statusCode: 404,

@@ -4,7 +4,7 @@ import { defineGcsExtensionMigration } from '@gcs-ssc/extensions/server'
 export default defineGcsExtensionMigration({
   up: async (db) => {
     await sql`
-      CREATE TABLE extensions.gcs_portal_inbox (
+      CREATE TABLE extensions.gcs_ssc_portal_connector_inbox (
         agency_id bigint NOT NULL REFERENCES "Agency_Profile"(id),
         event_id text NOT NULL,
         kind text NOT NULL,
@@ -17,5 +17,5 @@ export default defineGcsExtensionMigration({
       )
     `.execute(db)
   },
-  down: async (db) => { await sql`DROP TABLE extensions.gcs_portal_inbox`.execute(db) }
+  down: async (db) => { await sql`DROP TABLE extensions.gcs_ssc_portal_connector_inbox`.execute(db) }
 })

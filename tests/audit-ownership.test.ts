@@ -4,17 +4,17 @@ import { describe, expect, it } from 'vitest'
 import extension from '../extension.config.ts'
 
 const expectedOwnedTables = [
-  'gcs_portal_connection',
-  'gcs_portal_receipt',
-  'gcs_portal_publication',
-  'gcs_portal_identity',
-  'gcs_portal_organization',
-  'gcs_portal_verification',
-  'gcs_portal_outbox',
-  'gcs_portal_inbox',
-  'gcs_portal_outcome_outbox',
-  'gcs_portal_form',
-  'gcs_portal_operation'
+  'gcs_ssc_portal_connector_connection',
+  'gcs_ssc_portal_connector_receipt',
+  'gcs_ssc_portal_connector_publication',
+  'gcs_ssc_portal_connector_identity',
+  'gcs_ssc_portal_connector_organization',
+  'gcs_ssc_portal_connector_verification',
+  'gcs_ssc_portal_connector_outbox',
+  'gcs_ssc_portal_connector_inbox',
+  'gcs_ssc_portal_connector_outcome_outbox',
+  'gcs_ssc_portal_connector_form',
+  'gcs_ssc_portal_connector_operation'
 ].map(table => `extensions.${table}`).sort()
 
 describe('portal connector audit ownership', () => {
@@ -29,7 +29,7 @@ describe('portal connector audit ownership', () => {
     expect(created).toEqual(expectedOwnedTables)
     expect(extension.auditOwnership?.map(declaration => declaration.table).sort()).toEqual(expectedOwnedTables)
     for (const declaration of extension.auditOwnership ?? []) expect(declaration.owner).toEqual(
-      declaration.table === 'extensions.gcs_portal_verification'
+      declaration.table === 'extensions.gcs_ssc_portal_connector_verification'
         ? { kind: 'global', reason: 'A verified Portal organization maps to one GCS Proponent across all agencies.' }
         : { kind: 'owner', owner: 'agency', column: 'agency_id' }
     )

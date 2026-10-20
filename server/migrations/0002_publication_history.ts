@@ -4,7 +4,7 @@ import { defineGcsExtensionMigration } from '@gcs-ssc/extensions/server'
 export default defineGcsExtensionMigration({
   up: async (db) => {
     await sql`
-      CREATE TABLE extensions.gcs_portal_publication (
+      CREATE TABLE extensions.gcs_ssc_portal_connector_publication (
         id bigserial PRIMARY KEY,
         agency_id bigint NOT NULL REFERENCES "Agency_Profile"(id),
         gcs_agreement_id bigint NOT NULL REFERENCES "Funding_Case_Agreement_Profile"(id),
@@ -14,9 +14,9 @@ export default defineGcsExtensionMigration({
         portal_set_ids jsonb NOT NULL,
         source_digest text NOT NULL,
         published_at timestamptz NOT NULL DEFAULT now(),
-        UNIQUE (agency_id, gcs_agreement_id, portal_organization_id, source_digest)
+        CONSTRAINT gcs_ssc_portal_connector_publication_source_key UNIQUE (agency_id, gcs_agreement_id, portal_organization_id, source_digest)
       )
     `.execute(db)
   },
-  down: async (db) => { await sql`DROP TABLE extensions.gcs_portal_publication`.execute(db) }
+  down: async (db) => { await sql`DROP TABLE extensions.gcs_ssc_portal_connector_publication`.execute(db) }
 })

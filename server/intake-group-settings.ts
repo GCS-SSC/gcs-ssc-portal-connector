@@ -21,7 +21,7 @@ export const getIntakeGroupSettings = async (context: GcsExtensionRouteContext) 
     FROM "Common_Group" group_row WHERE group_row.egcs_cn_agency=${agencyId}::bigint AND group_row._deleted=false
       AND EXISTS (SELECT 1 FROM "Common_Group_Member" member_row
         JOIN "Common_User" common_user ON common_user.id=member_row.egcs_cn_user
-        JOIN "user" auth_user ON auth_user.id=common_user.egcs_cn_auth_user_id
+        JOIN "user" auth_user ON auth_user.id=common_user.egcs_cn_authuserid
         WHERE member_row.egcs_cn_group=group_row.id AND member_row._deleted=false
           AND common_user._deleted=false AND auth_user._deleted=false)
     ORDER BY group_row.egcs_cn_name_en, group_row.id
@@ -56,7 +56,7 @@ export const saveIntakeGroupSettings = async (context: GcsExtensionRouteContext)
       const member = (await sql<{ id: string }>`SELECT member_row.id::text
         FROM "Common_Group_Member" member_row
         JOIN "Common_User" common_user ON common_user.id=member_row.egcs_cn_user
-        JOIN "user" auth_user ON auth_user.id=common_user.egcs_cn_auth_user_id
+        JOIN "user" auth_user ON auth_user.id=common_user.egcs_cn_authuserid
         WHERE member_row.egcs_cn_group=${intakeGroupId}::bigint AND member_row._deleted=false
           AND common_user._deleted=false AND auth_user._deleted=false
         ORDER BY member_row.id LIMIT 1 FOR UPDATE OF member_row

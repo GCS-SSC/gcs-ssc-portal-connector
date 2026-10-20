@@ -25,12 +25,12 @@ export const publishAgreement = async (context: GcsExtensionRouteContext) => {
   const input = publicationInput.parse(await context.readBody())
   const agencyId = agencyIdFromContext(context)
   await authorizedWrite(context, async (transaction) => {
-    const identity = await transaction.selectFrom('extensions.gcs_portal_identity').select('proponent_id')
+    const identity = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_identity').select('proponent_id')
       .where('agency_id', '=', agencyId).where('portal_organization_id', '=', input.portalOrganizationId)
       .executeTakeFirst()
     if (!identity || identity.proponent_id !== input.proponentId)
       throw new Error('Verify the portal organization and recipient before publishing.')
-    const activeLink = await transaction.selectFrom('extensions.gcs_portal_verification')
+    const activeLink = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_verification')
       .select('portal_organization_id').where('portal_organization_id', '=', input.portalOrganizationId)
       .where('proponent_id', '=', input.proponentId).where('portal_active', '=', true).executeTakeFirst()
     if (!activeLink) throw new Error('The linked Portal organization is inactive.')
@@ -46,11 +46,11 @@ export const publishAgreement = async (context: GcsExtensionRouteContext) => {
 export const publishAgreementCore = async (
   db: ConnectorDb, agencyId: string, input: z.infer<typeof publicationInput>, deliveryScope?: string
 ) => {
-  const activeLink = await db.selectFrom('extensions.gcs_portal_verification')
+  const activeLink = await db.selectFrom('extensions.gcs_ssc_portal_connector_verification')
     .select('portal_organization_id').where('portal_organization_id', '=', input.portalOrganizationId)
     .where('proponent_id', '=', input.proponentId).where('portal_active', '=', true).executeTakeFirst()
   if (!activeLink) throw new Error('The linked Portal organization is inactive.')
-  const connection = await db.selectFrom('extensions.gcs_portal_connection').selectAll()
+  const connection = await db.selectFrom('extensions.gcs_ssc_portal_connector_connection').selectAll()
     .where('agency_id', '=', agencyId).executeTakeFirst()
   if (!connection) throw new Error('Connect an organization portal before publishing.')
   const source = await projectAgreement(db, agencyId, input.agreementId, input.proponentId)
@@ -176,7 +176,7 @@ export const publishAgreementCore = async (
     publishedSetIds.push(set.id)
   }
   await db.transaction().execute(async (transaction) => {
-    await transaction.insertInto('extensions.gcs_portal_publication').values({
+    await transaction.insertInto('extensions.gcs_ssc_portal_connector_publication').values({
       agency_id: agencyId,
       gcs_agreement_id: input.agreementId,
       portal_organization_id: input.portalOrganizationId,

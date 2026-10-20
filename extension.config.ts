@@ -49,17 +49,17 @@ export default defineGcsExtension({
   },
   nitroPlugin: './server/plugins/outbox.ts',
   auditOwnership: defineGcsAuditOwnership([
-    { table: 'extensions.gcs_portal_connection', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
-    { table: 'extensions.gcs_portal_receipt', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
-    { table: 'extensions.gcs_portal_publication', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
-    { table: 'extensions.gcs_portal_identity', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
-    { table: 'extensions.gcs_portal_organization', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
-    { table: 'extensions.gcs_portal_verification', owner: { kind: 'global', reason: 'A verified Portal organization maps to one GCS Proponent across all agencies.' } },
-    { table: 'extensions.gcs_portal_outbox', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
-    { table: 'extensions.gcs_portal_inbox', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
-    { table: 'extensions.gcs_portal_outcome_outbox', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
-    { table: 'extensions.gcs_portal_form', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
-    { table: 'extensions.gcs_portal_operation', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } }
+    { table: 'extensions.gcs_ssc_portal_connector_connection', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
+    { table: 'extensions.gcs_ssc_portal_connector_receipt', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
+    { table: 'extensions.gcs_ssc_portal_connector_publication', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
+    { table: 'extensions.gcs_ssc_portal_connector_identity', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
+    { table: 'extensions.gcs_ssc_portal_connector_organization', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
+    { table: 'extensions.gcs_ssc_portal_connector_verification', owner: { kind: 'global', reason: 'A verified Portal organization maps to one GCS Proponent across all agencies.' } },
+    { table: 'extensions.gcs_ssc_portal_connector_outbox', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
+    { table: 'extensions.gcs_ssc_portal_connector_inbox', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
+    { table: 'extensions.gcs_ssc_portal_connector_outcome_outbox', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
+    { table: 'extensions.gcs_ssc_portal_connector_form', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } },
+    { table: 'extensions.gcs_ssc_portal_connector_operation', owner: { kind: 'owner', owner: 'agency', column: 'agency_id' } }
   ]),
   migrations: [
     { path: './server/migrations/0001_portal_connector.ts' },

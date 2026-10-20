@@ -20,9 +20,9 @@ it('retains a rejected call update without blocking later portal operations', as
     await sql`CREATE TABLE extensions.agency_enablement (
       agency_id bigint, extension_key text, enabled boolean, _deleted boolean)`.execute(db)
     await sql`INSERT INTO extensions.agency_enablement VALUES (1, 'gcs-ssc-portal-connector', true, false)`.execute(db)
-    await sql`CREATE TABLE extensions.gcs_portal_connection (
+    await sql`CREATE TABLE extensions.gcs_ssc_portal_connector_connection (
       agency_id bigint PRIMARY KEY, portal_url text, portal_agency_id text)`.execute(db)
-    await sql`INSERT INTO extensions.gcs_portal_connection VALUES (1, 'https://portal.example/', 'G-ABCDE')`.execute(db)
+    await sql`INSERT INTO extensions.gcs_ssc_portal_connector_connection VALUES (1, 'https://portal.example/', 'G-ABCDE')`.execute(db)
     await migration0010.up(db)
     await migration0011.up(db)
     const transport = vi.fn(async () => transport.mock.calls.length === 1
@@ -34,10 +34,10 @@ it('retains a rejected call update without blocking later portal operations', as
     })
     await expect(client.updateCall('D-ABCDE', 1, { nameEn: 'A' }))
       .rejects.toBeInstanceOf(PortalRequestError)
-    expect((await sql<{ state: string }>`SELECT state FROM extensions.gcs_portal_operation ORDER BY id`.execute(db)).rows)
+    expect((await sql<{ state: string }>`SELECT state FROM extensions.gcs_ssc_portal_connector_operation ORDER BY id`.execute(db)).rows)
       .toEqual([{ state: 'failed' }])
     expect(await client.createCall({ nameEn: 'B' })).toBe('D-BCDEF')
-    expect((await sql<{ state: string }>`SELECT state FROM extensions.gcs_portal_operation ORDER BY id`.execute(db)).rows)
+    expect((await sql<{ state: string }>`SELECT state FROM extensions.gcs_ssc_portal_connector_operation ORDER BY id`.execute(db)).rows)
       .toEqual([{ state: 'failed' }, { state: 'delivered' }])
   } finally { await db.destroy() }
 }, 30_000)

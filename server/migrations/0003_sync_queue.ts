@@ -4,7 +4,7 @@ import { defineGcsExtensionMigration } from '@gcs-ssc/extensions/server'
 export default defineGcsExtensionMigration({
   up: async (db) => {
     await sql`
-      CREATE TABLE extensions.gcs_portal_identity (
+      CREATE TABLE extensions.gcs_ssc_portal_connector_identity (
         agency_id bigint NOT NULL REFERENCES "Agency_Profile"(id),
         portal_organization_id text NOT NULL,
         proponent_id bigint NOT NULL,
@@ -14,7 +14,7 @@ export default defineGcsExtensionMigration({
       )
     `.execute(db)
     await sql`
-      CREATE TABLE extensions.gcs_portal_outbox (
+      CREATE TABLE extensions.gcs_ssc_portal_connector_outbox (
         id bigserial PRIMARY KEY,
         agency_id bigint NOT NULL REFERENCES "Agency_Profile"(id),
         agreement_id bigint NOT NULL REFERENCES "Funding_Case_Agreement_Profile"(id),
@@ -29,7 +29,7 @@ export default defineGcsExtensionMigration({
         delivered_at timestamptz
       )
     `.execute(db)
-    await sql`CREATE INDEX gcs_portal_outbox_due ON extensions.gcs_portal_outbox (next_attempt_at, id) WHERE state <> 'delivered'`.execute(db)
+    await sql`CREATE INDEX gcs_portal_outbox_due ON extensions.gcs_ssc_portal_connector_outbox (next_attempt_at, id) WHERE state <> 'delivered'`.execute(db)
     await sql`
       CREATE OR REPLACE FUNCTION extensions.enqueue_portal_agreement_change()
       RETURNS trigger LANGUAGE plpgsql AS $fn$
@@ -44,14 +44,14 @@ export default defineGcsExtensionMigration({
         ELSE
           agreement_id := NEW.egcs_fc_fundingagreement;
         END IF;
-        INSERT INTO extensions.gcs_portal_outbox
+        INSERT INTO extensions.gcs_ssc_portal_connector_outbox
           (agency_id, agreement_id, portal_organization_id, proponent_id)
         SELECT identity.agency_id, agreement_id, identity.portal_organization_id, identity.proponent_id
-        FROM extensions.gcs_portal_identity identity
+        FROM extensions.gcs_ssc_portal_connector_identity identity
         JOIN "Funding_Case_Agreement_Applicant_Recipient" recipient
           ON recipient.egcs_fc_applicantrecipient = identity.proponent_id
           AND recipient.egcs_fc_fundingagreement = agreement_id AND recipient._deleted = false
-        WHERE EXISTS (SELECT 1 FROM extensions.gcs_portal_connection connection
+        WHERE EXISTS (SELECT 1 FROM extensions.gcs_ssc_portal_connector_connection connection
           WHERE connection.agency_id = identity.agency_id);
         RETURN NEW;
       END $fn$
@@ -69,7 +69,7 @@ export default defineGcsExtensionMigration({
     await sql`DROP TRIGGER gcs_portal_budget_year_change ON "Funding_Case_Agreement_Budget_Fiscal_Year"`.execute(db)
     await sql`DROP TRIGGER gcs_portal_agreement_change ON "Funding_Case_Agreement_Profile"`.execute(db)
     await sql`DROP FUNCTION extensions.enqueue_portal_agreement_change()`.execute(db)
-    await sql`DROP TABLE extensions.gcs_portal_outbox`.execute(db)
-    await sql`DROP TABLE extensions.gcs_portal_identity`.execute(db)
+    await sql`DROP TABLE extensions.gcs_ssc_portal_connector_outbox`.execute(db)
+    await sql`DROP TABLE extensions.gcs_ssc_portal_connector_identity`.execute(db)
   }
 })

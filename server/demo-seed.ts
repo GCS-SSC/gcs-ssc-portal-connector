@@ -81,15 +81,15 @@ export const seedHealthCanadaPortalConnector = async (
     }
 
     const extensionTable = (await sql<{ present: boolean }>`
-      SELECT to_regclass('extensions.gcs_portal_organization') IS NOT NULL AS present
+      SELECT to_regclass('extensions.gcs_ssc_portal_connector_organization') IS NOT NULL AS present
     `.execute(transaction)).rows[0]?.present
     if (!extensionTable) return { phase: 'restart-required' as const, ...result }
 
-    const connection = await transaction.selectFrom('extensions.gcs_portal_connection')
+    const connection = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_connection')
       .select('agency_id').where('agency_id', '=', agency.id).executeTakeFirst()
     if (!connection && options.preconfigureConnection) {
       if (!options.secretRootKey) throw new Error('GCS_EXTENSION_SECRETS_KEY is required to preconfigure a Portal connection.')
-      await transaction.insertInto('extensions.gcs_portal_connection').values({
+      await transaction.insertInto('extensions.gcs_ssc_portal_connector_connection').values({
         agency_id: agency.id,
         portal_agency_id: options.portalAgencyId,
         portal_url: options.portalUrl,
@@ -112,7 +112,7 @@ export const seedHealthCanadaPortalConnector = async (
 
     if (options.seedApplicationForm) {
       const definition = designerSurveySchema.parse(complexCommunityHealthForm())
-      const form = await transaction.insertInto('extensions.gcs_portal_form').values({
+      const form = await transaction.insertInto('extensions.gcs_ssc_portal_connector_form').values({
         id: DEMO_APPLICATION_FORM_ID, agency_id: agency.id, definition,
         revision: 1, portal_id: null, portal_revision: null
       }).onConflict(conflict => conflict.column('id').doNothing()).returning('id').executeTakeFirst()
@@ -120,7 +120,7 @@ export const seedHealthCanadaPortalConnector = async (
     }
 
     for (const organization of options.organizations) {
-      await transaction.insertInto('extensions.gcs_portal_organization').values({
+      await transaction.insertInto('extensions.gcs_ssc_portal_connector_organization').values({
         agency_id: agency.id, portal_organization_id: organization.id,
         name: organization.name, description: organization.description,
         owner_name: organization.ownerName, owner_email: organization.ownerEmail,

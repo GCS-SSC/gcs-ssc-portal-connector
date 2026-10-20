@@ -64,14 +64,14 @@ describe('portal Claim receipt transaction', () => {
     db = new Kysely({ dialect: new KyselyPGlite(engine).dialect })
     await engine.exec(`
       CREATE SCHEMA extensions;
-      CREATE TABLE extensions.gcs_portal_connection
+      CREATE TABLE extensions.gcs_ssc_portal_connector_connection
         (agency_id text PRIMARY KEY, portal_agency_id text, portal_url text, scan_cursor text);
-      CREATE TABLE extensions.gcs_portal_identity
+      CREATE TABLE extensions.gcs_ssc_portal_connector_identity
         (agency_id text, portal_organization_id text, proponent_id text);
-      CREATE TABLE extensions.gcs_portal_inbox
+      CREATE TABLE extensions.gcs_ssc_portal_connector_inbox
         (agency_id text, event_id text, kind text, submission_id text, item_submission_id text,
          created_at timestamptz, last_error text, PRIMARY KEY (agency_id,event_id));
-      CREATE TABLE extensions.gcs_portal_receipt
+      CREATE TABLE extensions.gcs_ssc_portal_connector_receipt
         (id bigserial PRIMARY KEY, agency_id text, event_id text, submission_id text,
          item_submission_id text, kind text, source_export jsonb, gcs_entity_type text,
          gcs_entity_id text, state text, updated_at timestamptz,
@@ -85,8 +85,8 @@ describe('portal Claim receipt transaction', () => {
       CREATE TABLE "Funding_Case_Agreement_Applicant_Recipient"
         (id text PRIMARY KEY, egcs_fc_fundingagreement text, egcs_fc_applicantrecipient text, _deleted boolean);
       CREATE TABLE host_claim (id text PRIMARY KEY);
-      INSERT INTO extensions.gcs_portal_connection VALUES ('11','G-ABCDE','https://portal.example.test/',NULL);
-      INSERT INTO extensions.gcs_portal_identity VALUES ('11','organization-1','55');
+      INSERT INTO extensions.gcs_ssc_portal_connector_connection VALUES ('11','G-ABCDE','https://portal.example.test/',NULL);
+      INSERT INTO extensions.gcs_ssc_portal_connector_identity VALUES ('11','organization-1','55');
       INSERT INTO "Transfer_Payment_Profile" VALUES ('99','11',false);
       INSERT INTO "Transfer_Payment_Stream" VALUES ('44','99',false);
       INSERT INTO "Funding_Case_Agreement_Profile" VALUES ('33','44',false);
@@ -114,7 +114,7 @@ describe('portal Claim receipt transaction', () => {
     const first = await syncPortal(context(db, createClaim) as never)
     expect(first.imported).toEqual([{ itemSubmissionId: 'item-1', kind: 'claim', entityId: '88' }])
     expect((await sql`SELECT id FROM host_claim`.execute(db)).rows).toEqual([{ id: '88' }])
-    expect((await sql`SELECT event_id, item_submission_id, state, gcs_entity_id FROM extensions.gcs_portal_receipt`.execute(db)).rows)
+    expect((await sql`SELECT event_id, item_submission_id, state, gcs_entity_id FROM extensions.gcs_ssc_portal_connector_receipt`.execute(db)).rows)
       .toEqual([{ event_id: '12', item_submission_id: 'item-1', state: 'imported', gcs_entity_id: '88' }])
 
     const retry = await syncPortal(context(db, createClaim) as never)
@@ -190,14 +190,14 @@ describe('portal Claim receipt transaction', () => {
   it('rolls the host draft back if receipt insertion fails', async () => {
     await engine.exec(`CREATE FUNCTION reject_receipt() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN RAISE EXCEPTION 'receipt rejected'; END $$;
-      CREATE TRIGGER receipt_rejection BEFORE INSERT ON extensions.gcs_portal_receipt
+      CREATE TRIGGER receipt_rejection BEFORE INSERT ON extensions.gcs_ssc_portal_connector_receipt
       FOR EACH ROW EXECUTE FUNCTION reject_receipt();`)
     const { syncPortal } = await import('../server/sync.ts')
     const result = await syncPortal(context(db, createClaim) as never)
     expect(result.imported).toEqual([])
     expect(result.pending).toEqual([expect.objectContaining({ eventId: '12', reason: expect.stringContaining('receipt rejected') })])
     expect((await sql`SELECT id FROM host_claim`.execute(db)).rows).toEqual([])
-    expect((await sql`SELECT id FROM extensions.gcs_portal_receipt`.execute(db)).rows).toEqual([])
+    expect((await sql`SELECT id FROM extensions.gcs_ssc_portal_connector_receipt`.execute(db)).rows).toEqual([])
     expect(portal.publishItemReference).not.toHaveBeenCalled()
     expect(portal.consume).not.toHaveBeenCalled()
   })
@@ -216,10 +216,10 @@ describe('portal Claim receipt transaction', () => {
     expect(first.imported).toEqual([])
     expect(first.pending).toEqual([expect.objectContaining({ eventId: '12', reason: 'Ambiguous network response' })])
     expect(portal.consume).not.toHaveBeenCalled()
-    expect((await sql`SELECT state FROM extensions.gcs_portal_receipt`.execute(db)).rows).toEqual([{ state: 'received' }])
+    expect((await sql`SELECT state FROM extensions.gcs_ssc_portal_connector_receipt`.execute(db)).rows).toEqual([{ state: 'received' }])
     const retry = await syncPortal(context(db, createClaim) as never)
     expect(retry.imported).toEqual([{ itemSubmissionId: 'item-1', kind: 'other_form', entityId: 'portal-receipt:1' }])
-    expect((await sql`SELECT count(*)::int AS count FROM extensions.gcs_portal_receipt`.execute(db)).rows).toEqual([{ count: 1 }])
+    expect((await sql`SELECT count(*)::int AS count FROM extensions.gcs_ssc_portal_connector_receipt`.execute(db)).rows).toEqual([{ count: 1 }])
     expect(portal.consume).toHaveBeenCalledWith('12', 'portal-receipt:1')
     expect(createClaim).not.toHaveBeenCalled()
   })

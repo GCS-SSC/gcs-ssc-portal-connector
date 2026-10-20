@@ -51,7 +51,7 @@ export const getReceiptAttachment = async (context: GcsExtensionRouteContext, tr
     .map(value => receiptAttachmentSchema.safeParse(value)).find(value => value.success && value.data.id === context.params.attachmentId)
   if (!attachment?.success) throw unavailable()
   const db = asConnectorDb(context.db)
-  const connection = await db.selectFrom('extensions.gcs_portal_connection').select(['portal_url', 'portal_agency_id'])
+  const connection = await db.selectFrom('extensions.gcs_ssc_portal_connector_connection').select(['portal_url', 'portal_agency_id'])
     .where('agency_id', '=', context.params.agencyId!).executeTakeFirst()
   if (!connection) throw unavailable()
   return fetchReceiptAttachment({ portalUrl: connection.portal_url, portalAgencyId: connection.portal_agency_id,

@@ -10,5 +10,13 @@ const hostRoot = [resolve(connectorRoot, '../gcs-ssc'), resolve(connectorRoot, '
 
 export default defineConfig({
   plugins: [vue()],
-  resolve: { alias: hostRoot ? [{ find: '~~', replacement: hostRoot }] : [] }
+  resolve: { alias: hostRoot ? [{ find: '~~', replacement: hostRoot }] : [] },
+  test: {
+    maxWorkers: 4,
+    coverage: {
+      provider: 'v8',
+      include: ['server/**/*.ts', 'shared/**/*.ts', 'components/**/*.vue', 'i18n/**/*.ts'],
+      thresholds: { statements: 80, branches: 80, functions: 80, lines: 80 }
+    }
+  }
 })

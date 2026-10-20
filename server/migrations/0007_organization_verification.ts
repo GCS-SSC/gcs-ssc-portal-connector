@@ -5,7 +5,7 @@ import { defineGcsExtensionMigration } from '@gcs-ssc/extensions/server'
 export default defineGcsExtensionMigration({
   up: async (db) => {
     await sql`
-      CREATE TABLE extensions.gcs_portal_organization (
+      CREATE TABLE extensions.gcs_ssc_portal_connector_organization (
         agency_id bigint NOT NULL REFERENCES "Agency_Profile"(id),
         portal_organization_id text NOT NULL,
         name text NOT NULL,
@@ -20,7 +20,7 @@ export default defineGcsExtensionMigration({
       )
     `.execute(db)
     await sql`
-      CREATE TABLE extensions.gcs_portal_verification (
+      CREATE TABLE extensions.gcs_ssc_portal_connector_verification (
         portal_organization_id text PRIMARY KEY,
         proponent_id bigint NOT NULL REFERENCES "Applicant_Recipient_Profile"(id),
         origin_agency_id bigint NOT NULL REFERENCES "Agency_Profile"(id),
@@ -32,44 +32,44 @@ export default defineGcsExtensionMigration({
       )
     `.execute(db)
     await sql`CREATE UNIQUE INDEX gcs_portal_one_active_org_per_proponent
-      ON extensions.gcs_portal_verification (proponent_id) WHERE portal_active`.execute(db)
-    await sql`ALTER TABLE extensions.gcs_portal_identity
-      DROP CONSTRAINT gcs_portal_identity_agency_id_proponent_id_key`.execute(db)
-    await sql`ALTER TABLE extensions.gcs_portal_outbox
-      DROP CONSTRAINT gcs_portal_outbox_state_check`.execute(db)
-    await sql`ALTER TABLE extensions.gcs_portal_outbox
-      ADD CONSTRAINT gcs_portal_outbox_state_check
+      ON extensions.gcs_ssc_portal_connector_verification (proponent_id) WHERE portal_active`.execute(db)
+    await sql`ALTER TABLE extensions.gcs_ssc_portal_connector_identity
+      DROP CONSTRAINT gcs_ssc_portal_connector_identity_agency_id_proponent_id_key`.execute(db)
+    await sql`ALTER TABLE extensions.gcs_ssc_portal_connector_outbox
+      DROP CONSTRAINT gcs_ssc_portal_connector_outbox_state_check`.execute(db)
+    await sql`ALTER TABLE extensions.gcs_ssc_portal_connector_outbox
+      ADD CONSTRAINT gcs_ssc_portal_connector_outbox_state_check
       CHECK (state IN ('pending','leased','delivered','cancelled'))`.execute(db)
 
     const conflicts = await sql<{ portal_organization_id: string }>`
-      SELECT portal_organization_id FROM extensions.gcs_portal_identity
+      SELECT portal_organization_id FROM extensions.gcs_ssc_portal_connector_identity
       GROUP BY portal_organization_id HAVING count(DISTINCT proponent_id) > 1
     `.execute(db)
     if (conflicts.rows.length) {
       throw new Error('Existing Portal organization links conflict across agencies; resolve them before this migration.')
     }
     await sql`
-      INSERT INTO extensions.gcs_portal_verification
+      INSERT INTO extensions.gcs_ssc_portal_connector_verification
         (portal_organization_id, proponent_id, origin_agency_id, verified_at)
       SELECT DISTINCT ON (portal_organization_id)
         portal_organization_id, proponent_id, agency_id, verified_at
-      FROM extensions.gcs_portal_identity
+      FROM extensions.gcs_ssc_portal_connector_identity
       ORDER BY portal_organization_id, verified_at, agency_id
     `.execute(db)
     await sql`
       WITH ranked AS (
         SELECT portal_organization_id,
           row_number() OVER (PARTITION BY proponent_id ORDER BY verified_at DESC, portal_organization_id) AS rank
-        FROM extensions.gcs_portal_verification
+        FROM extensions.gcs_ssc_portal_connector_verification
       )
-      UPDATE extensions.gcs_portal_verification verification SET portal_active=true
+      UPDATE extensions.gcs_ssc_portal_connector_verification verification SET portal_active=true
       FROM ranked WHERE ranked.portal_organization_id=verification.portal_organization_id AND ranked.rank=1
     `.execute(db)
     await sql`
-      UPDATE extensions.gcs_portal_outbox outbox SET state='cancelled',
+      UPDATE extensions.gcs_ssc_portal_connector_outbox outbox SET state='cancelled',
         last_error='Historical Portal organization link', updated_at=now()
       WHERE state='pending' AND NOT EXISTS (
-        SELECT 1 FROM extensions.gcs_portal_verification verification
+        SELECT 1 FROM extensions.gcs_ssc_portal_connector_verification verification
         WHERE verification.portal_organization_id=outbox.portal_organization_id
           AND verification.portal_active=true
       )
@@ -88,11 +88,11 @@ export default defineGcsExtensionMigration({
         ELSE
           agreement_id := NEW.egcs_fc_fundingagreement;
         END IF;
-        INSERT INTO extensions.gcs_portal_outbox
+        INSERT INTO extensions.gcs_ssc_portal_connector_outbox
           (agency_id, agreement_id, portal_organization_id, proponent_id)
         SELECT identity.agency_id, agreement_id, identity.portal_organization_id, identity.proponent_id
-        FROM extensions.gcs_portal_identity identity
-        JOIN extensions.gcs_portal_verification verification
+        FROM extensions.gcs_ssc_portal_connector_identity identity
+        JOIN extensions.gcs_ssc_portal_connector_verification verification
           ON verification.portal_organization_id=identity.portal_organization_id
           AND verification.portal_active=true
         JOIN "Funding_Case_Agreement_Applicant_Recipient" recipient
@@ -105,7 +105,7 @@ export default defineGcsExtensionMigration({
         JOIN "Transfer_Payment_Profile" program
           ON program.id=stream.egcs_tp_transferpaymentprofile
           AND program.egcs_tp_agency=identity.agency_id AND program._deleted=false
-        WHERE EXISTS (SELECT 1 FROM extensions.gcs_portal_connection connection
+        WHERE EXISTS (SELECT 1 FROM extensions.gcs_ssc_portal_connector_connection connection
           WHERE connection.agency_id=identity.agency_id);
         RETURN NEW;
       END $fn$
@@ -114,7 +114,7 @@ export default defineGcsExtensionMigration({
       CREATE OR REPLACE FUNCTION extensions.enqueue_portal_status_definition_change()
       RETURNS trigger LANGUAGE plpgsql AS $fn$
       BEGIN
-        INSERT INTO extensions.gcs_portal_outbox
+        INSERT INTO extensions.gcs_ssc_portal_connector_outbox
           (agency_id,agreement_id,portal_organization_id,proponent_id)
         SELECT identity.agency_id,agreement.id,identity.portal_organization_id,identity.proponent_id
         FROM "Funding_Case_Agreement_Profile" agreement
@@ -124,16 +124,16 @@ export default defineGcsExtensionMigration({
           ON program.id=stream.egcs_tp_transferpaymentprofile AND program._deleted=false
         JOIN "Funding_Case_Agreement_Applicant_Recipient" recipient
           ON recipient.egcs_fc_fundingagreement=agreement.id AND recipient._deleted=false
-        JOIN extensions.gcs_portal_identity identity
+        JOIN extensions.gcs_ssc_portal_connector_identity identity
           ON identity.proponent_id=recipient.egcs_fc_applicantrecipient
           AND identity.agency_id=program.egcs_tp_agency
-        JOIN extensions.gcs_portal_verification verification
+        JOIN extensions.gcs_ssc_portal_connector_verification verification
           ON verification.portal_organization_id=identity.portal_organization_id
           AND verification.portal_active=true
         WHERE agreement.egcs_fc_status=NEW.id AND agreement._deleted=false;
-        INSERT INTO extensions.gcs_portal_outcome_outbox (agency_id,receipt_id,status_id)
+        INSERT INTO extensions.gcs_ssc_portal_connector_outcome_outbox (agency_id,receipt_id,status_id)
         SELECT receipt.agency_id,receipt.id,NEW.id
-        FROM extensions.gcs_portal_receipt receipt
+        FROM extensions.gcs_ssc_portal_connector_receipt receipt
         LEFT JOIN "Funding_Case_Agreement_Claim" claim
           ON receipt.gcs_entity_type='fundingcaseagreementclaim' AND claim.id=receipt.gcs_entity_id
         LEFT JOIN "Funding_Case_Agreement_Forecast" forecast

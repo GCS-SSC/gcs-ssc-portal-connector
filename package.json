@@ -6,6 +6,7 @@
   "scripts": {
     "typecheck": "vue-tsc --noEmit",
     "test:unit": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "seed:demo": "bun scripts/seed-health-canada.ts"
   },
   "dependencies": {
@@ -18,6 +19,9 @@
     "@electric-sql/pglite": "0.3.16",
     "@types/node": "^25.3.0",
     "@vitejs/plugin-vue": "^6.0.4",
+    "@vitest/coverage-v8": "^4.0.18",
+    "@vue/test-utils": "^2.4.6",
+    "jsdom": "^28.1.0",
     "kysely": "^0.28.11",
     "kysely-pglite": "^0.6.1",
     "pg": "^8.23.0",

@@ -15,7 +15,7 @@ const inputSchema = z.object({
 
 const portalClient = async (context: GcsExtensionRouteContext) => {
   const agencyId = agencyIdFromContext(context)
-  const connection = await asConnectorDb(context.db).selectFrom('extensions.gcs_portal_connection')
+  const connection = await asConnectorDb(context.db).selectFrom('extensions.gcs_ssc_portal_connector_connection')
     .selectAll().where('agency_id', '=', agencyId).executeTakeFirst()
   if (!connection) throw new Error('Connect the portal first.')
   return queuePortalClient(asConnectorDb(context.db), agencyId, { portalUrl: connection.portal_url,
@@ -26,8 +26,8 @@ const portalClient = async (context: GcsExtensionRouteContext) => {
 /** Reads synchronized choices and app-wide verification history. */
 export const listOrganizations = async (context: GcsExtensionRouteContext) => {
   const agencyId = agencyIdFromContext(context)
-  const rows = await asConnectorDb(context.db).selectFrom('extensions.gcs_portal_organization as organization')
-    .leftJoin('extensions.gcs_portal_verification as verification',
+  const rows = await asConnectorDb(context.db).selectFrom('extensions.gcs_ssc_portal_connector_organization as organization')
+    .leftJoin('extensions.gcs_ssc_portal_connector_verification as verification',
       'verification.portal_organization_id', 'organization.portal_organization_id')
     .select([
       'organization.portal_organization_id as id', 'organization.name', 'organization.description',
@@ -63,9 +63,9 @@ export const listProponentVerifications = async (context: GcsExtensionRouteConte
       verification.portal_active AS active,
       verifier.name AS "verifierName",
       verifier.email AS "verifierEmail"
-    FROM extensions.gcs_portal_verification verification
+    FROM extensions.gcs_ssc_portal_connector_verification verification
     LEFT JOIN LATERAL (
-      SELECT name FROM extensions.gcs_portal_organization
+      SELECT name FROM extensions.gcs_ssc_portal_connector_organization
       WHERE portal_organization_id = verification.portal_organization_id
       ORDER BY (agency_id = verification.origin_agency_id) DESC, synced_at DESC
       LIMIT 1
@@ -98,17 +98,17 @@ export const refreshOrganizations = async (context: GcsExtensionRouteContext) =>
   }
   const activeIds = organizations.filter(item => item.active).map(item => item.id)
   const globalLinks = activeIds.length ? await asConnectorDb(context.db)
-    .selectFrom('extensions.gcs_portal_verification')
+    .selectFrom('extensions.gcs_ssc_portal_connector_verification')
     .select(['portal_organization_id', 'proponent_id'])
     .where('portal_organization_id', 'in', activeIds).execute() : []
-  const localLinks = await asConnectorDb(context.db).selectFrom('extensions.gcs_portal_identity')
+  const localLinks = await asConnectorDb(context.db).selectFrom('extensions.gcs_ssc_portal_connector_identity')
     .select('portal_organization_id').where('agency_id', '=', agencyId).execute()
   const localIds = new Set(localLinks.map(item => item.portal_organization_id))
   const toAttach = globalLinks.filter(item => !localIds.has(item.portal_organization_id))
   for (const link of toAttach) await client.verifyOrganization(link.portal_organization_id, link.proponent_id)
   await authorizedWrite(context, async transaction => {
     for (const organization of organizations) {
-      await transaction.insertInto('extensions.gcs_portal_organization').values({
+      await transaction.insertInto('extensions.gcs_ssc_portal_connector_organization').values({
         agency_id: agencyId, portal_organization_id: organization.id,
         name: organization.name, description: organization.description,
         owner_name: organization.ownerName, owner_email: organization.ownerEmail,
@@ -121,30 +121,30 @@ export const refreshOrganizations = async (context: GcsExtensionRouteContext) =>
         active: organization.active, synced_at: new Date()
       })).execute()
     }
-    await transaction.updateTable('extensions.gcs_portal_organization')
+    await transaction.updateTable('extensions.gcs_ssc_portal_connector_organization')
       .set({ active: false, synced_at: new Date() })
       .where('agency_id', '=', agencyId)
       .where('portal_organization_id', 'not in', organizations.length ? organizations.map(item => item.id) : [''])
       .execute()
-    await transaction.updateTable('extensions.gcs_portal_verification')
+    await transaction.updateTable('extensions.gcs_ssc_portal_connector_verification')
       .set({ portal_active: false })
       .where('portal_organization_id', 'not in', activeIds.length ? activeIds : [''])
       .execute()
     for (const organization of organizations.filter(item => item.active)) {
-      await sql`UPDATE extensions.gcs_portal_verification verification SET portal_active=true
+      await sql`UPDATE extensions.gcs_ssc_portal_connector_verification verification SET portal_active=true
         WHERE verification.portal_organization_id=${organization.id}
-          AND NOT EXISTS (SELECT 1 FROM extensions.gcs_portal_verification other
+          AND NOT EXISTS (SELECT 1 FROM extensions.gcs_ssc_portal_connector_verification other
             WHERE other.proponent_id=verification.proponent_id AND other.portal_active=true
               AND other.portal_organization_id<>verification.portal_organization_id)`.execute(transaction)
     }
-    await sql`UPDATE extensions.gcs_portal_outbox outbox SET state='cancelled',
+    await sql`UPDATE extensions.gcs_ssc_portal_connector_outbox outbox SET state='cancelled',
       last_error='Portal organization inactive', updated_at=now()
       WHERE agency_id=${agencyId}::bigint AND state='pending'
-        AND EXISTS (SELECT 1 FROM extensions.gcs_portal_verification verification
+        AND EXISTS (SELECT 1 FROM extensions.gcs_ssc_portal_connector_verification verification
           WHERE verification.portal_organization_id=outbox.portal_organization_id
             AND verification.portal_active=false)`.execute(transaction)
     for (const link of toAttach) {
-      await transaction.insertInto('extensions.gcs_portal_identity').values({
+      await transaction.insertInto('extensions.gcs_ssc_portal_connector_identity').values({
         agency_id: agencyId, portal_organization_id: link.portal_organization_id,
         proponent_id: link.proponent_id
       }).onConflict(conflict => conflict.columns(['agency_id', 'portal_organization_id']).doNothing()).execute()
@@ -178,7 +178,7 @@ export const verifyOrganization = async (context: GcsExtensionRouteContext, opti
     WHERE id=${input.proponentId}::bigint AND _deleted=false
   `.execute(db)).rows[0]
   if (!proponent) throw new Error('The selected recipient does not exist.')
-  const selectedOrganization = await db.selectFrom('extensions.gcs_portal_organization')
+  const selectedOrganization = await db.selectFrom('extensions.gcs_ssc_portal_connector_organization')
     .select(['portal_organization_id', 'active'])
     .where('agency_id', '=', agencyId)
     .where('portal_organization_id', '=', input.organizationId).executeTakeFirst()
@@ -186,17 +186,17 @@ export const verifyOrganization = async (context: GcsExtensionRouteContext, opti
   const client = await portalClient(context)
   await authorizedWrite(context, async (transaction) => {
     if (options.fromProponent) await assertProponentPageAccess(context, transaction, agencyId)
-    const globalLink = await transaction.selectFrom('extensions.gcs_portal_verification')
+    const globalLink = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_verification')
       .select(['proponent_id', 'portal_active'])
       .where('portal_organization_id', '=', input.organizationId).forUpdate().executeTakeFirst()
     if (globalLink && globalLink.proponent_id !== input.proponentId)
       throw new Error('This Portal organization is already linked to another GCS Proponent.')
-    const otherActive = await transaction.selectFrom('extensions.gcs_portal_verification')
+    const otherActive = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_verification')
       .select('portal_organization_id').where('proponent_id', '=', input.proponentId)
       .where('portal_active', '=', true).executeTakeFirst()
     if (otherActive && otherActive.portal_organization_id !== input.organizationId)
       throw new Error('Make the previous Portal organization inactive before linking a replacement.')
-    const existing = await transaction.selectFrom('extensions.gcs_portal_identity')
+    const existing = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_identity')
       .select('proponent_id').where('agency_id', '=', agencyId)
       .where('portal_organization_id', '=', input.organizationId).forUpdate().executeTakeFirst()
     if (existing && existing.proponent_id !== input.proponentId)
@@ -206,17 +206,17 @@ export const verifyOrganization = async (context: GcsExtensionRouteContext, opti
   let queued = 0
   await authorizedWrite(context, async (transaction) => {
     if (options.fromProponent) await assertProponentPageAccess(context, transaction, agencyId)
-    await transaction.insertInto('extensions.gcs_portal_verification').values({
+    await transaction.insertInto('extensions.gcs_ssc_portal_connector_verification').values({
       portal_organization_id: input.organizationId, proponent_id: input.proponentId,
       origin_agency_id: agencyId, verification_note: input.note,
       verified_by_user_id: context.auth?.userId ?? null, portal_active: true
     }).onConflict(conflict => conflict.column('portal_organization_id').doNothing()).execute()
-    const globalLink = await transaction.selectFrom('extensions.gcs_portal_verification')
+    const globalLink = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_verification')
       .select('proponent_id').where('portal_organization_id', '=', input.organizationId)
       .forUpdate().executeTakeFirstOrThrow()
     if (globalLink.proponent_id !== input.proponentId)
       throw new Error('This Portal organization is already linked to another GCS Proponent.')
-    await transaction.insertInto('extensions.gcs_portal_identity').values({
+    await transaction.insertInto('extensions.gcs_ssc_portal_connector_identity').values({
       agency_id: agencyId, portal_organization_id: input.organizationId, proponent_id: input.proponentId
     }).onConflict((conflict) => conflict.columns(['agency_id', 'portal_organization_id']).doNothing()).execute()
     const agreements = (await sql<{ id: string }>`
@@ -243,11 +243,11 @@ export const verifyProponentOrganization = async (context: GcsExtensionRouteCont
 export const enqueueAllVerifiedAgreements = async (transaction: ConnectorDb, agencyId: string) => {
     const result = await sql<{ count: string }>`
       WITH queued AS (
-        INSERT INTO extensions.gcs_portal_outbox
+        INSERT INTO extensions.gcs_ssc_portal_connector_outbox
           (agency_id, agreement_id, portal_organization_id, proponent_id)
         SELECT identity.agency_id, agreement.id, identity.portal_organization_id, identity.proponent_id
-        FROM extensions.gcs_portal_identity identity
-        JOIN extensions.gcs_portal_verification verification
+        FROM extensions.gcs_ssc_portal_connector_identity identity
+        JOIN extensions.gcs_ssc_portal_connector_verification verification
           ON verification.portal_organization_id=identity.portal_organization_id
           AND verification.portal_active=true
         JOIN "Funding_Case_Agreement_Applicant_Recipient" recipient

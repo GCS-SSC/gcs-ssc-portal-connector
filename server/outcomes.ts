@@ -24,11 +24,11 @@ export const drainOutcomeOutbox = async (db: ConnectorDb, limit: number, agencyI
   const results: Array<{ id: string; delivered: boolean; error?: string }> = []
   for (let index = 0; index < limit; index++) {
     const row = (await sql<LeasedOutcome>`
-      UPDATE extensions.gcs_portal_outcome_outbox SET state='leased', attempts=attempts+1,
+      UPDATE extensions.gcs_ssc_portal_connector_outcome_outbox SET state='leased', attempts=attempts+1,
         next_attempt_at=now()+interval '2 minutes', updated_at=now()
-      WHERE id=(SELECT id FROM extensions.gcs_portal_outcome_outbox
+      WHERE id=(SELECT id FROM extensions.gcs_ssc_portal_connector_outcome_outbox
         WHERE state <> 'delivered' AND next_attempt_at <= now()
-          AND ${enabledPortalAgency('extensions.gcs_portal_outcome_outbox.agency_id')}
+          AND ${enabledPortalAgency('extensions.gcs_ssc_portal_connector_outcome_outbox.agency_id')}
           AND (${agencyId ?? null}::bigint IS NULL OR agency_id=${agencyId ?? null}::bigint)
         ORDER BY next_attempt_at,id FOR UPDATE SKIP LOCKED LIMIT 1)
       RETURNING id::text,agency_id::text,receipt_id::text,attempts
@@ -41,8 +41,8 @@ export const drainOutcomeOutbox = async (db: ConnectorDb, limit: number, agencyI
           connection.portal_url,connection.portal_agency_id,connection.entity_status_ids,
           status.id::text AS status_id,status.egcs_cn_name_en AS status_en,
           status.egcs_cn_name_fr AS status_fr,status.egcs_cn_color AS status_colour
-        FROM extensions.gcs_portal_receipt receipt
-        JOIN extensions.gcs_portal_connection connection ON connection.agency_id=receipt.agency_id
+        FROM extensions.gcs_ssc_portal_connector_receipt receipt
+        JOIN extensions.gcs_ssc_portal_connector_connection connection ON connection.agency_id=receipt.agency_id
         LEFT JOIN "Funding_Case_Agreement_Claim" claim
           ON receipt.gcs_entity_type='fundingcaseagreementclaim' AND claim.id=receipt.gcs_entity_id
         LEFT JOIN "Funding_Case_Agreement_Forecast" forecast
@@ -66,14 +66,14 @@ export const drainOutcomeOutbox = async (db: ConnectorDb, limit: number, agencyI
         key: await readPortalCredentialFromDb(asConnectorDb(db), row.agency_id) }, `outcome-delivery:${row.id}`)
       await client.publishItemStatus(source.submission_id, source.item_submission_id,
         source.gcs_entity_id, status)
-      await sql`UPDATE extensions.gcs_portal_outcome_outbox SET state='delivered', delivered_at=now(),
+      await sql`UPDATE extensions.gcs_ssc_portal_connector_outcome_outbox SET state='delivered', delivered_at=now(),
         updated_at=now(),last_error=NULL WHERE id=${row.id}::bigint
         AND state='leased' AND attempts=${row.attempts}`.execute(db)
       results.push({ id: row.id, delivered: true })
     } catch (error) {
       const message = error instanceof Error ? error.message.slice(0, 500) : 'Outcome delivery failed'
       const seconds = retryDelaySeconds(row.attempts)
-      await sql`UPDATE extensions.gcs_portal_outcome_outbox SET state='pending',last_error=${message},
+      await sql`UPDATE extensions.gcs_ssc_portal_connector_outcome_outbox SET state='pending',last_error=${message},
         next_attempt_at=now()+(${seconds} || ' seconds')::interval,updated_at=now()
         WHERE id=${row.id}::bigint AND state='leased' AND attempts=${row.attempts}`.execute(db)
       results.push({ id: row.id, delivered: false, error: message })

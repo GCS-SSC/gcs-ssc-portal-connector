@@ -7,7 +7,7 @@ export const listPublications = async (context: GcsExtensionRouteContext) => {
   const agencyId = context.params.agencyId
   if (!agreementId || !/^[1-9]\d{0,18}$/.test(agreementId)) throw new Error('A valid Agreement is required.')
   if (!agencyId || !/^[1-9]\d{0,18}$/.test(agencyId)) throw new Error('A valid agency is required.')
-  const rows = await asConnectorDb(context.db).selectFrom('extensions.gcs_portal_publication')
+  const rows = await asConnectorDb(context.db).selectFrom('extensions.gcs_ssc_portal_connector_publication')
     .select(['portal_organization_id', 'portal_agreement_id', 'portal_agreement_revision',
       'portal_set_ids', 'published_at'])
     .where('agency_id', '=', agencyId).where('gcs_agreement_id', '=', agreementId)

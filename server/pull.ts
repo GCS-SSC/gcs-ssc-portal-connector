@@ -11,12 +11,12 @@ export const pullDueAgencies = async (db: ConnectorDb) => {
   const results: Array<{ agencyId: string; found: number; error?: string }> = []
   for (let index = 0; index < 20; index++) {
     const connection = (await sql<DueConnection>`
-      UPDATE extensions.gcs_portal_connection SET last_pull_at=now(), last_pull_error=NULL,
+      UPDATE extensions.gcs_ssc_portal_connector_connection SET last_pull_at=now(), last_pull_error=NULL,
         pull_lease_until=now() + interval '10 minutes'
       WHERE agency_id=(
-        SELECT agency_id FROM extensions.gcs_portal_connection
+        SELECT agency_id FROM extensions.gcs_ssc_portal_connector_connection
         WHERE pull_interval_minutes IS NOT NULL AND
-          ${enabledPortalAgency('extensions.gcs_portal_connection.agency_id')} AND
+          ${enabledPortalAgency('extensions.gcs_ssc_portal_connector_connection.agency_id')} AND
           (pull_lease_until IS NULL OR pull_lease_until <= now()) AND (
           last_pull_at IS NULL OR last_pull_at <= now() - (pull_interval_minutes || ' minutes')::interval
         ) ORDER BY last_pull_at NULLS FIRST, agency_id FOR UPDATE SKIP LOCKED LIMIT 1
@@ -33,7 +33,7 @@ export const pullDueAgencies = async (db: ConnectorDb) => {
       for (let page = 0; page < 4; page++) {
         const batch = await client.updates(after)
         for (const event of batch.updates) {
-          await db.insertInto('extensions.gcs_portal_inbox').values({
+          await db.insertInto('extensions.gcs_ssc_portal_connector_inbox').values({
             agency_id: connection.agency_id, event_id: event.eventId,
             kind: event.kind, submission_id: event.submissionId,
             item_submission_id: event.itemSubmissionId,
@@ -47,7 +47,7 @@ export const pullDueAgencies = async (db: ConnectorDb) => {
       results.push({ agencyId: connection.agency_id, found })
     } catch (error) {
       const message = error instanceof Error ? error.message.slice(0, 500) : 'Portal pull failed'
-      await db.updateTable('extensions.gcs_portal_connection').set({ last_pull_error: message, pull_lease_until: null })
+      await db.updateTable('extensions.gcs_ssc_portal_connector_connection').set({ last_pull_error: message, pull_lease_until: null })
         .where('agency_id', '=', connection.agency_id).execute()
       results.push({ agencyId: connection.agency_id, found: 0, error: message })
     }
@@ -56,6 +56,6 @@ export const pullDueAgencies = async (db: ConnectorDb) => {
 }
 
 export const releasePullLease = async (db: ConnectorDb, agencyId: string) => {
-  await db.updateTable('extensions.gcs_portal_connection').set({ pull_lease_until: null })
+  await db.updateTable('extensions.gcs_ssc_portal_connector_connection').set({ pull_lease_until: null })
     .where('agency_id', '=', agencyId).execute()
 }

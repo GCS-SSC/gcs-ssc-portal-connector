@@ -14,7 +14,7 @@ type Operation = {
 }
 
 const connectionFor = async (db: ConnectorDb, agencyId: string): Promise<PortalConnection> => {
-  const row = await db.selectFrom('extensions.gcs_portal_connection').select(['portal_url', 'portal_agency_id'])
+  const row = await db.selectFrom('extensions.gcs_ssc_portal_connector_connection').select(['portal_url', 'portal_agency_id'])
     .where('agency_id', '=', agencyId).executeTakeFirst()
   if (!row) throw new Error('Save a Portal connection to deliver this queued change.')
   return { portalUrl: row.portal_url, portalAgencyId: row.portal_agency_id,
@@ -30,7 +30,7 @@ const formSnapshotSchema = z.object({
 const deliverForm = async (db: ConnectorDb, operation: Operation, connection: PortalConnection) => {
   const snapshot = formSnapshotSchema.parse(operation.body)
   if (!snapshot.request) {
-    const form = await db.selectFrom('extensions.gcs_portal_form').selectAll()
+    const form = await db.selectFrom('extensions.gcs_ssc_portal_connector_form').selectAll()
       .where('agency_id', '=', operation.agency_id).where('id', '=', operation.form_id!).executeTakeFirstOrThrow()
     snapshot.request = form.portal_id
       ? { path: `surveys/${encodeURIComponent(form.portal_id)}`, method: 'PUT',
@@ -38,7 +38,7 @@ const deliverForm = async (db: ConnectorDb, operation: Operation, connection: Po
       : { path: 'surveys', method: 'POST',
           body: { agencyId: connection.portalAgencyId, definition: snapshot.definition } }
     // Freeze the predecessor's revision before I/O so crash retries replay exactly.
-    const frozen = await db.updateTable('extensions.gcs_portal_operation').set({ body: snapshot })
+    const frozen = await db.updateTable('extensions.gcs_ssc_portal_connector_operation').set({ body: snapshot })
       .where('id', '=', operation.id).where('state', '=', 'leased')
       .where('attempts', '=', operation.attempts).returning('id').executeTakeFirst()
     if (!frozen) throw new Error('Portal operation lease expired before delivery.')
@@ -47,9 +47,9 @@ const deliverForm = async (db: ConnectorDb, operation: Operation, connection: Po
     snapshot.request.body, fetch, operation.idempotency_key)
   const survey = z.object({ survey: z.object({ id: z.string(), revision: z.number().int().positive() }) })
     .parse(response).survey
-  await db.updateTable('extensions.gcs_portal_form').set({ portal_id: survey.id, portal_revision: survey.revision })
+  await db.updateTable('extensions.gcs_ssc_portal_connector_form').set({ portal_id: survey.id, portal_revision: survey.revision })
     .where('agency_id', '=', operation.agency_id).where('id', '=', operation.form_id!)
-    .where(eb => eb.exists(eb.selectFrom('extensions.gcs_portal_operation').select('id')
+    .where(eb => eb.exists(eb.selectFrom('extensions.gcs_ssc_portal_connector_operation').select('id')
       .where('id', '=', operation.id).where('state', '=', 'leased').where('attempts', '=', operation.attempts)))
     .where(eb => eb.or([eb('portal_revision', 'is', null), eb('portal_revision', '<=', survey.revision)]))
     .execute()
@@ -62,7 +62,7 @@ const deliver = async (db: ConnectorDb, operation: Operation) => {
     const response = operation.kind === 'form'
       ? await deliverForm(db, operation, connection)
       : await portalRequest(connection, operation.path!, operation.method!, operation.body as object | undefined, fetch, operation.idempotency_key)
-    const completed = await db.updateTable('extensions.gcs_portal_operation').set({ state: 'delivered', response,
+    const completed = await db.updateTable('extensions.gcs_ssc_portal_connector_operation').set({ state: 'delivered', response,
       last_error: null, delivered_at: new Date(), updated_at: new Date() })
       .where('id', '=', operation.id).where('state', '=', 'leased').where('attempts', '=', operation.attempts).returning('id').executeTakeFirst()
     if (!completed) return { id: operation.id, delivered: false, error: 'Portal operation lease expired.' }
@@ -72,12 +72,12 @@ const deliver = async (db: ConnectorDb, operation: Operation) => {
     const callConflict = error instanceof PortalRequestError && error.status === 409
       && operation.method === 'PUT' && /^calls\/[^/]+$/.test(operation.path ?? '')
     if (callConflict) {
-      await db.updateTable('extensions.gcs_portal_operation').set({ state: 'failed', last_error: message,
+      await db.updateTable('extensions.gcs_ssc_portal_connector_operation').set({ state: 'failed', last_error: message,
         updated_at: new Date() }).where('id', '=', operation.id)
         .where('state', '=', 'leased').where('attempts', '=', operation.attempts).execute()
       return { id: operation.id, delivered: false, error: message, conflict: true }
     }
-    await sql`UPDATE extensions.gcs_portal_operation SET state='pending', last_error=${message},
+    await sql`UPDATE extensions.gcs_ssc_portal_connector_operation SET state='pending', last_error=${message},
       next_attempt_at=now() + (${retryDelaySeconds(operation.attempts)} || ' seconds')::interval,
       updated_at=now() WHERE id=${operation.id}::bigint AND state='leased'
       AND attempts=${operation.attempts}`.execute(db)
@@ -86,14 +86,14 @@ const deliver = async (db: ConnectorDb, operation: Operation) => {
 }
 
 const lease = async (db: ConnectorDb, agencyId?: string, operationId?: string): Promise<Operation | undefined> =>
-  (await sql<Operation>`UPDATE extensions.gcs_portal_operation operation
+  (await sql<Operation>`UPDATE extensions.gcs_ssc_portal_connector_operation operation
     SET state='leased', attempts=attempts+1, next_attempt_at=now() + interval '2 minutes', updated_at=now()
-    WHERE id=(SELECT candidate.id FROM extensions.gcs_portal_operation candidate
+    WHERE id=(SELECT candidate.id FROM extensions.gcs_ssc_portal_connector_operation candidate
       WHERE candidate.state IN ('pending','leased') AND candidate.next_attempt_at<=now()
         AND (${agencyId ?? null}::bigint IS NULL OR candidate.agency_id=${agencyId ?? null}::bigint)
         AND (${operationId ?? null}::bigint IS NULL OR candidate.id=${operationId ?? null}::bigint)
         AND ${enabledPortalAgency('candidate.agency_id')}
-        AND NOT EXISTS (SELECT 1 FROM extensions.gcs_portal_operation earlier
+        AND NOT EXISTS (SELECT 1 FROM extensions.gcs_ssc_portal_connector_operation earlier
           WHERE earlier.agency_id=candidate.agency_id AND earlier.id<candidate.id
             AND earlier.state IN ('pending','leased'))
       ORDER BY candidate.next_attempt_at, candidate.id FOR UPDATE SKIP LOCKED LIMIT 1)
@@ -115,21 +115,21 @@ export const queuePortalClient = (db: ConnectorDb, agencyId: string, connection:
   createPortalClient(connection, fetch, async (path, method, body) => {
     const deduplicationKey = deliveryScope ? `${deliveryScope}:${agencyId}:${createHash('sha256')
       .update(serializePortalBody({ path, method, body: body ?? null })).digest('hex')}` : null
-    const inserted = await db.insertInto('extensions.gcs_portal_operation').values({
+    const inserted = await db.insertInto('extensions.gcs_ssc_portal_connector_operation').values({
       agency_id: agencyId, kind: 'request', method, path, body: body ?? null, form_id: null,
       deduplication_key: deduplicationKey,
       last_error: null, response: null, delivered_at: null
     }).onConflict(conflict => conflict.column('deduplication_key').doNothing())
       .returning('id').executeTakeFirst()
-    const stored = inserted ?? await db.selectFrom('extensions.gcs_portal_operation')
+    const stored = inserted ?? await db.selectFrom('extensions.gcs_ssc_portal_connector_operation')
       .select('id').where('deduplication_key', '=', deduplicationKey).executeTakeFirstOrThrow()
-    const saved = await db.selectFrom('extensions.gcs_portal_operation').select(['state', 'response'])
+    const saved = await db.selectFrom('extensions.gcs_ssc_portal_connector_operation').select(['state', 'response'])
       .where('id', '=', String(stored.id)).executeTakeFirstOrThrow()
     if (saved.state === 'delivered') return saved.response
     if (saved.state === 'failed') throw new PortalRequestError(409, path)
     const operation = await lease(db, agencyId, String(stored.id))
     if (!operation) {
-      const delivered = await db.selectFrom('extensions.gcs_portal_operation').select(['state', 'response'])
+      const delivered = await db.selectFrom('extensions.gcs_ssc_portal_connector_operation').select(['state', 'response'])
         .where('id', '=', String(stored.id)).executeTakeFirst()
       if (delivered?.state === 'delivered') return delivered.response
       throw new Error('Portal operation is queued behind an earlier delivery.')
@@ -141,9 +141,9 @@ export const queuePortalClient = (db: ConnectorDb, agencyId: string, connection:
   })
 
 export const enqueueForm = async (db: ConnectorDb, agencyId: string, formId: string) => {
-  const form = await db.selectFrom('extensions.gcs_portal_form').select(['definition', 'revision'])
+  const form = await db.selectFrom('extensions.gcs_ssc_portal_connector_form').select(['definition', 'revision'])
     .where('agency_id', '=', agencyId).where('id', '=', formId).executeTakeFirstOrThrow()
-  await db.insertInto('extensions.gcs_portal_operation').values({
+  await db.insertInto('extensions.gcs_ssc_portal_connector_operation').values({
     agency_id: agencyId, kind: 'form', method: null, path: null,
     body: { definition: designerSurveySchema.parse(form.definition), revision: form.revision },
     form_id: formId, last_error: null, response: null, delivered_at: null

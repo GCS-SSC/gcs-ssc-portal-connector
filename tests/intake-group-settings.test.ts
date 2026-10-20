@@ -33,7 +33,7 @@ describe('intake group configuration', () => {
       await sql`CREATE TABLE "Common_Group" (id bigint PRIMARY KEY, egcs_cn_agency bigint NOT NULL,
         egcs_cn_name_en text NOT NULL, egcs_cn_name_fr text NOT NULL, _deleted boolean NOT NULL)`.execute(db)
       await sql`CREATE TABLE "user" (id bigint PRIMARY KEY, _deleted boolean NOT NULL)`.execute(db)
-      await sql`CREATE TABLE "Common_User" (id bigint PRIMARY KEY, egcs_cn_auth_user_id bigint NOT NULL, _deleted boolean NOT NULL)`.execute(db)
+      await sql`CREATE TABLE "Common_User" (id bigint PRIMARY KEY, egcs_cn_authuserid bigint NOT NULL, _deleted boolean NOT NULL)`.execute(db)
       await sql`CREATE TABLE "Common_Group_Member" (id bigint PRIMARY KEY, egcs_cn_group bigint NOT NULL,
         egcs_cn_user bigint NOT NULL, _deleted boolean NOT NULL)`.execute(db)
       await sql`INSERT INTO "user" VALUES (1,false),(2,true)`.execute(db)

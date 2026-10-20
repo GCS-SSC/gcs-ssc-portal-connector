@@ -4,7 +4,7 @@ import { defineGcsExtensionMigration } from '@gcs-ssc/extensions/server'
 export default defineGcsExtensionMigration({
   up: async (db) => {
     await sql`
-      CREATE TABLE extensions.gcs_portal_connection (
+      CREATE TABLE extensions.gcs_ssc_portal_connector_connection (
         agency_id bigint PRIMARY KEY REFERENCES "Agency_Profile"(id),
         portal_agency_id text NOT NULL,
         portal_url text NOT NULL,
@@ -14,7 +14,7 @@ export default defineGcsExtensionMigration({
       )
     `.execute(db)
     await sql`
-      CREATE TABLE extensions.gcs_portal_receipt (
+      CREATE TABLE extensions.gcs_ssc_portal_connector_receipt (
         id bigserial PRIMARY KEY,
         agency_id bigint NOT NULL REFERENCES "Agency_Profile"(id),
         event_id text NOT NULL,
@@ -28,13 +28,13 @@ export default defineGcsExtensionMigration({
         created_at timestamptz NOT NULL DEFAULT now(),
         updated_at timestamptz NOT NULL DEFAULT now(),
         UNIQUE (agency_id, event_id),
-        UNIQUE (agency_id, item_submission_id)
+        CONSTRAINT gcs_ssc_portal_connector_receipt_item_key UNIQUE (agency_id, item_submission_id)
       )
     `.execute(db)
-    await sql`CREATE INDEX gcs_portal_receipt_agency_state ON extensions.gcs_portal_receipt (agency_id, state, id)`.execute(db)
+    await sql`CREATE INDEX gcs_portal_receipt_agency_state ON extensions.gcs_ssc_portal_connector_receipt (agency_id, state, id)`.execute(db)
   },
   down: async (db) => {
-    await sql`DROP TABLE extensions.gcs_portal_receipt`.execute(db)
-    await sql`DROP TABLE extensions.gcs_portal_connection`.execute(db)
+    await sql`DROP TABLE extensions.gcs_ssc_portal_connector_receipt`.execute(db)
+    await sql`DROP TABLE extensions.gcs_ssc_portal_connector_connection`.execute(db)
   }
 })

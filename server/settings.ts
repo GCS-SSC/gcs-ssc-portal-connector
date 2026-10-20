@@ -18,7 +18,7 @@ const inputSchema = z.object({
 
 export const getSettings = async (context: GcsExtensionRouteContext) => {
   const agencyId = agencyIdFromContext(context)
-  const connection = await asConnectorDb(context.db).selectFrom('extensions.gcs_portal_connection')
+  const connection = await asConnectorDb(context.db).selectFrom('extensions.gcs_ssc_portal_connector_connection')
     .select(['portal_status_ids', 'entity_status_ids', 'pull_interval_minutes', 'last_pull_at', 'last_pull_error'])
     .where('agency_id', '=', agencyId).executeTakeFirst()
   const statuses = (await sql<{ id: string; name_en: string; name_fr: string }>`
@@ -39,7 +39,7 @@ export const saveSettings = async (context: GcsExtensionRouteContext) => {
   const input = inputSchema.parse(await context.readBody())
   const agencyId = agencyIdFromContext(context)
   await authorizedWrite(context, async (transaction) => {
-    const connection = await transaction.selectFrom('extensions.gcs_portal_connection')
+    const connection = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_connection')
       .select(['agency_id', 'portal_status_ids', 'entity_status_ids']).where('agency_id', '=', agencyId).forUpdate().executeTakeFirst()
     if (!connection) throw new Error('Connect the portal first.')
     const ids = [...new Set([
@@ -53,7 +53,7 @@ export const saveSettings = async (context: GcsExtensionRouteContext) => {
     const agreementIds = [...new Set(input.portalStatusIds)]
     const nextEntityIds = Object.fromEntries(Object.entries(input.entityStatusIds)
       .map(([key, values]) => [key, [...new Set(values)]])) as z.infer<typeof entityStatusIds>
-    await transaction.updateTable('extensions.gcs_portal_connection').set({
+    await transaction.updateTable('extensions.gcs_ssc_portal_connector_connection').set({
       portal_status_ids: sql`${JSON.stringify(agreementIds)}::jsonb`,
       entity_status_ids: sql`${JSON.stringify(nextEntityIds)}::jsonb`,
       pull_interval_minutes: input.pullIntervalMinutes,
@@ -62,11 +62,14 @@ export const saveSettings = async (context: GcsExtensionRouteContext) => {
     if (JSON.stringify([...connection.portal_status_ids].sort()) !== JSON.stringify([...agreementIds].sort())) {
       await enqueueAllVerifiedAgreements(transaction, agencyId)
     }
-    if (JSON.stringify(connection.entity_status_ids) !== JSON.stringify(nextEntityIds)) {
+    const entityStatusesChanged = (['claim', 'forecast', 'funding_application', 'other_form'] as const)
+      .some(kind => JSON.stringify([...connection.entity_status_ids[kind]].sort())
+        !== JSON.stringify([...nextEntityIds[kind]].sort()))
+    if (entityStatusesChanged) {
       await sql`
-      INSERT INTO extensions.gcs_portal_outcome_outbox (agency_id,receipt_id,status_id)
+      INSERT INTO extensions.gcs_ssc_portal_connector_outcome_outbox (agency_id,receipt_id,status_id)
       SELECT receipt.agency_id,receipt.id,COALESCE(claim.egcs_fc_status,forecast.egcs_fc_status,intake.egcs_fi_status)
-      FROM extensions.gcs_portal_receipt receipt
+      FROM extensions.gcs_ssc_portal_connector_receipt receipt
       LEFT JOIN "Funding_Case_Agreement_Claim" claim
         ON receipt.gcs_entity_type='fundingcaseagreementclaim' AND claim.id=receipt.gcs_entity_id
       LEFT JOIN "Funding_Case_Agreement_Forecast" forecast
