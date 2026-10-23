@@ -190,6 +190,18 @@ beforeEach(() => {
 })
 
 describe('connector form requirements', () => {
+  it.each([
+    ['en', 'As often as possible', 'every five minutes'],
+    ['fr', 'Dès que possible', 'toutes les cinq minutes']
+  ] as const)('explains the shared minimum polling cadence in %s', async (locale, label, help) => {
+    state.locale = locale
+    const wrapper = mount(PortalConnection, { props: { agencyId: '1', section: 'connection', enabled: true } })
+    await flushPromises()
+    expect(wrapper.get('select[name="pullSchedule"] option[value="1"]').text()).toBe(label)
+    expect(wrapper.get('[data-field="pullSchedule"]').text()).toContain(help)
+    wrapper.unmount()
+  })
+
   it('restores intake navigation when a refreshed intake has been published by another editor', async () => {
     const item = { id: 'D-ABCDE', revision: 1, published: false, surveyId: null, surveyRevision: null,
       streamId: '1', nameEn: 'Application', nameFr: 'Demande', startDate: '2026-01-01', endDate: '2026-12-31' }

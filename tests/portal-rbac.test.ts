@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest'
 import extension from '../extension.config.ts'
 
 describe('Portal workspace authorization contract', () => {
+  it('declares generic background scheduling and its separate host import capabilities', () => {
+    expect(extension.requiredHostCapabilities).toEqual(expect.arrayContaining([
+      'background-queue', 'scheduled-agreement-import', 'scheduled-intake-import'
+    ]))
+    expect(extension.requiredHostCapabilities).not.toContain('l1-queue')
+    expect(extension.nitroPlugin).toBe('./server/plugins/outbox.ts')
+  })
+
   it('requires Agency Manager for every agency mutation and Agency Viewer for reads', () => {
     for (const handler of extension.serverHandlers ?? []) {
       if (!handler.rbac) throw new Error(`${handler.method} ${handler.route} lacks RBAC`)

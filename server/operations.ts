@@ -106,7 +106,6 @@ export const drainOperations = async (db: ConnectorDb, limit: number, agencyId?:
     if (!operation) break
     const result = await deliver(db, operation)
     results.push(result)
-    if (!result.delivered) break
   }
   return { results }
 }

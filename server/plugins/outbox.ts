@@ -1,5 +1,5 @@
 import { defineGcsExtensionNitroPlugin, getGcsExtensionHookDatabase, type GcsExtensionRouteContext,
-  registerGcsExtensionL1QueueHandler } from '@gcs-ssc/extensions/server'
+  registerGcsExtensionQueueHandler } from '@gcs-ssc/extensions/server'
 import { asConnectorDb } from '../db.ts'
 import { drainOutbox } from '../outbox.ts'
 import { drainOutcomeOutbox } from '../outcomes.ts'
@@ -12,13 +12,13 @@ import { initializeLocalPortalDemo } from '../local-demo.ts'
 /** The host leases both recurring schedules; domain queues retain delivery evidence. */
 export default defineGcsExtensionNitroPlugin((nitroApp) => {
   let demoInitialization: Promise<void> | null = null
-  registerGcsExtensionL1QueueHandler({
-    extensionKey: EXTENSION_KEY, id: 'deliveries', intervalMs: 5000,
+  registerGcsExtensionQueueHandler({
+    extensionKey: EXTENSION_KEY, id: 'deliveries', queueLevel: 1,
     run: async context => {
       const database = asConnectorDb(context.db)
-      await drainOperations(database, 2)
-      await drainOutbox(database, 2)
-      await drainOutcomeOutbox(database, 2)
+      await drainOperations(database, 120)
+      await drainOutbox(database, 120)
+      await drainOutcomeOutbox(database, 120)
     }
   }, nitroApp)
   nitroApp.hooks.hook('request', async (event: { context?: { $db?: unknown } }) => {
@@ -31,8 +31,8 @@ export default defineGcsExtensionNitroPlugin((nitroApp) => {
     })
     await demoInitialization
   })
-  registerGcsExtensionL1QueueHandler({
-    extensionKey: EXTENSION_KEY, id: 'imports', intervalMs: 60000,
+  registerGcsExtensionQueueHandler({
+    extensionKey: EXTENSION_KEY, id: 'imports', queueLevel: 1,
     run: async payload => {
       const pulled = await pullDueAgencies(asConnectorDb(payload.db))
       for (const agency of pulled.results) {

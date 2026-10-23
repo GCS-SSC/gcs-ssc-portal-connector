@@ -66,7 +66,6 @@ export const drainOutbox = async (db: ConnectorDb, limit: number, agencyId?: str
         AND state='leased' AND attempts=${row.attempts}`.execute(db)
       results.push({ id: row.id, delivered: false, error: message })
     }
-    if (index < limit - 1) await new Promise((resolve) => setTimeout(resolve, 500))
   }
   return { results }
 }

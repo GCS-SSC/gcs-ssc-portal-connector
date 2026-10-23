@@ -5,10 +5,10 @@ const drainOutcomeOutbox = vi.hoisted(() => vi.fn(async () => ({ results: [] }))
 const pullDueAgencies = vi.hoisted(() => vi.fn(async (): Promise<{ results: Array<{ agencyId: string; found: number; error?: string }> }> => ({ results: [] })))
 const drainOperations = vi.hoisted(() => vi.fn(async () => ({ results: [] })))
 
-const handlers = vi.hoisted(() => new Map<string, { intervalMs: number; run: (context: unknown) => Promise<void> }>())
+const handlers = vi.hoisted(() => new Map<string, { queueLevel: number; run: (context: unknown) => Promise<void> }>())
 vi.mock('@gcs-ssc/extensions/server', async importOriginal => ({
   ...await importOriginal<object>(),
-  registerGcsExtensionL1QueueHandler: (handler: { id: string; intervalMs: number; run: (context: unknown) => Promise<void> }) => {
+  registerGcsExtensionQueueHandler: (handler: { id: string; queueLevel: number; run: (context: unknown) => Promise<void> }) => {
     handlers.set(handler.id, handler)
   }
 }))
@@ -26,26 +26,31 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-describe('host L1 scheduled portal worker', () => {
+describe('host background queue Portal worker', () => {
   it('registers bounded delivery and import handlers without requiring an HTTP response', async () => {
     handlers.clear()
     const plugin = (await import('../server/plugins/outbox.ts')).default
     plugin({ hooks: { hook: vi.fn() } } as never)
     const database = { source: 'L1 task' }
-    expect(handlers.get('deliveries')?.intervalMs).toBe(5000)
-    expect(handlers.get('imports')?.intervalMs).toBe(60000)
+    expect(handlers.get('deliveries')).toMatchObject({ queueLevel: 1 })
+    expect(handlers.get('deliveries')).not.toHaveProperty('intervalMs')
+    expect(handlers.get('imports')).toMatchObject({ queueLevel: 1 })
+    expect(handlers.get('imports')).not.toHaveProperty('intervalMs')
     await handlers.get('imports')?.run({ db: database, createWriteAuthorization: vi.fn(), runForAgency: vi.fn() })
     expect(pullDueAgencies).toHaveBeenCalledWith(database)
     await handlers.get('deliveries')?.run({ db: database })
-    expect(drainOperations).toHaveBeenCalledWith(database, 2)
-    expect(drainOutbox).toHaveBeenCalledWith(database, 2)
-    expect(drainOutcomeOutbox).toHaveBeenCalledWith(database, 2)
+    expect(drainOperations).toHaveBeenCalledWith(database, 120)
+    expect(drainOutbox).toHaveBeenCalledWith(database, 120)
+    expect(drainOutcomeOutbox).toHaveBeenCalledWith(database, 120)
   })
 
   it('uses the host agency context for imports and releases a failed import lease', async () => {
     const plugin = (await import('../server/plugins/outbox.ts')).default
     plugin({ hooks: { hook: vi.fn() } } as never)
-    pullDueAgencies.mockResolvedValueOnce({ results: [{ agencyId: '11', found: 1 }] })
+    pullDueAgencies.mockResolvedValueOnce({ results: [
+      { agencyId: '11', found: 1 }, { agencyId: '22', found: 1 },
+      { agencyId: '33', found: 0 }, { agencyId: '44', found: 0, error: 'Poll failed' }
+    ] })
     const database = { source: 'L1 import' }
     const authorization = { source: 'host authorization' }
     const createWriteAuthorization = vi.fn(() => authorization)
@@ -58,7 +63,9 @@ describe('host L1 scheduled portal worker', () => {
       expect(createWriteAuthorization).toHaveBeenCalledWith('gcs-ssc-portal-connector', '11')
       expect(syncPortal).toHaveBeenCalledWith(expect.objectContaining({ db: database,
         params: { agencyId: '11' }, config: {}, agencyConfig: {}, writeAuthorization: authorization }))
-      expect(releasePullLease).toHaveBeenCalledWith(database, '11')
+      expect(releasePullLease.mock.calls).toEqual([[database, '11'], [database, '22'], [database, '33']])
+      expect(runForAgency.mock.calls.map(([agencyId]) => agencyId)).toEqual(['11', '22'])
+      expect(syncPortal).toHaveBeenCalledTimes(2)
     } finally { log.mockRestore() }
   })
 })

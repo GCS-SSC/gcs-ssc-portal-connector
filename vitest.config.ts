@@ -12,6 +12,7 @@ export default defineConfig({
   plugins: [vue()],
   resolve: { alias: hostRoot ? [{ find: '~~', replacement: hostRoot }] : [] },
   test: {
+    include: ['tests/*.test.ts'],
     maxWorkers: 4,
     coverage: {
       provider: 'v8',

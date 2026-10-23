@@ -580,7 +580,7 @@ watch(() => props.agencyId, searchProponents)
         <ExtensionFormField :label="t('pullSchedule')" name="pullSchedule" :description="t('pullScheduleHelp')">
           <ExtensionSelect v-model="pullInterval" :items="[
             { value: 'manual', label: t('manualOnly') },
-            { value: '1', label: t('everyMinute') },
+            { value: '1', label: t('everyScheduledCheck') },
             { value: '5', label: t('everyFiveMinutes') },
             { value: '15', label: t('everyFifteenMinutes') },
             { value: '30', label: t('everyThirtyMinutes') },

@@ -1,10 +1,9 @@
-import { readdirSync } from 'node:fs'
 import { Kysely, sql } from 'kysely'
 import { KyselyPGlite } from 'kysely-pglite'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { setEncryptedExtensionSecret, type GcsExtensionRouteContext } from '@gcs-ssc/extensions/server'
+import type { GcsExtensionRouteContext } from '@gcs-ssc/extensions/server'
 import type { ConnectorDatabase } from '../server/db.ts'
-import { secretOptions } from '../server/connection.ts'
+import { migrateQueueFixture, resetQueueFixture } from './fixtures/queue-database.ts'
 import { drainOutbox, enqueueAgreement, getOutboxItem, listOutbox, pushOutbox } from '../server/outbox.ts'
 import { drainOutcomeOutbox } from '../server/outcomes.ts'
 import { pullDueAgencies, releasePullLease } from '../server/pull.ts'
@@ -13,50 +12,11 @@ let db: Kysely<ConnectorDatabase>
 const context = (agencyId: string, itemId?: string) => ({ db, params: { agencyId, itemId } }) as unknown as GcsExtensionRouteContext
 beforeAll(async () => {
   db = new Kysely<ConnectorDatabase>({ dialect: new KyselyPGlite().dialect })
-  const fixture = `CREATE SCHEMA extensions;
-    CREATE TABLE "Agency_Profile" (id bigint PRIMARY KEY, _deleted boolean DEFAULT false);
-    CREATE TABLE "Applicant_Recipient_Profile" (id bigint PRIMARY KEY);
-    CREATE TABLE "Funding_Case_Agreement_Profile" (id bigint PRIMARY KEY);
-    CREATE TABLE "Funding_Case_Agreement_Budget_Fiscal_Year" (id bigint PRIMARY KEY);
-    CREATE TABLE "Funding_Case_Agreement_Budget_Line_Item" (id bigint PRIMARY KEY);
-    CREATE TABLE "Funding_Case_Agreement_Budget_Version" (id bigint PRIMARY KEY);
-    CREATE TABLE "Funding_Case_Agreement_Applicant_Recipient" (id bigint PRIMARY KEY);
-    CREATE TABLE "Funding_Case_Agreement_Claim" (id bigint PRIMARY KEY, egcs_fc_status bigint);
-    CREATE TABLE "Funding_Case_Agreement_Forecast" (id bigint PRIMARY KEY, egcs_fc_status bigint);
-    CREATE TABLE "Funding_Case_Intake_Profile" (id bigint PRIMARY KEY, egcs_fi_status bigint);
-    CREATE TABLE "Common_Status" (id bigint PRIMARY KEY, egcs_cn_name_en text, egcs_cn_name_fr text, egcs_cn_color text, _deleted boolean);
-    CREATE TABLE extensions.agency_enablement (extension_key text, agency_id bigint, enabled boolean, _deleted boolean DEFAULT false);
-    CREATE TABLE extensions.secret_entry (id bigserial PRIMARY KEY, extension_key text, owner_type text, owner_id text, secret_key text,
-      ciphertext text, iv text, auth_tag text, algorithm text, key_version integer, metadata jsonb,
-      created_at timestamptz DEFAULT now(), updated_at timestamptz, _deleted boolean DEFAULT false);
-    INSERT INTO "Agency_Profile" (id) VALUES (11),(22);
-    INSERT INTO "Applicant_Recipient_Profile" VALUES (101);
-    INSERT INTO "Funding_Case_Agreement_Profile" VALUES (201)`
-  for (const statement of fixture.split(';')) await sql.raw(statement).execute(db)
-  const directory = new URL('../server/migrations/', import.meta.url)
-  for (const file of readdirSync(directory).sort()) {
-    const migration = await import(new URL(file, directory).href)
-    await migration.default.up(db)
-  }
+  await migrateQueueFixture(db)
 }, 30_000)
 beforeEach(async () => {
   vi.stubEnv('GCS_EXTENSION_SECRETS_KEY', 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=')
-  for (const table of ['operation', 'outcome_outbox', 'inbox', 'outbox', 'receipt', 'connection', 'identity', 'verification']) {
-    await sql.raw(`TRUNCATE extensions.gcs_ssc_portal_connector_${table} RESTART IDENTITY CASCADE`).execute(db)
-  }
-  await sql`TRUNCATE extensions.agency_enablement, extensions.secret_entry, "Common_Status",
-    "Funding_Case_Agreement_Claim", "Funding_Case_Agreement_Forecast", "Funding_Case_Intake_Profile" CASCADE`.execute(db)
-  await sql`INSERT INTO extensions.agency_enablement VALUES
-    ('gcs-ssc-portal-connector',11,true,false), ('gcs-ssc-portal-connector',22,true,false)`.execute(db)
-  await sql`INSERT INTO "Common_Status" VALUES (401,'Approved','Approuvé','#123abc',false)`.execute(db)
-  for (const agencyId of ['11', '22']) {
-    await db.insertInto('extensions.gcs_ssc_portal_connector_connection').values({
-      agency_id: agencyId, portal_agency_id: `G-${agencyId}`, portal_url: 'https://portal.example/',
-      scan_cursor: null, pull_interval_minutes: 5, last_pull_at: null, last_pull_error: null,
-      pull_lease_until: null, updated_at: new Date()
-    }).execute()
-    await setEncryptedExtensionSecret(db, { ...secretOptions(agencyId), value: { key: `gcs_${'a'.repeat(43)}` } })
-  }
+  await resetQueueFixture(db)
 })
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs() })
 afterAll(async () => { await db.destroy() })
@@ -164,6 +124,22 @@ describe('agreement queue recovery and visibility', () => {
 })
 
 describe('pull queue pagination, retry and leases', () => {
+  it('polls several due Agencies in one run and excludes manual or not-yet-due preferences', async () => {
+    const transport = vi.fn(async () => Response.json({ updates: [], nextCursor: null }))
+    vi.stubGlobal('fetch', transport)
+    expect(await pullDueAgencies(db)).toEqual({ results: [
+      { agencyId: '11', found: 0 }, { agencyId: '22', found: 0 }
+    ] })
+    await releasePullLease(db, '11')
+    await releasePullLease(db, '22')
+    await db.updateTable('extensions.gcs_ssc_portal_connector_connection')
+      .set({ pull_interval_minutes: null }).where('agency_id', '=', '11').execute()
+    await db.updateTable('extensions.gcs_ssc_portal_connector_connection')
+      .set({ pull_interval_minutes: 60 }).where('agency_id', '=', '22').execute()
+    expect(await pullDueAgencies(db)).toEqual({ results: [] })
+    expect(transport).toHaveBeenCalledTimes(2)
+  })
+
   it('persists paginated events once and skips disabled agencies', async () => {
     await sql`UPDATE extensions.agency_enablement SET enabled=false WHERE agency_id=22`.execute(db)
     const event = { eventId: '71', kind: 'submission_item', submissionId: 'submission', itemSubmissionId: 'item',
