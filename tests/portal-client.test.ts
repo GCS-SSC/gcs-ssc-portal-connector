@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createPortalClient } from '../server/portal-client.ts'
+import { createPortalClient, portalRequest } from '../server/portal-client.ts'
 import { testConnection } from '../server/connection.ts'
 import type { GcsExtensionRouteContext } from '@gcs-ssc/extensions/server'
 
@@ -12,6 +12,30 @@ const connection = {
 }
 
 describe('portal transport', () => {
+  it('rejects oversized JSON responses before interpreting the remote payload', async () => {
+    const transport = vi.fn(async () => new Response('x'.repeat(4 * 1024 * 1024 + 1)))
+    await expect(portalRequest(connection, 'oversized', 'GET', undefined, transport)).rejects.toThrow('exceeds 4 MiB')
+    expect(transport).toHaveBeenCalledTimes(1)
+  })
+  it.each([null, 'not an envelope', {}])('rejects an invalid immutable submission envelope: %j', async envelope => {
+    const transport = vi.fn(async () => Response.json(envelope))
+    await expect(createPortalClient(connection, transport).submission('submission-1')).rejects.toThrow()
+    expect(transport).toHaveBeenCalledTimes(1)
+  })
+  it('reuses an identical immutable item reference and refuses a conflicting one without mutations', async () => {
+    const transport = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => Response.json({ outcomes: [{ itemSubmissionId: 'item-1', remoteReference: '91', revision: 3 }] }))
+    const client = createPortalClient(connection, transport)
+    await client.publishItemReference('submission-1', 'item-1', '91')
+    await expect(client.publishItemReference('submission-1', 'item-1', '92')).rejects.toThrow('another GCS record')
+    expect(transport.mock.calls).toHaveLength(2)
+    expect(transport.mock.calls.every(([_url, init]) => !init?.method || init.method === 'GET')).toBe(true)
+  })
+  it('does not republish an unchanged status and reference', async () => {
+    const status = { en: 'Approved', fr: 'Approuvé', colour: '#123456' }
+    const transport = vi.fn(async () => Response.json({ outcomes: [{ itemSubmissionId: 'item-1', remoteReference: '91', revision: 3, gcsStatus: status }] }))
+    await createPortalClient(connection, transport).publishItemStatus('submission-1', 'item-1', '91', status)
+    expect(transport).toHaveBeenCalledTimes(1)
+  })
   it('routes every mutation through the supplied outbound queue while reads use the transport', async () => {
     const transport = vi.fn(async () => Response.json({ surveys: [] })) as unknown as typeof fetch
     const queue = vi.fn(async (_path: string, _method: string, _body?: object) =>

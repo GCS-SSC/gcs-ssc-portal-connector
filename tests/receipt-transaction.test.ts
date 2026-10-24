@@ -7,6 +7,8 @@ import type { PortalSubmission, PortalUpdate } from '../shared/portal-contract.t
 const portal = vi.hoisted(() => ({
   update: null as PortalUpdate | null,
   submission: null as PortalSubmission | null,
+  updates: vi.fn<(after?: string) => Promise<{ updates: PortalUpdate[]; nextCursor: string | null }>>(),
+  response: vi.fn(async () => ({ evidence: 'original documentation' })),
   publishItemReference: vi.fn(async () => undefined),
   consume: vi.fn(async () => undefined)
 }))
@@ -25,7 +27,8 @@ vi.mock('../server/portal-client.ts', () => ({
    * @returns The fake client bound to the current test submission.
    */
   createPortalClient: () => ({
-    updates: async () => ({ updates: portal.update ? [portal.update] : [], nextCursor: null }),
+    updates: portal.updates,
+    response: portal.response,
     submission: async () => portal.submission,
     publishItemReference: portal.publishItemReference,
     consume: portal.consume
@@ -51,6 +54,15 @@ const submission = (itemSubmissionId: string): PortalSubmission => ({
       submittedCostSubsection: null, submittedLineItem: null,
       description: 'Eligible cost', amount: '1.00', currency: 'CAD' }]
   } }]
+})
+
+const forecastSubmission = (): PortalSubmission => ({
+  ...submission('item-1'),
+  items: [{ kind: 'forecast', itemSubmissionId: 'item-1', mappingComplete: true,
+    forecast: { agreementId: '33', header: { egcs_fc_fiscalyear: '77' },
+      lineItems: [{ egcs_fc_fundingagreementbudgetlineitem: '66', egcs_fc_month: 0,
+        egcs_fc_amount: '1000.00', egcs_fc_currency: 'CAD' }] }
+  }]
 })
 
 describe('portal Claim receipt transaction', () => {
@@ -98,6 +110,8 @@ describe('portal Claim receipt transaction', () => {
     })
     portal.update = update('12', 'item-1')
     portal.submission = submission('item-1')
+    portal.updates.mockImplementation(async () => ({ updates: portal.update ? [portal.update] : [], nextCursor: null }))
+    portal.response.mockResolvedValue({ evidence: 'original documentation' })
   })
 
   afterEach(async () => {
@@ -107,6 +121,144 @@ describe('portal Claim receipt transaction', () => {
   const context = (database: Kysely<unknown>, create: ReturnType<typeof vi.fn>) => ({
     db: database, params: { agencyId: '11' },
     writeAuthorization: { createAgreementClaim: create }
+  })
+
+  it('requires a connection before reading remote updates or creating drafts', async () => {
+    await db.deleteFrom('extensions.gcs_ssc_portal_connector_connection' as never).execute()
+    const { syncPortal } = await import('../server/sync.ts')
+    await expect(syncPortal(context(db, createClaim) as never)).rejects.toThrow('Connect an organization portal')
+    expect(portal.updates).not.toHaveBeenCalled()
+    expect(createClaim).not.toHaveBeenCalled()
+  })
+
+  it.each(['claim', 'forecast'] as const)('reuses a completed %s receipt after an acknowledgement retry', async kind => {
+    if (kind === 'forecast') portal.submission = forecastSubmission()
+    const createForecast = vi.fn(async () => ({ status: 'created', forecastId: '91', version: '3', lineItemIds: [], draftStatusId: '90' }))
+    const request = { ...context(db, createClaim), writeAuthorization: { createAgreementClaim: createClaim, createAgreementForecast: createForecast } }
+    const { syncPortal } = await import('../server/sync.ts')
+    const first = await syncPortal(request as never)
+    const retry = await syncPortal(request as never)
+    expect(retry.imported).toEqual(first.imported)
+    expect(retry.imported).toHaveLength(1)
+    expect(kind === 'claim' ? createClaim : createForecast).toHaveBeenCalledTimes(1)
+    expect(portal.consume).toHaveBeenCalledTimes(2)
+    expect((await sql`SELECT count(*)::int AS count FROM extensions.gcs_ssc_portal_connector_receipt`.execute(db)).rows).toEqual([{ count: 1 }])
+  })
+
+  it.each(['claim', 'forecast'] as const)('keeps a %s pending when the atomic host service is unavailable', async kind => {
+    if (kind === 'forecast') portal.submission = forecastSubmission()
+    const { syncPortal } = await import('../server/sync.ts')
+    const result = await syncPortal({ db, params: { agencyId: '11' }, writeAuthorization: {} } as never)
+    expect(result.pending).toEqual([expect.objectContaining({ reason: `The host does not provide atomic ${kind === 'claim' ? 'Claim' : 'Forecast'} creation.` })])
+    expect(result.imported).toEqual([])
+    expect(portal.consume).not.toHaveBeenCalled()
+    expect((await sql`SELECT id FROM extensions.gcs_ssc_portal_connector_receipt`.execute(db)).rows).toEqual([])
+  })
+
+  it.each(['claim', 'forecast'] as const)('retains a %s whose host creation result is not created', async kind => {
+    if (kind === 'forecast') portal.submission = forecastSubmission()
+    const rejected = vi.fn(async () => ({ status: 'unavailable' }))
+    const { syncPortal } = await import('../server/sync.ts')
+    const result = await syncPortal({ db, params: { agencyId: '11' },
+      writeAuthorization: { createAgreementClaim: rejected, createAgreementForecast: rejected } } as never)
+    expect(result.pending).toEqual([expect.objectContaining({ reason: `${kind === 'claim' ? 'Claim' : 'Forecast'} cannot be imported: unavailable.` })])
+    expect(result.imported).toEqual([])
+    expect(portal.publishItemReference).not.toHaveBeenCalled()
+    expect(portal.consume).not.toHaveBeenCalled()
+    expect((await sql`SELECT id FROM extensions.gcs_ssc_portal_connector_receipt`.execute(db)).rows).toEqual([])
+  })
+
+  it.each([
+    ['claim', 'event'], ['claim', 'state'], ['claim', 'entity'],
+    ['forecast', 'event'], ['forecast', 'state'], ['forecast', 'entity']
+  ] as const)('does not acknowledge a conflicting %s receipt with mismatched %s', async (kind, field) => {
+    if (kind === 'forecast') portal.submission = forecastSubmission()
+    await sql`INSERT INTO extensions.gcs_ssc_portal_connector_receipt
+      (agency_id,event_id,submission_id,item_submission_id,kind,state,gcs_entity_id)
+      VALUES ('11',${field === 'event' ? '99' : '12'},'submission-1','item-1',${kind},
+        ${field === 'state' ? 'received' : 'imported'},${field === 'entity' ? null : '88'})`.execute(db)
+    const createForecast = vi.fn()
+    const { syncPortal } = await import('../server/sync.ts')
+    const result = await syncPortal({ ...context(db, createClaim),
+      writeAuthorization: { createAgreementClaim: createClaim, createAgreementForecast: createForecast } } as never)
+    expect(result.pending).toEqual([expect.objectContaining({ reason: 'A conflicting or incomplete import receipt already exists.' })])
+    expect(result.imported).toEqual([])
+    expect(createClaim).not.toHaveBeenCalled()
+    expect(createForecast).not.toHaveBeenCalled()
+    expect(portal.consume).not.toHaveBeenCalled()
+  })
+
+  it.each(['proponent', 'stream'] as const)('leaves a Forecast pending without its frozen %s mapping', async missing => {
+    portal.submission = { ...forecastSubmission(), agreementReference: {
+      externalApplicantRecipientId: missing === 'proponent' ? null : '55',
+      externalStreamId: missing === 'stream' ? null : '44'
+    } }
+    const createForecast = vi.fn()
+    const { syncPortal } = await import('../server/sync.ts')
+    const result = await syncPortal({ ...context(db, createClaim), writeAuthorization: { createAgreementForecast: createForecast } } as never)
+    expect(result.pending).toEqual([expect.objectContaining({ reason: 'The organization has no verified GCS agreement and proponent mapping.' })])
+    expect(createForecast).not.toHaveBeenCalled()
+    expect(portal.consume).not.toHaveBeenCalled()
+  })
+
+  it('revalidates Forecast organization and live Stream ownership before calling the host', async () => {
+    portal.submission = forecastSubmission()
+    const createForecast = vi.fn()
+    const request = { ...context(db, createClaim), writeAuthorization: { createAgreementForecast: createForecast } }
+    const { syncPortal } = await import('../server/sync.ts')
+    await sql`UPDATE extensions.gcs_ssc_portal_connector_identity SET proponent_id='56'`.execute(db)
+    expect((await syncPortal(request as never)).pending).toEqual([expect.objectContaining({ reason: expect.stringContaining('not verified') })])
+    await sql`UPDATE extensions.gcs_ssc_portal_connector_identity SET proponent_id='55'`.execute(db)
+    await sql`UPDATE "Transfer_Payment_Stream" SET _deleted=true`.execute(db)
+    expect((await syncPortal(request as never)).pending).toEqual([expect.objectContaining({ reason: expect.stringContaining('mapping do not match') })])
+    expect(createForecast).not.toHaveBeenCalled()
+    expect(portal.consume).not.toHaveBeenCalled()
+  })
+
+  it.each(['item', 'detail', 'event'] as const)('retains unsupported documentation once using its %s identity and leaves it unacknowledged', async identity => {
+    portal.update = { ...update('12', 'item-1'), kind: 'organization_detail',
+      itemSubmissionId: identity === 'item' ? 'item-1' : null, detailId: identity === 'detail' ? 'detail-1' : null }
+    const { syncPortal } = await import('../server/sync.ts')
+    const first = await syncPortal(context(db, createClaim) as never)
+    expect(first.pending).toEqual([expect.objectContaining({ eventId: '12', code: 'documentationPending' })])
+    await syncPortal(context(db, createClaim) as never)
+    expect((await sql`SELECT item_submission_id, state, source_export FROM extensions.gcs_ssc_portal_connector_receipt`.execute(db)).rows)
+      .toEqual([{ item_submission_id: identity === 'item' ? 'item-1' : identity === 'detail' ? 'detail-1' : 'event:12',
+        state: 'unsupported', source_export: { evidence: 'original documentation' } }])
+    expect(portal.consume).not.toHaveBeenCalled()
+    expect(createClaim).not.toHaveBeenCalled()
+  })
+
+  it('retains a submission whose requested item is absent without creating or acknowledging a draft', async () => {
+    portal.submission = submission('different-item')
+    const { syncPortal } = await import('../server/sync.ts')
+    const result = await syncPortal(context(db, createClaim) as never)
+    expect(result.pending).toEqual([expect.objectContaining({ code: 'unsupportedPending', organizationId: 'organization-1' })])
+    expect((await sql`SELECT kind,state FROM extensions.gcs_ssc_portal_connector_receipt`.execute(db)).rows).toEqual([{ kind: 'unknown', state: 'unsupported' }])
+    expect(createClaim).not.toHaveBeenCalled()
+    expect(portal.consume).not.toHaveBeenCalled()
+  })
+
+  it('records an untyped remote failure without losing the pending event', async () => {
+    portal.update = { ...update('12', 'item-1'), kind: 'organization_detail' }
+    portal.response.mockRejectedValueOnce('Transport disconnected')
+    const { syncPortal } = await import('../server/sync.ts')
+    const result = await syncPortal(context(db, createClaim) as never)
+    expect(result.pending).toEqual([{ eventId: '12', reason: 'Import failed.' }])
+    expect((await sql`SELECT last_error FROM extensions.gcs_ssc_portal_connector_inbox`.execute(db)).rows).toEqual([{ last_error: 'Import failed.' }])
+    expect(portal.consume).not.toHaveBeenCalled()
+  })
+
+  it('bounds each feed scan to four pages and resumes its cursor on the next run', async () => {
+    portal.updates.mockImplementation(async after => ({ updates: [], nextCursor: String(Number(after ?? 20) + 1) }))
+    const { syncPortal } = await import('../server/sync.ts')
+    expect(await syncPortal(context(db, createClaim) as never)).toEqual({ imported: [], pending: [], hasMore: true })
+    expect(portal.updates.mock.calls).toEqual([[undefined], ['21'], ['22'], ['23']])
+    expect((await sql`SELECT scan_cursor FROM extensions.gcs_ssc_portal_connector_connection`.execute(db)).rows).toEqual([{ scan_cursor: '24' }])
+    portal.updates.mockResolvedValueOnce({ updates: [], nextCursor: null })
+    expect((await syncPortal(context(db, createClaim) as never)).hasMore).toBe(false)
+    expect(portal.updates).toHaveBeenLastCalledWith('24')
+    expect((await sql`SELECT scan_cursor FROM extensions.gcs_ssc_portal_connector_connection`.execute(db)).rows).toEqual([{ scan_cursor: null }])
   })
 
   it('commits the host draft and receipt together, then reuses the receipt on retry', async () => {

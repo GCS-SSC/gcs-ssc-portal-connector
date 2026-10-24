@@ -11,6 +11,25 @@ const metadata = { id: 'X-ABCDE', filename: 'community-health-evidence.txt', siz
   sha256: createHash('sha256').update(bytes).digest('hex'), status: 'ready' as const }
 const connection = { portalUrl: 'https://portal.test/base/', portalAgencyId: 'G-ABCDE', key: 'private-bearer' }
 describe('verified original receipt attachment', () => {
+  it('uses a safe fallback when an original filename contains only control characters', async () => {
+    const response = await fetchReceiptAttachment(connection, 'K-ABCDE', { ...metadata, filename: '\r\n\u0000' }, async () => new Response(bytes))
+    expect(response.headers.get('content-disposition')).toBe('attachment; filename="download"; filename*=UTF-8\'\'attachment')
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes)
+  })
+  it('normalizes a remote transport failure without exposing the credential', async () => {
+    const failure: unknown = await fetchReceiptAttachment(connection, 'K-ABCDE', metadata, async () => {
+      throw new Error(`Upstream rejected Authorization: Bearer ${connection.key}`)
+    }).catch((error: unknown) => error)
+    expect(failure).toMatchObject({ code: 'GCS_PORTAL_ATTACHMENT_DOWNLOAD_FAILED', statusCode: 502 })
+    if (!(failure instanceof Error)) throw new Error('Expected a normalized attachment error')
+    const errorDetails = (_key: string, value: unknown): unknown => value instanceof Error
+      ? Object.fromEntries(Object.getOwnPropertyNames(value).map(name => [name, Reflect.get(value, name)]))
+      : value
+    expect(failure.message).not.toContain(connection.key)
+    expect(String(failure)).not.toContain(connection.key)
+    expect(JSON.stringify(failure.cause, errorDetails) ?? '').not.toContain(connection.key)
+    expect(JSON.stringify(failure, errorDetails)).not.toContain(connection.key)
+  })
   it('forces safe download headers and verifies exact original bytes through encoded scoped path', async () => {
     const transport = vi.fn(async (_url: RequestInfo | URL, _options?: RequestInit) => new Response(bytes, { headers: { 'content-type': 'text/html' } }))
     const response = await fetchReceiptAttachment(connection, 'K-ABCDE/?', { ...metadata, filename: '../health\r\n".txt' }, transport)
@@ -54,5 +73,14 @@ describe('agency-scoped frozen attachment route', () => {
     const response = await getReceiptAttachment(context() as never, transport)
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes)
     expect(transport).toHaveBeenCalledTimes(1)
+  })
+  it('refuses attachments after the Agency connection is removed or frozen metadata is absent', async () => {
+    const transport = vi.fn(async () => new Response(bytes))
+    await db.updateTable('extensions.gcs_ssc_portal_connector_receipt' as never).set({ source_export: null } as never).execute()
+    await expect(getReceiptAttachment(context() as never, transport)).rejects.toMatchObject({ code: 'GCS_PORTAL_ATTACHMENT_UNAVAILABLE' })
+    await db.updateTable('extensions.gcs_ssc_portal_connector_receipt' as never).set({ source_export: { attachments: [metadata] } } as never).execute()
+    await db.deleteFrom('extensions.gcs_ssc_portal_connector_connection' as never).execute()
+    await expect(getReceiptAttachment(context() as never, transport)).rejects.toMatchObject({ code: 'GCS_PORTAL_ATTACHMENT_UNAVAILABLE' })
+    expect(transport).not.toHaveBeenCalled()
   })
 })
