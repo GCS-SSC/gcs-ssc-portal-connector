@@ -40,7 +40,7 @@ watch(() => props.questionId, () => {
 </script>
 
 <template>
-  <div class="space-y-3">
+  <div class="space-y-3" data-field-scope="extension.gcs-ssc-portal-connector.form-choice-editor">
     <div class="flex justify-end">
       <ExtensionButton type="button" icon="i-lucide-plus" color="neutral" variant="outline" :disabled="disabled || options.length >= 50" @click="edit()">
         {{ t('formChoiceAdd') }}

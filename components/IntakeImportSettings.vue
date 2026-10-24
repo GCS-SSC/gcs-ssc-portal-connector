@@ -72,7 +72,7 @@ watch(() => props.agencyId, () => {
 }, { immediate: true })
 </script>
 <template>
-  <section :aria-label="t('title')" class="space-y-4" :aria-busy="loading || saving">
+  <section :aria-label="t('title')" class="space-y-4" :aria-busy="loading || saving" data-field-scope="extension.gcs-ssc-portal-connector.intake-import-settings">
     <h3 class="text-lg font-semibold">{{ t('title') }}</h3>
     <ExtensionAlert v-if="failure" color="error" :description="t(failure)" />
     <ExtensionButton v-if="failure === 'loadFailed'" :label="t('retry')" :disabled="loading" @click="load" />
@@ -80,10 +80,12 @@ watch(() => props.agencyId, () => {
       <ExtensionAlert v-if="groupId === null" color="warning" :description="t('prerequisite')" />
       <ExtensionAlert v-else-if="!selectedAvailable" color="warning" :description="t('unavailable')" />
       <ExtensionFormField name="intakeGroupId" :label="t('groupLabel')" :description="t('groupHint')" :required="false">
-        <ExtensionSelect :model-value="groupId ?? noGroup" name="intakeGroupId" :items="options" :aria-label="t('groupLabel')"
+        <ExtensionSelect
+          :model-value="groupId ?? noGroup" name="intakeGroupId" :items="options" :aria-label="t('groupLabel')"
           :disabled="readOnly || disabled || loading || saving" @update:model-value="updateSelection" />
       </ExtensionFormField>
-      <ExtensionSaveButton v-if="!readOnly" :label="t('save')" :loading="saving" :disabled="disabled || loading || saving"
+      <ExtensionSaveButton
+        v-if="!readOnly" :label="t('save')" :loading="saving" :disabled="disabled || loading || saving"
         @click="save" />
       <ExtensionAlert v-if="success" color="success" :description="t('saved')" />
     </template>

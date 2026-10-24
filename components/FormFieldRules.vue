@@ -156,7 +156,7 @@ const updateSelection = (index: number, rule: Extract<FieldRule, { kind: 'group'
 </script>
 
 <template>
-  <div class="field-rules">
+  <div class="field-rules" data-field-scope="extension.gcs-ssc-portal-connector.form-field-rules">
     <p class="text-sm text-muted">{{ t('fieldRulesHelp') }}</p>
     <p v-if="question.type === 'date'" class="text-sm text-muted">{{ t('fieldRulesDateHelp') }}</p>
     <p v-if="question.type === 'number'" class="text-sm text-muted">{{ t('fieldRulesNumberHelp') }}</p>
@@ -167,27 +167,33 @@ const updateSelection = (index: number, rule: Extract<FieldRule, { kind: 'group'
         <template v-if="rule.kind === 'compare'">
           <p class="text-sm text-muted">{{ t(scope === 'column' ? 'fieldRulesEarlierColumns' : 'fieldRulesEarlier') }}</p>
           <div class="field-rule-grid">
-            <ExtensionFormField :label="t('fieldRuleOperator')" :name="fieldName(index, 'operator')" required>
-              <ExtensionSelect :model-value="rule.operator" :name="fieldName(index, 'operator')" value-key="value" :items="operators"
+            <ExtensionFormField :label="t('fieldRuleOperator')" :name="fieldName(index, 'operator')" required data-ui-target="extension.gcs-ssc-portal-connector.form-field-rules.field-rule-operator">
+              <ExtensionSelect
+                :model-value="rule.operator" :name="fieldName(index, 'operator')" value-key="value" :items="operators"
                 required :disabled="disabled" @update:model-value="replace(index, { ...rule, operator: $event as typeof rule.operator })" />
             </ExtensionFormField>
-            <ExtensionFormField :label="t('fieldRuleTarget')" :name="fieldName(index, 'target')" required>
-              <ExtensionSelect :model-value="compareTarget(rule)" :name="fieldName(index, 'target')"
+            <ExtensionFormField :label="t('fieldRuleTarget')" :name="fieldName(index, 'target')" required data-ui-target="extension.gcs-ssc-portal-connector.form-field-rules.field-rule-target">
+              <ExtensionSelect
+                :model-value="compareTarget(rule)" :name="fieldName(index, 'target')"
                 value-key="value" :items="targetItems" required :disabled="disabled"
                 :aria-invalid="(rule.target.kind === 'question' || rule.target.kind === 'column') && Boolean(errorFor(rule))" :aria-describedby="errorFor(rule) ? fieldName(index, 'error') : undefined"
                 @update:model-value="updateTarget(index, rule, String($event))" />
             </ExtensionFormField>
           </div>
-          <ExtensionFormField v-if="rule.target.kind === 'value'" :label="t('fieldRuleValue')" :name="fieldName(index, 'value')"
-            :description="question.type === 'number' ? t('fieldRuleNumberInputHelp') : undefined" required>
-            <ExtensionInput :model-value="rule.target.value" :name="fieldName(index, 'value')"
+          <ExtensionFormField
+            v-if="rule.target.kind === 'value'" :label="t('fieldRuleValue')" :name="fieldName(index, 'value')"
+            :description="question.type === 'number' ? t('fieldRuleNumberInputHelp') : undefined" required data-ui-target="extension.gcs-ssc-portal-connector.form-field-rules.field-rule-value">
+            <ExtensionInput
+              :model-value="rule.target.value" :name="fieldName(index, 'value')"
               :type="question.type === 'date' ? 'date' : question.type === 'email' ? 'email' : 'text'" :inputmode="question.type === 'number' ? 'decimal' : undefined"
               required :disabled="disabled" :aria-invalid="Boolean(errorFor(rule))" :aria-describedby="errorFor(rule) ? fieldName(index, 'error') : undefined"
               @update:model-value="replace(index, { ...rule, target: { kind: 'value', value: String($event) } })" />
           </ExtensionFormField>
-          <ExtensionFormField v-if="question.type === 'date' && (rule.target.kind === 'question' || rule.target.kind === 'today')"
-            :label="t('fieldRuleOffset')" :name="fieldName(index, 'offset')" :description="t('fieldRuleOffsetHelp')" :required="false">
-            <ExtensionInput :model-value="rule.target.offsetDays ?? ''" :name="fieldName(index, 'offset')" type="number" min="-36500" max="36500" step="1"
+          <ExtensionFormField
+            v-if="question.type === 'date' && (rule.target.kind === 'question' || rule.target.kind === 'today')"
+            :label="t('fieldRuleOffset')" :name="fieldName(index, 'offset')" :description="t('fieldRuleOffsetHelp')" :required="false" data-ui-target="extension.gcs-ssc-portal-connector.form-field-rules.field-rule-offset">
+            <ExtensionInput
+              :model-value="rule.target.offsetDays ?? ''" :name="fieldName(index, 'offset')" type="number" min="-36500" max="36500" step="1"
               :required="false" :disabled="disabled" :aria-invalid="Boolean(errorFor(rule))" :aria-describedby="errorFor(rule) ? fieldName(index, 'error') : undefined"
               @update:model-value="updateOffset(index, rule, String($event))" />
           </ExtensionFormField>
@@ -195,64 +201,78 @@ const updateSelection = (index: number, rule: Extract<FieldRule, { kind: 'group'
         <template v-else-if="rule.kind === 'length' || rule.kind === 'count'">
           <p :id="fieldName(index, 'bound-help')" class="text-sm text-muted">{{ t('fieldRuleOptionalBound') }} {{ t('fieldRuleCeiling', { max: fieldRuleCeiling(question) }) }}</p>
           <div class="field-rule-grid">
-            <ExtensionFormField v-for="bound in (['min', 'max'] as const)" :key="bound"
-              :label="t(bound === 'min' ? 'fieldRuleMinimum' : 'fieldRuleMaximum')" :name="fieldName(index, bound)" :required="false">
-              <ExtensionInput :model-value="rule[bound] ?? ''" :name="fieldName(index, bound)" type="number" min="0" :max="fieldRuleCeiling(question)" step="1"
+            <ExtensionFormField
+              data-field-label-en="Minimum or maximum length" data-field-label-fr="Longueur minimale ou maximale"
+              v-for="bound in (['min', 'max'] as const)" :key="bound"
+              :label="t(bound === 'min' ? 'fieldRuleMinimum' : 'fieldRuleMaximum')" :name="fieldName(index, bound)" :required="false" data-ui-target="extension.gcs-ssc-portal-connector.form-field-rules.length-bound">
+              <ExtensionInput
+                :model-value="rule[bound] ?? ''" :name="fieldName(index, bound)" type="number" min="0" :max="fieldRuleCeiling(question)" step="1"
                 :required="false" :disabled="disabled" :aria-invalid="Boolean(errorFor(rule))"
                 :aria-describedby="`${fieldName(index, 'bound-help')}${errorFor(rule) ? ` ${fieldName(index, 'error')}` : ''}`"
                 @update:model-value="updateBound(index, rule, bound, String($event))" />
             </ExtensionFormField>
           </div>
         </template>
-        <ExtensionFormField v-else-if="rule.kind === 'precision'" :label="t('fieldRuleDecimals')" :name="fieldName(index, 'precision')" :description="t('fieldRuleIntegerHelp')" required>
-          <ExtensionInput :model-value="rule.decimalPlaces === -1 ? '' : rule.decimalPlaces" :name="fieldName(index, 'precision')" type="number" min="0" max="20" step="1"
+        <ExtensionFormField v-else-if="rule.kind === 'precision'" :label="t('fieldRuleDecimals')" :name="fieldName(index, 'precision')" :description="t('fieldRuleIntegerHelp')" required data-ui-target="extension.gcs-ssc-portal-connector.form-field-rules.field-rule-decimals">
+          <ExtensionInput
+            :model-value="rule.decimalPlaces === -1 ? '' : rule.decimalPlaces" :name="fieldName(index, 'precision')" type="number" min="0" max="20" step="1"
             required :disabled="disabled" :aria-invalid="Boolean(errorFor(rule))" :aria-describedby="errorFor(rule) ? fieldName(index, 'error') : undefined"
             @update:model-value="replace(index, { ...rule, decimalPlaces: $event === '' ? -1 : Number($event) })" />
         </ExtensionFormField>
-        <ExtensionFormField v-else-if="rule.kind === 'format'" :label="t('fieldRuleFormat')" :name="fieldName(index, 'format')" :description="formatHelp(rule.format)" required>
-          <ExtensionSelect :model-value="rule.format" :name="fieldName(index, 'format')" value-key="value" :items="formatItems" required :disabled="disabled"
+        <ExtensionFormField v-else-if="rule.kind === 'format'" :label="t('fieldRuleFormat')" :name="fieldName(index, 'format')" :description="formatHelp(rule.format)" required data-ui-target="extension.gcs-ssc-portal-connector.form-field-rules.field-rule-format">
+          <ExtensionSelect
+            :model-value="rule.format" :name="fieldName(index, 'format')" value-key="value" :items="formatItems" required :disabled="disabled"
             @update:model-value="replace(index, { ...rule, format: $event as typeof rule.format })" />
         </ExtensionFormField>
-        <ExtensionFormField v-else-if="rule.kind === 'choice'" :label="t('fieldRuleChoice')" :name="fieldName(index, 'choice')" :description="t('fieldRuleChoiceHelp')" required>
-          <ExtensionSelect :model-value="rule.value" :name="fieldName(index, 'choice')" value-key="value"
+        <ExtensionFormField v-else-if="rule.kind === 'choice'" :label="t('fieldRuleChoice')" :name="fieldName(index, 'choice')" :description="t('fieldRuleChoiceHelp')" required data-ui-target="extension.gcs-ssc-portal-connector.form-field-rules.field-rule-choice">
+          <ExtensionSelect
+            :model-value="rule.value" :name="fieldName(index, 'choice')" value-key="value"
             :items="'options' in question ? question.options.map(option => ({ value: option.value, label: option.label[locale] })) : []"
             required :disabled="disabled" :aria-invalid="Boolean(errorFor(rule))" :aria-describedby="errorFor(rule) ? fieldName(index, 'error') : undefined"
             @update:model-value="replace(index, { ...rule, value: String($event) })" />
         </ExtensionFormField>
         <template v-else-if="rule.kind === 'required'">
-          <FormCondition :model-value="rule.when" :questions="questions" :locale="locale" :disabled="disabled" purpose="required" :name-prefix="fieldName(index, 'condition')"
+          <FormCondition data-field-container="Composite editor; its individual field declarations own their identities."
+            :model-value="rule.when" :questions="questions" :locale="locale" :disabled="disabled" purpose="required" :name-prefix="fieldName(index, 'condition')"
             :error-id="errorFor(rule) ? fieldName(index, 'error') : undefined"
             @update:model-value="conditionUpdate(index, $event)" />
         </template>
         <template v-else-if="rule.kind === 'group' || rule.kind === 'unique' || rule.kind === 'total'">
-          <ExtensionFormField v-if="rule.kind === 'group'" :label="t('fieldRuleGroupMode')" :name="fieldName(index, 'group-mode')" required>
-            <ExtensionSelect :model-value="rule.mode" :name="fieldName(index, 'group-mode')" value-key="value" :items="groupModes" required :disabled="disabled"
+          <ExtensionFormField v-if="rule.kind === 'group'" :label="t('fieldRuleGroupMode')" :name="fieldName(index, 'group-mode')" required data-ui-target="extension.gcs-ssc-portal-connector.form-field-rules.field-rule-group-mode">
+            <ExtensionSelect
+              :model-value="rule.mode" :name="fieldName(index, 'group-mode')" value-key="value" :items="groupModes" required :disabled="disabled"
               @update:model-value="replace(index, { ...rule, mode: $event as typeof rule.mode })" />
           </ExtensionFormField>
           <p v-if="rule.kind === 'unique'" class="text-sm text-muted">{{ t(question.type === 'list' ? 'fieldRuleUniqueListHelp' : 'fieldRuleUniqueHelp') }}</p>
-          <fieldset v-if="rule.kind !== 'unique' || question.type !== 'list'" class="field-rule-selections"
+          <fieldset
+            v-if="rule.kind !== 'unique' || question.type !== 'list'" class="field-rule-selections"
             :aria-invalid="Boolean(errorFor(rule))" :aria-describedby="`${fieldName(index, 'selection-help')}${errorFor(rule) ? ` ${fieldName(index, 'error')}` : ''}`">
             <legend class="text-sm font-semibold">{{ t(rule.kind === 'group' ? 'fieldRuleGroupFields' : rule.kind === 'unique' && question.type === 'repeat' ? 'fieldRuleUniqueFields' : 'fieldRuleColumns') }}</legend>
             <p :id="fieldName(index, 'selection-help')" class="text-sm text-muted">{{ t(rule.kind === 'group' ? 'fieldRuleGroupHelp' : 'fieldRuleSelectFields') }}</p>
-            <ExtensionCheckbox v-for="source in selectionSources(rule)" :key="source.id" :label="source.label" :model-value="selectedIds(rule).includes(source.id)"
-              :disabled="disabled || rule.kind === 'group' && source.id === question.id || selectedIds(rule).length >= 20 && !selectedIds(rule).includes(source.id)" :required="false"
+            <ExtensionCheckbox
+              data-field-label-en="Source questions" data-field-label-fr="Questions sources"
+              v-for="source in selectionSources(rule)" :key="source.id" :label="source.label" :model-value="selectedIds(rule).includes(source.id)"
+              :disabled="disabled || rule.kind === 'group' && source.id === question.id || selectedIds(rule).length >= 20 && !selectedIds(rule).includes(source.id)" :required="false" data-ui-target="extension.gcs-ssc-portal-connector.form-field-rules.selected-ids-rule-.includes-source.id"
               @update:model-value="updateSelection(index, rule, source.id, Boolean($event))" />
           </fieldset>
           <template v-if="rule.kind === 'total'">
             <div class="field-rule-grid">
-              <ExtensionFormField :label="t('fieldRuleTotalOperator')" :name="fieldName(index, 'total-operator')" required>
-                <ExtensionSelect :model-value="rule.operator" :name="fieldName(index, 'total-operator')" value-key="value"
+              <ExtensionFormField :label="t('fieldRuleTotalOperator')" :name="fieldName(index, 'total-operator')" required data-ui-target="extension.gcs-ssc-portal-connector.form-field-rules.field-rule-total-operator">
+                <ExtensionSelect
+                  :model-value="rule.operator" :name="fieldName(index, 'total-operator')" value-key="value"
                   :items="[{ value: 'equals', label: t('fieldRuleEquals') }, { value: 'lessThanOrEqual', label: t('fieldRuleLessThanOrEqual') }]"
                   required :disabled="disabled" @update:model-value="replace(index, { ...rule, operator: $event as typeof rule.operator })" />
               </ExtensionFormField>
-              <ExtensionFormField :label="t('fieldRuleTarget')" :name="fieldName(index, 'total-target')" required>
-                <ExtensionSelect :model-value="rule.target.kind === 'question' ? rule.target.questionId : fixedTarget" :name="fieldName(index, 'total-target')"
+              <ExtensionFormField :label="t('fieldRuleTarget')" :name="fieldName(index, 'total-target')" required data-ui-target="extension.gcs-ssc-portal-connector.form-field-rules.total-target">
+                <ExtensionSelect
+                  :model-value="rule.target.kind === 'question' ? rule.target.questionId : fixedTarget" :name="fieldName(index, 'total-target')"
                   value-key="value" :items="totalTargets" required :disabled="disabled"
                   @update:model-value="replace(index, { ...rule, target: $event === fixedTarget ? { kind: 'value', value: '' } : { kind: 'question', questionId: String($event) } })" />
               </ExtensionFormField>
             </div>
-            <ExtensionFormField v-if="rule.target.kind === 'value'" :label="t('fieldRuleValue')" :name="fieldName(index, 'total-value')" :description="t('fieldRuleNumberInputHelp')" required>
-              <ExtensionInput :model-value="rule.target.value" :name="fieldName(index, 'total-value')" type="text" inputmode="decimal" required :disabled="disabled"
+            <ExtensionFormField v-if="rule.target.kind === 'value'" :label="t('fieldRuleValue')" :name="fieldName(index, 'total-value')" :description="t('fieldRuleNumberInputHelp')" required data-ui-target="extension.gcs-ssc-portal-connector.form-field-rules.total-value">
+              <ExtensionInput
+                :model-value="rule.target.value" :name="fieldName(index, 'total-value')" type="text" inputmode="decimal" required :disabled="disabled"
                 :aria-invalid="Boolean(errorFor(rule))" :aria-describedby="errorFor(rule) ? fieldName(index, 'error') : undefined"
                 @update:model-value="replace(index, { ...rule, target: { kind: 'value', value: String($event) } })" />
             </ExtensionFormField>
@@ -269,7 +289,7 @@ const updateSelection = (index: number, rule: Extract<FieldRule, { kind: 'group'
     <p v-if="scope !== 'column' && question.required" class="text-sm text-muted">{{ t('fieldRuleAlwaysRequired') }}</p>
     <p v-else-if="scope !== 'column' && !questions.length" class="text-sm text-muted">{{ t('fieldRuleNoConditions') }}</p>
     <div v-if="kinds.length" ref="addControls" class="field-rule-add">
-      <ExtensionFormField :label="t('fieldRuleKind')" :name="`${editorId}-kind`" required>
+      <ExtensionFormField :label="t('fieldRuleKind')" :name="`${editorId}-kind`" required data-ui-target="extension.gcs-ssc-portal-connector.form-field-rules.field-rule-kind">
         <ExtensionSelect v-model="selectedKind" :name="`${editorId}-kind`" value-key="value" :items="kinds" required :disabled="disabled" />
       </ExtensionFormField>
       <ExtensionButton color="neutral" variant="outline" icon="i-lucide-plus" :disabled="disabled || (rules?.length ?? 0) >= 20" @click="add">{{ t('fieldRuleAdd') }}</ExtensionButton>

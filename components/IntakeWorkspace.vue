@@ -177,7 +177,7 @@ const returnToList = () => {
 </script>
 
 <template>
-  <section class="space-y-5" :aria-label="t('intakes')">
+  <section class="space-y-5" :aria-label="t('intakes')" data-field-scope="extension.gcs-ssc-portal-connector.intake-workspace">
     <p v-if="error" role="alert" class="text-sm text-error">{{ error }}
       <button v-if="!draft" type="button" class="ml-2 underline" @click="load">{{ t('intakeRetry') }}</button>
     </p>
@@ -198,26 +198,31 @@ const returnToList = () => {
       </div>
       <div class="grid gap-4 sm:grid-cols-2">
         <ExtensionFormField :label="t('intakeNameEn')" name="intakeNameEn" required :error="fieldErrors.nameEn ? t(fieldErrors.nameEn) : undefined">
-          <ExtensionInput v-model="draft.nameEn" name="intakeNameEn" required :disabled="disabled || busy"
+          <ExtensionInput
+            v-model="draft.nameEn" name="intakeNameEn" required :disabled="disabled || busy"
             :aria-invalid="Boolean(fieldErrors.nameEn)" />
         </ExtensionFormField>
         <ExtensionFormField :label="t('intakeNameFr')" name="intakeNameFr" required :error="fieldErrors.nameFr ? t(fieldErrors.nameFr) : undefined">
-          <ExtensionInput v-model="draft.nameFr" name="intakeNameFr" required :disabled="disabled || busy"
+          <ExtensionInput
+            v-model="draft.nameFr" name="intakeNameFr" required :disabled="disabled || busy"
             :aria-invalid="Boolean(fieldErrors.nameFr)" />
         </ExtensionFormField>
         <ExtensionFormField :label="t('intakeStream')" name="intakeStream" :required="!selected" :error="fieldErrors.streamId ? t(fieldErrors.streamId) : undefined">
-          <ExtensionSelect v-model="draft.streamId" name="intakeStream" value-key="value" :required="!selected"
+          <ExtensionSelect
+            v-model="draft.streamId" name="intakeStream" value-key="value" :required="!selected"
             :disabled="disabled || busy || Boolean(selected)" :aria-required="!selected"
             :aria-invalid="Boolean(fieldErrors.streamId)"
             :items="streams.map((item) => ({ value: item.id, label: localized(item) }))" />
         </ExtensionFormField>
         <div />
         <ExtensionFormField :label="t('intakeOpens')" name="intakeStartDate" required :error="fieldErrors.startDate ? t(fieldErrors.startDate) : undefined">
-          <ExtensionInput v-model="draft.startDate" name="intakeStartDate" type="date" required
+          <ExtensionInput
+            v-model="draft.startDate" name="intakeStartDate" type="date" required
             :disabled="disabled || busy" :aria-invalid="Boolean(fieldErrors.startDate)" />
         </ExtensionFormField>
         <ExtensionFormField :label="t('intakeCloses')" name="intakeEndDate" required :error="fieldErrors.endDate ? t(fieldErrors.endDate) : undefined">
-          <ExtensionInput v-model="draft.endDate" name="intakeEndDate" type="date" required
+          <ExtensionInput
+            v-model="draft.endDate" name="intakeEndDate" type="date" required
             :disabled="disabled || busy" :aria-invalid="Boolean(fieldErrors.endDate)" />
         </ExtensionFormField>
       </div>
@@ -243,11 +248,13 @@ const returnToList = () => {
           {{ selected.surveyId ? t('intakeEditForm') : t('intakeCreateForm') }}
         </ExtensionButton>
       </section>
-      <FormCreator v-if="editingForm && !selected.published" :key="`${agencyId}:${selected.id}`" :agency-id="agencyId"
+      <FormCreator
+        v-if="editingForm && !selected.published" :key="`${agencyId}:${selected.id}`" :agency-id="agencyId"
         :intake-id="selected.id" :selected-form-id="selected.surveyId ?? undefined"
         :disabled="disabled || selected.published" @close="editingForm = false" @saved="load" />
       <div v-if="!editingForm" class="flex flex-wrap gap-3 border-t border-default pt-4">
-        <ExtensionButton v-if="!selected.published" :disabled="disabled || busy || !selected.surveyId"
+        <ExtensionButton
+          v-if="!selected.published" :disabled="disabled || busy || !selected.surveyId"
           :loading="busy" @click="act('publish')">{{ t('intakePublish') }}</ExtensionButton>
         <ExtensionButton v-else :disabled="disabled || busy" :loading="busy" @click="act('withdraw')">{{ t('intakeWithdraw') }}</ExtensionButton>
         <ExtensionButton v-if="!selected.published" :disabled="disabled || busy" @click="act('delete')">{{ t('intakeDelete') }}</ExtensionButton>
@@ -261,7 +268,7 @@ const returnToList = () => {
         <ExtensionButton :disabled="disabled" @click="openCreate">{{ t('intakeCreate') }}</ExtensionButton>
       </div>
       <label class="block max-w-md text-sm font-medium text-highlighted">{{ t('intakeSearch') }}
-        <input v-model="search" type="search" class="mt-1 w-full rounded border border-default bg-default px-3 py-2" />
+        <input data-field-label-en="Search intakes" data-field-label-fr="Rechercher des demandes" v-model="search" type="search" class="mt-1 w-full rounded border border-default bg-default px-3 py-2" data-ui-target="extension.gcs-ssc-portal-connector.intake-workspace.search" />
       </label>
       <p v-if="!filtered.length" class="text-sm text-muted">{{ intakes.length ? t('intakeNoMatch') : t('intakeEmpty') }}</p>
       <ul v-else class="divide-y divide-default border-y border-default">

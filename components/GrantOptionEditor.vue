@@ -9,7 +9,7 @@ const { locale, t } = useExtensionI18n(messages)
 </script>
 
 <template>
-  <ExtensionAssessmentSchemaAccordionSection :title="`${title} (${options.length})`" level="sub">
+  <ExtensionAssessmentSchemaAccordionSection :title="`${title} (${options.length})`" level="sub" data-field-scope="extension.gcs-ssc-portal-connector.grant-option-editor">
     <div class="mt-4 space-y-3">
       <div class="flex justify-end">
         <ExtensionButton type="button" color="primary" variant="outline" icon="i-lucide-plus" :disabled="disabled || options.length >= 200" @click="emit('add')">
@@ -22,10 +22,10 @@ const { locale, t } = useExtensionI18n(messages)
         level="sub">
         <div class="space-y-3">
           <div class="grid gap-3 sm:grid-cols-2">
-            <ExtensionFormField :label="t('grantLabelEn')" :name="`${prefix}-${option.id}-en`" required>
+            <ExtensionFormField :label="t('grantLabelEn')" :name="`${prefix}-${option.id}-en`" required data-ui-target="extension.gcs-ssc-portal-connector.grant-option-editor.grant-label-en">
               <ExtensionInput v-model="option.label.en" :name="`${prefix}-${option.id}-en`" required maxlength="255" :disabled="disabled" />
             </ExtensionFormField>
-            <ExtensionFormField :label="t('grantLabelFr')" :name="`${prefix}-${option.id}-fr`" required>
+            <ExtensionFormField :label="t('grantLabelFr')" :name="`${prefix}-${option.id}-fr`" required data-ui-target="extension.gcs-ssc-portal-connector.grant-option-editor.grant-label-fr">
               <ExtensionInput v-model="option.label.fr" :name="`${prefix}-${option.id}-fr`" required maxlength="255" :disabled="disabled" />
             </ExtensionFormField>
           </div>

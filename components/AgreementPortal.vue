@@ -93,7 +93,7 @@ watch(() => [agreementId.value, agencyId.value], load)
 </script>
 
 <template>
-  <div class="space-y-8">
+  <div class="space-y-8" data-field-scope="extension.gcs-ssc-portal-connector.agreement-portal">
     <section class="space-y-4">
       <div>
         <h3 class="text-base font-semibold text-highlighted">{{ t('publish') }}</h3>

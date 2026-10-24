@@ -43,7 +43,7 @@ const forms = computed(() => {
     </section>
     <section v-for="form in forms" :key="form.id" class="space-y-3">
       <h3 class="text-base font-semibold">{{ form.definition.title[language] }}</h3>
-      <HeadlessSurvey :definition="form.definition" :model-value="form.answers" :locale="language">
+      <HeadlessSurvey data-field-exclude="Authored runtime questions retain their own help and are outside static field help." :definition="form.definition" :model-value="form.answers" :locale="language">
         <template #default="{ fields, page, canBack, isLastPage, next, back, complete }">
           <div v-if="page && !complete" class="space-y-4">
             <h4 class="font-medium">{{ page.title[language] }}</h4>

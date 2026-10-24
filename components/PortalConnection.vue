@@ -552,7 +552,7 @@ watch(() => props.agencyId, searchProponents)
 </script>
 
 <template>
-  <div class="space-y-8">
+  <div class="space-y-8" data-field-scope="extension.gcs-ssc-portal-connector.portal-connection">
     <section v-if="section === 'connection'" class="space-y-4">
       <div>
         <h3 class="text-base font-semibold text-highlighted">{{ t('connection') }}</h3>
@@ -578,14 +578,15 @@ watch(() => props.agencyId, searchProponents)
         </div>
         <p class="text-sm text-muted">{{ t('saveConnectionHelp') }}</p>
         <ExtensionFormField :label="t('pullSchedule')" name="pullSchedule" :description="t('pullScheduleHelp')">
-          <ExtensionSelect v-model="pullInterval" :items="[
-            { value: 'manual', label: t('manualOnly') },
-            { value: '1', label: t('everyScheduledCheck') },
-            { value: '5', label: t('everyFiveMinutes') },
-            { value: '15', label: t('everyFifteenMinutes') },
-            { value: '30', label: t('everyThirtyMinutes') },
-            { value: '60', label: t('everyHour') }
-          ]" value-key="value" name="pullSchedule" :disabled="locked || busy || !connection" />
+          <ExtensionSelect
+            v-model="pullInterval" :items="[
+              { value: 'manual', label: t('manualOnly') },
+              { value: '1', label: t('everyScheduledCheck') },
+              { value: '5', label: t('everyFiveMinutes') },
+              { value: '15', label: t('everyFifteenMinutes') },
+              { value: '30', label: t('everyThirtyMinutes') },
+              { value: '60', label: t('everyHour') }
+            ]" value-key="value" name="pullSchedule" :disabled="locked || busy || !connection" />
         </ExtensionFormField>
         <ExtensionSaveButton :label="t('saveSettings')" :disabled="locked || busy || !connection" :loading="busy" @click="saveSettings" />
         <p v-if="lastPullAt" class="text-sm text-muted">{{ t('lastPull') }} {{ new Date(lastPullAt).toLocaleString(locale) }}</p>
@@ -597,9 +598,11 @@ watch(() => props.agencyId, searchProponents)
         <template #description>{{ t('formsReadOnlyHelp') }}</template>
       </ExtensionAlert>
       <ExtensionAlert v-if="!connection" color="info" variant="soft" icon="i-lucide-info" :title="t('formsAwaitConnection')" />
-      <FormLibrary v-if="detailFormId === undefined" :agency-id="agencyId" :disabled="locked"
+      <FormLibrary
+        v-if="detailFormId === undefined" :agency-id="agencyId" :disabled="locked"
         @open="emit('openForm', $event)" />
-      <FormCreator v-else :key="agencyId" :agency-id="agencyId" :disabled="locked"
+      <FormCreator
+        v-else :key="agencyId" :agency-id="agencyId" :disabled="locked"
         :selected-form-id="detailFormId" :flow-only="formFlowOnly" :initial-view="formEditorView" standalone @flow="emit('formFlow', $event)" @saved="emit('savedForm', $event)"
         @close="emit('closeForm')" />
     </section>
@@ -611,18 +614,20 @@ watch(() => props.agencyId, searchProponents)
       <div><h3 class="text-base font-semibold text-highlighted">{{ t('organizationLinks') }}</h3>
         <p class="mt-1 text-sm text-muted">{{ t('organizationLinksHelp') }}</p></div>
       <ExtensionFormField :label="t('proponentVerificationAccess')" name="proponentVerificationAccess" :description="t('proponentVerificationAccessHelp')">
-        <ExtensionSelect v-model="proponentVerificationAccess" :items="[
-          { value: 'off', label: t('verificationOff') },
-          { value: 'manager', label: t('verificationManagers') },
-          { value: 'contributor', label: t('verificationContributorsAndManagers') }
-        ]" value-key="value" name="proponentVerificationAccess" :disabled="locked || busy" />
+        <ExtensionSelect
+          v-model="proponentVerificationAccess" :items="[
+            { value: 'off', label: t('verificationOff') },
+            { value: 'manager', label: t('verificationManagers') },
+            { value: 'contributor', label: t('verificationContributorsAndManagers') }
+          ]" value-key="value" name="proponentVerificationAccess" :disabled="locked || busy" />
       </ExtensionFormField>
       <div class="flex flex-wrap items-center gap-3">
         <ExtensionSaveButton :label="t('saveVerificationAccess')" :disabled="locked || busy" :loading="busy" @click="saveProponentVerificationAccess" />
         <ExtensionButton :disabled="locked || busy || !connection" :loading="busy" @click="refreshOrganizationChoices">{{ t('refreshOrganizations') }}</ExtensionButton>
       </div>
       <p v-if="!unverifiedOrganizations.length" class="text-sm text-muted">{{ t('noUnverifiedOrganizations') }}</p>
-      <ExtensionResourceLayoutCard v-else v-model:search="organizationSearch" v-model:pagination="organizationPagination"
+      <ExtensionResourceLayoutCard
+        v-else v-model:search="organizationSearch" v-model:pagination="organizationPagination"
         :data="visibleOrganizations" :columns="organizationColumns" :total-records="filteredOrganizations.length"
         :show-button="false" :show-column-toggle="false" :search-placeholder="t('searchOrganizations')">
         <template #organization-cell="{ row }">
@@ -662,16 +667,17 @@ watch(() => props.agencyId, searchProponents)
       <div><h3 class="text-base font-semibold text-highlighted">{{ t('portalStatuses') }}</h3>
         <p class="mt-1 text-sm text-muted">{{ t('portalStatusesHelp') }}</p></div>
       <ExtensionFormField :label="t('statusEntity')" name="statusEntity">
-        <ExtensionSelect v-model="statusEntity" :items="[
-          { value: 'agreement', label: t('agreementKind') },
-          { value: 'claim', label: t('claimKind') },
-          { value: 'forecast', label: t('forecastKind') },
-          { value: 'funding_application', label: t('fundingApplicationKind') },
-          { value: 'other_form', label: t('otherFormKind') }
-        ]" value-key="value" name="statusEntity" />
+        <ExtensionSelect
+          v-model="statusEntity" :items="[
+            { value: 'agreement', label: t('agreementKind') },
+            { value: 'claim', label: t('claimKind') },
+            { value: 'forecast', label: t('forecastKind') },
+            { value: 'funding_application', label: t('fundingApplicationKind') },
+            { value: 'other_form', label: t('otherFormKind') }
+          ]" value-key="value" name="statusEntity" />
       </ExtensionFormField>
       <div class="grid gap-2 sm:grid-cols-2">
-        <ExtensionCheckbox v-for="status in statuses" :key="status.id" :model-value="visibleStatusIds.includes(status.id)" :label="locale === 'fr' ? status.name_fr : status.name_en" :disabled="locked || busy || !connection" @update:model-value="toggleStatus(status.id, Boolean($event))" />
+        <ExtensionCheckbox data-field-label-en="Visible statuses" data-field-label-fr="Statuts visibles" v-for="status in statuses" :key="status.id" :model-value="visibleStatusIds.includes(status.id)" :label="locale === 'fr' ? status.name_fr : status.name_en" :disabled="locked || busy || !connection" data-ui-target="extension.gcs-ssc-portal-connector.portal-connection.visible-status-ids.includes-status.id" @update:model-value="toggleStatus(status.id, Boolean($event))" />
       </div>
       <ExtensionSaveButton :label="t('saveSettings')" :disabled="locked || busy || !connection" :loading="busy" @click="saveSettings" />
     </section>
@@ -691,7 +697,8 @@ watch(() => props.agencyId, searchProponents)
         </template>
       </ExtensionAlert>
       <p v-if="!inbound.length" class="text-sm text-muted">{{ t('emptyInbound') }}</p>
-      <ExtensionResourceLayoutCard v-else v-model:search="inboundSearch" v-model:pagination="inboundPagination"
+      <ExtensionResourceLayoutCard
+        v-else v-model:search="inboundSearch" v-model:pagination="inboundPagination"
         :data="visibleInbound" :columns="inboundColumns" :total-records="filteredInbound.length"
         :show-button="false" :show-column-toggle="false" :search-placeholder="t('searchInbound')">
         <template #submission-cell="{ row }"><span class="font-medium">{{ row.original.submissionId }}</span></template>
@@ -705,7 +712,8 @@ watch(() => props.agencyId, searchProponents)
       <div class="space-y-4 border-t border-default pt-6">
         <h4 class="text-base font-semibold text-highlighted">{{ t('receipts') }}</h4>
         <p v-if="!receipts.length" class="text-sm text-muted">{{ t('none') }}</p>
-        <ExtensionResourceLayoutCard v-else v-model:search="receiptSearch" v-model:pagination="receiptPagination"
+        <ExtensionResourceLayoutCard
+          v-else v-model:search="receiptSearch" v-model:pagination="receiptPagination"
           :data="visibleReceipts" :columns="receiptColumns" :total-records="filteredReceipts.length"
           :show-button="false" :show-column-toggle="false" :search-placeholder="t('searchReceipts')">
           <template #submission-cell="{ row }"><span class="font-medium">{{ row.original.submission_id }}</span>
@@ -717,7 +725,8 @@ watch(() => props.agencyId, searchProponents)
             <time class="mt-1 block text-xs text-muted" :datetime="row.original.created_at">{{ new Date(row.original.created_at).toLocaleString(locale) }}</time>
           </template>
           <template #actions-cell="{ row }">
-            <div class="flex justify-end"><ExtensionButton v-if="row.original.kind === 'other_form' || row.original.kind === 'funding_application'"
+            <div class="flex justify-end"><ExtensionButton
+              v-if="row.original.kind === 'other_form' || row.original.kind === 'funding_application'"
               icon="i-lucide-eye" color="neutral" variant="ghost" :aria-label="t('viewReceipt')"
               @click="openReceipt(row.original)" /></div>
           </template>
@@ -748,23 +757,27 @@ watch(() => props.agencyId, searchProponents)
           <h3 class="text-lg font-semibold text-highlighted">{{ t('outboundBacklog') }}</h3>
           <p class="mt-1 text-sm text-muted">{{ t('outboundBacklogHelp') }}</p>
         </div>
-        <ExtensionButton color="neutral" variant="outline" class="shrink-0 whitespace-nowrap"
+        <ExtensionButton
+          color="neutral" variant="outline" class="shrink-0 whitespace-nowrap"
           :disabled="locked || busy || !connection" :loading="busy" @click="initialSync">{{ t('initialSync') }}</ExtensionButton>
       </div>
       <div class="flex flex-wrap items-end gap-x-3 gap-y-4">
         <div class="shrink-0">
           <ExtensionFormField :label="t('pushCount')" name="pushCount" required>
-            <ExtensionInput v-model="pushCount" class="w-28" name="pushCount" type="number" min="1" max="100" required :disabled="locked || busy || !connection"
+            <ExtensionInput
+              v-model="pushCount" class="w-28" name="pushCount" type="number" min="1" max="100" required :disabled="locked || busy || !connection"
               :aria-invalid="!validPushCount" :aria-describedby="!validPushCount ? 'push-count-error' : undefined" />
             <p v-if="!validPushCount" id="push-count-error" role="alert" class="text-sm text-error">{{ t('pushCountInvalid') }}</p>
           </ExtensionFormField>
         </div>
         <ExtensionButton class="shrink-0 whitespace-nowrap" :disabled="locked || busy || !connection || !validPushCount" :loading="busy" @click="pushBacklog">{{ t('pushBacklog') }}</ExtensionButton>
-        <ExtensionButton color="neutral" variant="outline" class="shrink-0 whitespace-nowrap"
+        <ExtensionButton
+          color="neutral" variant="outline" class="shrink-0 whitespace-nowrap"
           :disabled="locked || busy || !connection" :loading="busy" @click="pushAllBacklog">{{ t('pushAll') }}</ExtensionButton>
       </div>
       <p v-if="!backlog.length" class="text-sm text-muted">{{ t('emptyBacklog') }}</p>
-      <ExtensionResourceLayoutCard v-else v-model:search="backlogSearch" v-model:pagination="backlogPagination"
+      <ExtensionResourceLayoutCard
+        v-else v-model:search="backlogSearch" v-model:pagination="backlogPagination"
         :data="visibleBacklog" :columns="backlogColumns" :total-records="filteredBacklog.length"
         :show-button="false" :show-column-toggle="false" :search-placeholder="t('searchBacklog')">
         <template #agreement-cell="{ row }"><span class="font-medium">#{{ row.original.agreementId }}</span></template>
@@ -776,13 +789,15 @@ watch(() => props.agencyId, searchProponents)
         </template>
         <template #actions-cell="{ row }">
           <div class="flex justify-end">
-            <ExtensionButton icon="i-lucide-eye" color="neutral" variant="ghost"
+            <ExtensionButton
+              icon="i-lucide-eye" color="neutral" variant="ghost"
               :aria-label="t('viewDeliveryDetails')" @click="openBacklogDetail(row.original)" />
           </div>
         </template>
         <template #empty>{{ t('noMatchingBacklog') }}</template>
       </ExtensionResourceLayoutCard>
-      <ExtensionModal :open="selectedBacklog !== null" :title="t('deliveryDetails')"
+      <ExtensionModal
+        :open="selectedBacklog !== null" :title="t('deliveryDetails')"
         :ui="{ content: 'sm:max-w-2xl' }" @update:open="(value: boolean) => { if (!value) selectedBacklog = null }">
         <template #body>
           <p v-if="backlogDetailBusy" role="status">{{ t('loading') }}</p>
@@ -833,7 +848,8 @@ watch(() => props.agencyId, searchProponents)
       <div class="space-y-4 border-t border-default pt-6">
         <h4 class="text-base font-semibold text-highlighted">{{ t('outcomeBacklog') }}</h4>
         <p v-if="!outcomeBacklog.length" class="text-sm text-muted">{{ t('emptyOutcomeBacklog') }}</p>
-        <ExtensionResourceLayoutCard v-else v-model:search="outcomeSearch" v-model:pagination="outcomePagination"
+        <ExtensionResourceLayoutCard
+          v-else v-model:search="outcomeSearch" v-model:pagination="outcomePagination"
           :data="visibleOutcomeBacklog" :columns="outcomeColumns" :total-records="filteredOutcomeBacklog.length"
           :show-button="false" :show-column-toggle="false" :search-placeholder="t('searchOutcomeBacklog')">
           <template #submission-cell="{ row }"><span class="font-medium">{{ row.original.submissionId }}</span></template>
