@@ -137,7 +137,7 @@ watch(() => [agencies.value, proponentId.value], load)
 </script>
 
 <template>
-  <div class="space-y-8">
+  <div class="space-y-8" data-field-scope="extension.gcs-ssc-portal-connector.proponent-verification">
     <p v-if="loading" role="status" class="text-sm text-muted">{{ t('loading') }}</p>
     <template v-else>
       <section v-if="verifications.length" class="space-y-6">
@@ -171,7 +171,8 @@ watch(() => [agencies.value, proponentId.value], load)
             </div>
           </ExtensionFormField>
           <p v-if="searchedTerm !== null && !searchResults.length" role="status" class="text-sm text-muted">{{ t('noMatchingOrganizations') }}</p>
-          <ExtensionResourceLayoutCard v-if="searchedTerm !== null && searchResults.length"
+          <ExtensionResourceLayoutCard
+            v-if="searchedTerm !== null && searchResults.length"
             v-model:pagination="pagination" :data="visibleResults" :columns="columns"
             :total-records="searchResults.length" :show-toolbar="false" :show-button="false" :show-column-toggle="false">
             <template #organization-cell="{ row }">

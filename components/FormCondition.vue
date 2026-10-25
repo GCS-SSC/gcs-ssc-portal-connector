@@ -56,35 +56,41 @@ const remove = (index: number) => {
 </script>
 
 <template>
-  <div class="condition-editor">
+  <div class="condition-editor" data-field-scope="extension.gcs-ssc-portal-connector.form-condition">
     <p v-if="!condition?.conditions.length" class="text-sm text-muted">{{ t(purpose === 'required' ? 'fieldRuleConditionEmpty' : purpose === 'branch' ? 'designConditionBranchEmpty' : 'designConditionAlways') }}</p>
     <p v-if="!questions.length" class="text-sm text-muted">{{ t('designConditionEmpty') }}</p>
     <p v-if="condition && condition.conditions.length > 1" class="text-sm text-muted">{{ t('designConditionMatchHelp') }}</p>
-    <ExtensionFormField v-if="condition && condition.conditions.length > 1" :label="t('interfaceMatch')" :name="fieldName('conditionMatch')" required>
-      <ExtensionSelect :model-value="condition.match" :name="fieldName('conditionMatch')" value-key="value" :disabled="disabled" required
+    <ExtensionFormField v-if="condition && condition.conditions.length > 1" :label="t('interfaceMatch')" :name="fieldName('conditionMatch')" required data-ui-target="extension.gcs-ssc-portal-connector.form-condition.interface-match">
+      <ExtensionSelect
+        :model-value="condition.match" :name="fieldName('conditionMatch')" value-key="value" :disabled="disabled" required
         :aria-invalid="Boolean(errorId)" :aria-describedby="errorId"
         :items="[{ value: 'all', label: t('interfaceAllRules') }, { value: 'any', label: t('interfaceAnyRule') }]"
         @update:model-value="condition = { ...condition!, match: $event as 'all' | 'any' }" />
     </ExtensionFormField>
     <div v-for="(row, index) in condition?.conditions ?? []" :key="index" class="condition-row">
-      <ExtensionFormField :label="t('interfaceIfTheAnswerTo')" :name="fieldName(`conditionQuestion${index}`)" required>
-        <ExtensionSelect :model-value="row.questionId" :name="fieldName(`conditionQuestion${index}`)" value-key="value"
+      <ExtensionFormField :label="t('interfaceIfTheAnswerTo')" :name="fieldName(`conditionQuestion${index}`)" required data-ui-target="extension.gcs-ssc-portal-connector.form-condition.interface-if-the-answer-to">
+        <ExtensionSelect
+          :model-value="row.questionId" :name="fieldName(`conditionQuestion${index}`)" value-key="value"
           :aria-invalid="Boolean(errorId)" :aria-describedby="errorId"
           :items="questions.map((item) => ({ value: item.id, label: item.label }))" :disabled="disabled" required
           @update:model-value="update(index, 'questionId', String($event))" />
       </ExtensionFormField>
-      <ExtensionFormField :label="t('interfaceIs')" :name="fieldName(`conditionOperator${index}`)" required>
-        <ExtensionSelect :model-value="row.operator" :name="fieldName(`conditionOperator${index}`)" value-key="value"
+      <ExtensionFormField :label="t('interfaceIs')" :name="fieldName(`conditionOperator${index}`)" required data-ui-target="extension.gcs-ssc-portal-connector.form-condition.interface-is">
+        <ExtensionSelect
+          :model-value="row.operator" :name="fieldName(`conditionOperator${index}`)" value-key="value"
           :aria-invalid="Boolean(errorId)" :aria-describedby="errorId"
           :items="operatorItems(row.questionId)" :disabled="disabled" required @update:model-value="update(index, 'operator', String($event))" />
       </ExtensionFormField>
-      <ExtensionFormField v-if="'value' in row" :label="t('interfaceThisAnswer')" :name="fieldName(`conditionValue${index}`)"
-        :description="source(row.questionId)?.type === 'number' ? t('fieldRuleNumberInputHelp') : undefined" required>
-        <ExtensionSelect v-if="source(row.questionId)?.options" :model-value="row.value" :name="fieldName(`conditionValue${index}`)"
+      <ExtensionFormField
+        v-if="'value' in row" :label="t('interfaceThisAnswer')" :name="fieldName(`conditionValue${index}`)"
+        :description="source(row.questionId)?.type === 'number' ? t('fieldRuleNumberInputHelp') : undefined" required data-ui-target="extension.gcs-ssc-portal-connector.form-condition.interface-this-answer">
+        <ExtensionSelect
+          v-if="source(row.questionId)?.options" :model-value="row.value" :name="fieldName(`conditionValue${index}`)"
           :aria-invalid="Boolean(errorId)" :aria-describedby="errorId"
           value-key="value" :items="source(row.questionId)?.options ?? []" :disabled="disabled" required
           @update:model-value="update(index, 'value', String($event))" />
-        <ExtensionInput v-else :model-value="row.value" :name="fieldName(`conditionValue${index}`)" type="text" :inputmode="source(row.questionId)?.type === 'number' ? 'decimal' : undefined" required :disabled="disabled"
+        <ExtensionInput
+          v-else :model-value="row.value" :name="fieldName(`conditionValue${index}`)" type="text" :inputmode="source(row.questionId)?.type === 'number' ? 'decimal' : undefined" required :disabled="disabled"
           :aria-invalid="Boolean(errorId)" :aria-describedby="errorId"
           @update:model-value="update(index, 'value', String($event))" />
       </ExtensionFormField>
@@ -93,9 +99,9 @@ const remove = (index: number) => {
       </div>
     </div>
     <div class="condition-actions">
-    <ExtensionButton color="neutral" variant="outline" icon="i-lucide-plus" :disabled="disabled || !questions.length || (condition?.conditions.length ?? 0) >= 20" @click="add">
-      {{ t('interfaceAddRule') }}
-    </ExtensionButton>
+      <ExtensionButton color="neutral" variant="outline" icon="i-lucide-plus" :disabled="disabled || !questions.length || (condition?.conditions.length ?? 0) >= 20" @click="add">
+        {{ t('interfaceAddRule') }}
+      </ExtensionButton>
     </div>
   </div>
 </template>

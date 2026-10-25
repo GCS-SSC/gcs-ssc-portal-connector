@@ -25,7 +25,7 @@ const updateList = (items: ListItem[]) => props.field.setValue(JSON.stringify(it
 const updateTable = (items: TableRow[]) => props.field.setValue(JSON.stringify(items))
 </script>
 <template>
-  <div :id="field.id" tabindex="-1" class="space-y-2 min-w-0" :data-preview-field="field.id">
+  <div :id="field.id" tabindex="-1" class="space-y-2 min-w-0" :data-preview-field="field.id" data-field-exclude="Dynamically authored portal questions already carry their own help text.">
     <FormGrantElement v-if="field.question.type === 'budget' || field.question.type === 'activities'" :field="field" :locale="locale" />
     <fieldset v-else-if="field.question.type === 'checkboxes'" :aria-describedby="`${field.id}-choices-help ${field.error ? `${field.id}-error` : ''}`" :aria-invalid="Boolean(field.error)">
       <legend class="font-medium">{{ previewLabel(field.label, field.required) }}</legend>
@@ -34,7 +34,7 @@ const updateTable = (items: TableRow[]) => props.field.setValue(JSON.stringify(i
       <p v-if="field.error" :id="`${field.id}-error`" role="alert" class="text-sm text-error">{{ errorText }}</p>
     </fieldset>
     <ExtensionFormField v-else-if="field.question.type === 'multiselect'" :label="previewLabel(field.label, field.required)" :name="field.id" :description="field.hint" :error="errorText">
-      <ExtensionSelectMenu multiple :model-value="choices()" :name="field.id" :id="`${field.id}-control`" value-key="value" :items="field.options" :required="field.required" :aria-required="field.required" :disabled="field.disabled" :aria-invalid="Boolean(field.error)" :placeholder="t('interfaceChooseOptions')" @update:model-value="field.setValue(JSON.stringify($event ?? []))" />
+      <ExtensionSelectMenu :id="`${field.id}-control`" multiple :model-value="choices()" :name="field.id" value-key="value" :items="field.options" :required="field.required" :aria-required="field.required" :disabled="field.disabled" :aria-invalid="Boolean(field.error)" :placeholder="t('interfaceChooseOptions')" @update:model-value="field.setValue(JSON.stringify($event ?? []))" />
     </ExtensionFormField>
     <div v-else-if="field.question.type === 'computed'" class="text-sm"><p><strong>{{ field.label }}</strong>: {{ field.value || '—' }}</p><p v-if="field.hint" class="text-muted">{{ field.hint }}</p></div>
     <template v-else-if="field.question.type === 'repeat'">
@@ -53,7 +53,8 @@ const updateTable = (items: TableRow[]) => props.field.setValue(JSON.stringify(i
       <p v-if="field.hint" class="text-sm text-muted">{{ field.hint }}</p>
       <div v-for="(row, index) in rows()" :key="row.id" class="flex items-end gap-2">
         <ExtensionFormField :label="previewLabel(`${field.label} ${index + 1}`, true)" :name="`${field.id}-${row.id}`">
-          <ExtensionInput :model-value="row.value" :name="`${field.id}-${row.id}`" :aria-describedby="field.error ? `${field.id}-error` : undefined" required :disabled="field.disabled"
+          <ExtensionInput
+            :model-value="row.value" :name="`${field.id}-${row.id}`" :aria-describedby="field.error ? `${field.id}-error` : undefined" required :disabled="field.disabled"
             @update:model-value="updateList(rows().map((item) => item.id === row.id ? { ...item, value: answerText($event) } : item))" />
         </ExtensionFormField>
         <ExtensionButton type="button" color="neutral" variant="ghost" :disabled="field.disabled" @click="updateList(rows().filter((item) => item.id !== row.id))">{{ t('interfaceRemove') }}</ExtensionButton>
@@ -66,9 +67,11 @@ const updateTable = (items: TableRow[]) => props.field.setValue(JSON.stringify(i
       <p class="font-medium">{{ field.label }}{{ field.required ? ` ${t('previewRequired')}` : '' }}</p>
       <p v-if="field.hint" class="text-sm text-muted">{{ field.hint }}</p>
       <div v-for="row in table()" :key="row.id" class="grid gap-2 border-b border-default pb-3 sm:grid-cols-2">
-        <ExtensionFormField v-for="column in field.question.columns" :key="column.id"
+        <ExtensionFormField
+          v-for="column in field.question.columns" :key="column.id"
           :label="previewLabel(column.label[locale], column.required)" :name="`${field.id}-${row.id}-${column.id}`">
-          <ExtensionInput :model-value="row.cells[column.id] ?? ''" :name="`${field.id}-${row.id}-${column.id}`"
+          <ExtensionInput
+            :model-value="row.cells[column.id] ?? ''" :name="`${field.id}-${row.id}-${column.id}`"
             :aria-describedby="field.error ? `${field.id}-error` : undefined"
             :required="column.required" :disabled="field.disabled" :type="column.type === 'date' ? 'date' : 'text'" :inputmode="column.type === 'number' ? 'decimal' : undefined" @update:model-value="updateTable(table().map((item) => item.id === row.id
               ? { ...item, cells: { ...item.cells, [column.id]: answerText($event) } } : item))" />
@@ -84,18 +87,22 @@ const updateTable = (items: TableRow[]) => props.field.setValue(JSON.stringify(i
       </ExtensionButton>
     </template>
     <ExtensionFormField v-else-if="field.question.type === 'textarea'" :label="previewLabel(field.label, field.required)" :name="field.id" :description="field.hint" :error="errorText">
-      <ExtensionTextarea :id="`${field.id}-control`" :model-value="field.value" :name="field.id" :rows="5"
+      <ExtensionTextarea
+        :id="`${field.id}-control`" :model-value="field.value" :name="field.id" :rows="5"
         :required="field.required" :disabled="field.disabled" :maxlength="field.question.maxLength" :aria-invalid="Boolean(field.error)"
         @update:model-value="field.setValue(answerText($event))" />
     </ExtensionFormField>
-    <ExtensionFormField v-else-if="field.question.type === 'select'" :label="previewLabel(field.label, field.required)" :name="field.id"
+    <ExtensionFormField
+      v-else-if="field.question.type === 'select'" :label="previewLabel(field.label, field.required)" :name="field.id"
       :description="field.hint" :error="errorText">
-      <ExtensionSelect :model-value="field.value" :name="field.id" :id="`${field.id}-control`" value-key="value" :required="field.required" :disabled="field.disabled" :aria-invalid="Boolean(field.error)"
+      <ExtensionSelect
+        :id="`${field.id}-control`" :model-value="field.value" :name="field.id" value-key="value" :required="field.required" :disabled="field.disabled" :aria-invalid="Boolean(field.error)"
         :items="field.options" :placeholder="t('interfaceChoose')"
         @update:model-value="field.setValue(answerText($event))" />
     </ExtensionFormField>
     <ExtensionFormField v-else :label="previewLabel(field.label, field.required)" :name="field.id" :description="field.hint" :error="errorText">
-      <ExtensionInput :model-value="field.value" :name="field.id" :id="`${field.id}-control`" :required="field.required" :disabled="field.disabled" :aria-invalid="Boolean(field.error)"
+      <ExtensionInput
+        :id="`${field.id}-control`" :model-value="field.value" :name="field.id" :required="field.required" :disabled="field.disabled" :aria-invalid="Boolean(field.error)"
         :maxlength="field.question.type === 'text' ? field.question.maxLength : undefined"
         :type="['email', 'date'].includes(field.question.type) ? field.question.type : 'text'" :inputmode="field.question.type === 'number' ? 'decimal' : undefined"
         @update:model-value="field.setValue(answerText($event))" />

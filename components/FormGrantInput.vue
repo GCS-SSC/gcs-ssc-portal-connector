@@ -11,7 +11,7 @@ const text = (value: unknown) => value == null ? '' : String(value)
 </script>
 
 <template>
-  <div class="min-w-0">
+  <div class="min-w-0" data-field-exclude="Dynamically authored portal grant inputs use their question help text.">
     <ExtensionFormField
       :label="`${t(input.label)}${input.required && !input.readonly ? ` ${t('previewRequired')}` : ''}`" :name="id"
       :error="error ? t(`grantError_${error}`) : undefined"

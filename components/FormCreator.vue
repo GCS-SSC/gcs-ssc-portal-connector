@@ -1127,7 +1127,7 @@ watch(() => props.agencyId, () => {
 </script>
 
 <template>
-  <section class="designer space-y-5" :aria-label="t('interfaceFormDesigner')">
+  <section class="designer space-y-5" :aria-label="t('interfaceFormDesigner')" data-field-scope="extension.gcs-ssc-portal-connector.form-creator">
     <button v-if="!standalone" type="button" class="designer-back" @click="closeDesigner">
       ← {{ props.opportunityId ? t('interfaceBackToOpportunity') : props.intakeId ? t('interfaceBackToIntake') : t('interfaceAllForms') }}
     </button>
@@ -1139,7 +1139,7 @@ watch(() => props.agencyId, () => {
     </p>
     <ExtensionEntityEditorWorkspace content-test-id="form-detail-content">
       <template #sidebar>
-        <ExtensionRouteTabs
+        <ExtensionRouteTabs data-field-container="Page navigation state, not a business input field."
           v-model="tab" :items="workflowTabs" :external-panel-id="editorPanelId" :priority-values="['edit', 'test', 'publish', 'flow']" orientation="vertical"
           :ui="{ root: 'w-full', list: 'w-full flex-col items-stretch p-0', trigger: 'w-full justify-start' }" />
         <nav class="designer-sidebar-outline" :aria-label="t('interfaceFormPagesAndSections')">
@@ -1199,12 +1199,14 @@ watch(() => props.agencyId, () => {
                           <ExtensionFormField :label="t('interfaceHeadingFrench')" name="groupTitleFr" required>
                             <ExtensionInput v-model="selected.item.title.fr" name="groupTitleFr" required :disabled="disabled" />
                           </ExtensionFormField>
-                          <ExtensionFormField :label="t('interfaceInstructionsEnglish')" name="groupDescriptionEn" :required="instructionsRequired"
+                          <ExtensionFormField
+                            :label="t('interfaceInstructionsEnglish')" name="groupDescriptionEn" :required="instructionsRequired"
                             :description="t('formInstructionsHelp')"
                             :error="instructionsRequired && !selected.item.description!.en.trim() ? t('formInstructionsPairRequired') : undefined">
                             <ExtensionTextarea v-model="selected.item.description!.en" name="groupDescriptionEn" class="w-full" :rows="3" :required="instructionsRequired" :disabled="disabled" />
                           </ExtensionFormField>
-                          <ExtensionFormField :label="t('interfaceInstructionsFrench')" name="groupDescriptionFr" :required="instructionsRequired"
+                          <ExtensionFormField
+                            :label="t('interfaceInstructionsFrench')" name="groupDescriptionFr" :required="instructionsRequired"
                             :description="t('formInstructionsHelp')"
                             :error="instructionsRequired && !selected.item.description!.fr.trim() ? t('formInstructionsPairRequired') : undefined">
                             <ExtensionTextarea v-model="selected.item.description!.fr" name="groupDescriptionFr" class="w-full" :rows="3" :required="instructionsRequired" :disabled="disabled" />
@@ -1233,9 +1235,10 @@ watch(() => props.agencyId, () => {
                               {{ t('maxItemsInvalid') }}
                             </p>
                           </ExtensionFormField>
-                          <ExtensionCheckbox v-model="repeatSource.required" :label="t('interfaceAtLeastOneRequired')" :disabled="disabled" />
+                          <ExtensionCheckbox v-model="repeatSource.required" :label="t('interfaceAtLeastOneRequired')" :disabled="disabled" data-ui-target="extension.gcs-ssc-portal-connector.form-creator.interface-at-least-one-required" />
                           <ExtensionAssessmentSchemaAccordionSection :title="t('fieldRulesTitle')" level="sub" class="sm:col-span-2" :default-open="ruleCorrectionQuestionId === repeatSource.id">
-                            <FormFieldRules :key="repeatSource.id" :model-value="repeatSource.rules" :question="repeatSource"
+                            <FormFieldRules data-field-container="Composite editor; its individual field declarations own their identities."
+                              :key="repeatSource.id" :model-value="repeatSource.rules" :question="repeatSource"
                               :questions="conditionChoicesFor('question', repeatSource.id)" :repeat-questions="repeatFieldRuleSources(definition, repeatSource.id, language)" :locale="language" :disabled="disabled"
                               @update:model-value="updateRules(repeatSource!, $event)" />
                           </ExtensionAssessmentSchemaAccordionSection>
@@ -1245,7 +1248,7 @@ watch(() => props.agencyId, () => {
                             {{ t('interfaceShowThisGroupWhen') }}
                           </p>
                           <FormDesignHelp topic="Visibility" />
-                          <FormCondition v-model="(selected.item as AdvancedGroup).visibleWhen" :questions="groupConditionOptions" :locale="language" :disabled="disabled" />
+                          <FormCondition data-field-container="Composite editor; its individual field declarations own their identities." v-model="(selected.item as AdvancedGroup).visibleWhen" :questions="groupConditionOptions" :locale="language" :disabled="disabled" />
                         </div>
                         <div class="flex flex-wrap gap-2 pt-2">
                           <ExtensionButton color="neutral" variant="outline" :disabled="disabled" @click="addGroup">
@@ -1289,227 +1292,232 @@ watch(() => props.agencyId, () => {
                                   </ExtensionFormField>
                                 </div>
 
-                                <ExtensionCheckbox v-if="selectedQuestion.type !== 'computed'" v-model="selectedQuestion.required" :label="t('interfaceRequiredResponse')" :disabled="disabled" />
+                                <ExtensionCheckbox v-if="selectedQuestion.type !== 'computed'" v-model="selectedQuestion.required" :label="t('interfaceRequiredResponse')" :disabled="disabled" data-ui-target="extension.gcs-ssc-portal-connector.form-creator.interface-required-response" />
                                 <div class="question-settings-disclosures">
-                                <ExtensionAssessmentSchemaAccordionSection :title="t('formQuestionPosition')" level="sub">
-<ExtensionFormField :label="t('interfacePlaceIn')" name="questionPlacement">
-                                  <ExtensionSelect
-                                    :model-value="selected.id" name="questionPlacement" value-key="value" :disabled="disabled"
-                                    :items="nodes.map((node) => ({ value: node.id, label: `${'· '.repeat(node.depth)}${node.title}` }))"
-                                    @update:model-value="placeQuestion(String($event))" />
-                                </ExtensionFormField>
-                                <div class="designer-position-actions">
-                                  <ExtensionButton color="neutral" variant="outline" :disabled="disabled || !canMoveQuestion(-1)" @click="moveQuestion(-1)">
-                                    {{ t('interfaceMoveUp') }}
-                                  </ExtensionButton>
-                                  <ExtensionButton color="neutral" variant="outline" :disabled="disabled || !canMoveQuestion(1)" @click="moveQuestion(1)">
-                                    {{ t('interfaceMoveDown') }}
-                                  </ExtensionButton>
+                                  <ExtensionAssessmentSchemaAccordionSection :title="t('formQuestionPosition')" level="sub">
+                                    <ExtensionFormField :label="t('interfacePlaceIn')" name="questionPlacement">
+                                      <ExtensionSelect
+                                        :model-value="selected.id" name="questionPlacement" value-key="value" :disabled="disabled"
+                                        :items="nodes.map((node) => ({ value: node.id, label: `${'· '.repeat(node.depth)}${node.title}` }))"
+                                        @update:model-value="placeQuestion(String($event))" />
+                                    </ExtensionFormField>
+                                    <div class="designer-position-actions">
+                                      <ExtensionButton color="neutral" variant="outline" :disabled="disabled || !canMoveQuestion(-1)" @click="moveQuestion(-1)">
+                                        {{ t('interfaceMoveUp') }}
+                                      </ExtensionButton>
+                                      <ExtensionButton color="neutral" variant="outline" :disabled="disabled || !canMoveQuestion(1)" @click="moveQuestion(1)">
+                                        {{ t('interfaceMoveDown') }}
+                                      </ExtensionButton>
 
-                                </div>
-                                <ExtensionFormField v-if="selectedQuestion.type === 'text' || selectedQuestion.type === 'textarea'" :label="t('interfaceMaximumCharacters')" name="maxLength" required>
-                                  <ExtensionInput
-                                    :model-value="selectedQuestion.maxLength || ''" name="maxLength" type="number" min="1" max="5000" required :disabled="disabled"
-                                    :aria-invalid="invalidLimit(selectedQuestion.maxLength, 5000)" :aria-describedby="invalidLimit(selectedQuestion.maxLength, 5000) ? 'maxLength-error' : undefined"
-                                    @update:model-value="selectedQuestion.maxLength = Number($event)" />
-                                  <p v-if="invalidLimit(selectedQuestion.maxLength, 5000)" id="maxLength-error" role="alert" class="text-sm text-error">
-                                    {{ t('maxLengthInvalid') }}
-                                  </p>
-                                </ExtensionFormField>
-                                <ExtensionFormField v-if="selectedQuestion.type === 'list'" :label="t('interfaceMaximumItems')" name="maxItems" required>
-                                  <ExtensionInput
-                                    :model-value="selectedQuestion.maxItems || ''" name="maxItems" type="number" min="1" max="50" required :disabled="disabled"
-                                    :aria-invalid="invalidLimit(selectedQuestion.maxItems, 50)" :aria-describedby="invalidLimit(selectedQuestion.maxItems, 50) ? 'maxItems-error' : undefined"
-                                    @update:model-value="selectedQuestion.maxItems = Number($event)" />
-                                  <p v-if="invalidLimit(selectedQuestion.maxItems, 50)" id="maxItems-error" role="alert" class="text-sm text-error">
-                                    {{ t('maxItemsInvalid') }}
-                                  </p>
-                                </ExtensionFormField>
-                                <ExtensionFormField v-if="selectedQuestion.type === 'table'" :label="t('interfaceMaximumRows')" name="maxRows" required>
-                                    <ExtensionInput
-                                      :model-value="selectedQuestion.maxRows || ''" name="maxRows" type="number" min="1" max="100" required :disabled="disabled"
-                                      :aria-invalid="invalidLimit(selectedQuestion.maxRows, 100)" :aria-describedby="invalidLimit(selectedQuestion.maxRows, 100) ? 'maxRows-error' : undefined"
-                                      @update:model-value="selectedQuestion.maxRows = Number($event)" />
-                                    <p v-if="invalidLimit(selectedQuestion.maxRows, 100)" id="maxRows-error" role="alert" class="text-sm text-error">
-                                      {{ t('maxRowsInvalid') }}
-                                    </p>
-                                  </ExtensionFormField>
-                                </ExtensionAssessmentSchemaAccordionSection>
-                                <ExtensionAssessmentSchemaAccordionSection v-if="selectedQuestion.type !== 'computed'" :title="t('fieldRulesTitle')" level="sub" :default-open="ruleCorrectionQuestionId === selectedQuestion.id">
-                                  <FormFieldRules :key="selectedQuestion.id" :model-value="selectedQuestion.rules" :question="selectedQuestion" :questions="questionConditionOptions"
-                                    :locale="language" :disabled="disabled" @update:model-value="updateRules(selectedQuestion!, $event)" />
-                                </ExtensionAssessmentSchemaAccordionSection>
-                                <ExtensionAssessmentSchemaAccordionSection :title="t('formQuestionHelp')" level="sub"><div class="grid gap-4 md:grid-cols-2">
-                                  <ExtensionFormField :label="t('interfaceHelpTextEnglish')" name="questionHintEn">
-                                    <ExtensionTextarea v-model="selectedQuestion.hint!.en" name="questionHintEn" class="w-full" :rows="3" :required="false" :disabled="disabled" />
-                                  </ExtensionFormField>
-                                  <ExtensionFormField :label="t('interfaceHelpTextFrench')" name="questionHintFr">
-                                    <ExtensionTextarea v-model="selectedQuestion.hint!.fr" name="questionHintFr" class="w-full" :rows="3" :required="false" :disabled="disabled" />
-                                  </ExtensionFormField>
-                                </div></ExtensionAssessmentSchemaAccordionSection>
-<div v-if="selectedQuestion.type === 'list'" class="space-y-2 border-t border-default pt-4">
-                                  <p class="text-sm text-muted">
-                                    {{ t('formListFieldsHelp') }}
-                                  </p>
-                                  <ExtensionButton color="neutral" variant="outline" :disabled="disabled" @click="addFieldsForList">
-                                    {{ t('formAddFieldsForList') }}
-                                  </ExtensionButton>
-                                </div>
-                                <template v-if="selectedQuestion.type === 'select' || selectedQuestion.type === 'checkboxes' || selectedQuestion.type === 'multiselect'">
-                                  <ExtensionAssessmentSchemaAccordionSection :title="t('formQuestionChoices')" level="sub" :default-open="true">
-                                    <FormChoiceEditor :question-id="selectedQuestion.id" :options="selectedQuestion.options" :disabled="Boolean(disabled)" @update:options="updateChoices" />
+                                    </div>
+                                    <ExtensionFormField v-if="selectedQuestion.type === 'text' || selectedQuestion.type === 'textarea'" :label="t('interfaceMaximumCharacters')" name="maxLength" required>
+                                      <ExtensionInput
+                                        :model-value="selectedQuestion.maxLength || ''" name="maxLength" type="number" min="1" max="5000" required :disabled="disabled"
+                                        :aria-invalid="invalidLimit(selectedQuestion.maxLength, 5000)" :aria-describedby="invalidLimit(selectedQuestion.maxLength, 5000) ? 'maxLength-error' : undefined"
+                                        @update:model-value="selectedQuestion.maxLength = Number($event)" />
+                                      <p v-if="invalidLimit(selectedQuestion.maxLength, 5000)" id="maxLength-error" role="alert" class="text-sm text-error">
+                                        {{ t('maxLengthInvalid') }}
+                                      </p>
+                                    </ExtensionFormField>
+                                    <ExtensionFormField v-if="selectedQuestion.type === 'list'" :label="t('interfaceMaximumItems')" name="maxItems" required data-ui-target="extension.gcs-ssc-portal-connector.form-creator.interface-maximum-items">
+                                      <ExtensionInput
+                                        :model-value="selectedQuestion.maxItems || ''" name="maxItems" type="number" min="1" max="50" required :disabled="disabled"
+                                        :aria-invalid="invalidLimit(selectedQuestion.maxItems, 50)" :aria-describedby="invalidLimit(selectedQuestion.maxItems, 50) ? 'maxItems-error' : undefined"
+                                        @update:model-value="selectedQuestion.maxItems = Number($event)" />
+                                      <p v-if="invalidLimit(selectedQuestion.maxItems, 50)" id="maxItems-error" role="alert" class="text-sm text-error">
+                                        {{ t('maxItemsInvalid') }}
+                                      </p>
+                                    </ExtensionFormField>
+                                    <ExtensionFormField v-if="selectedQuestion.type === 'table'" :label="t('interfaceMaximumRows')" name="maxRows" required>
+                                      <ExtensionInput
+                                        :model-value="selectedQuestion.maxRows || ''" name="maxRows" type="number" min="1" max="100" required :disabled="disabled"
+                                        :aria-invalid="invalidLimit(selectedQuestion.maxRows, 100)" :aria-describedby="invalidLimit(selectedQuestion.maxRows, 100) ? 'maxRows-error' : undefined"
+                                        @update:model-value="selectedQuestion.maxRows = Number($event)" />
+                                      <p v-if="invalidLimit(selectedQuestion.maxRows, 100)" id="maxRows-error" role="alert" class="text-sm text-error">
+                                        {{ t('maxRowsInvalid') }}
+                                      </p>
+                                    </ExtensionFormField>
                                   </ExtensionAssessmentSchemaAccordionSection>
-<ExtensionAssessmentSchemaAccordionSection v-if="selectedQuestion.type === 'select'" :title="t('formQuestionDependencies')" level="sub">
-                                  <ExtensionFormField :label="t('interfaceChoicesDependOn')" name="choiceDependency">
-                                    <ExtensionSelect
-                                      :model-value="selectedQuestion.dependsOn?.questionId ?? 'none'" name="choiceDependency" value-key="value" :disabled="disabled"
-                                      :items="[{ value: 'none', label: t('interfaceNoDependency') }, ...selectOptions.filter((item) => item.value !== selectedQuestion!.id)]"
-                                      @update:model-value="setDependency(String($event))" />
-                                  </ExtensionFormField>
-                                  <FormDesignHelp topic="Dependencies" />
-                                  <p v-if="!selectOptions.length" class="text-sm text-muted">
-                                    {{ t('designNoChoiceSources') }}
-                                  </p>
-                                  <div v-if="selectedQuestion.dependsOn" class="space-y-3">
+                                  <ExtensionAssessmentSchemaAccordionSection v-if="selectedQuestion.type !== 'computed'" :title="t('fieldRulesTitle')" level="sub" :default-open="ruleCorrectionQuestionId === selectedQuestion.id">
+                                    <FormFieldRules data-field-container="Composite editor; its individual field declarations own their identities."
+                                      :key="selectedQuestion.id" :model-value="selectedQuestion.rules" :question="selectedQuestion" :questions="questionConditionOptions"
+                                      :locale="language" :disabled="disabled" @update:model-value="updateRules(selectedQuestion!, $event)" />
+                                  </ExtensionAssessmentSchemaAccordionSection>
+                                  <ExtensionAssessmentSchemaAccordionSection :title="t('formQuestionHelp')" level="sub"><div class="grid gap-4 md:grid-cols-2">
+                                    <ExtensionFormField :label="t('interfaceHelpTextEnglish')" name="questionHintEn">
+                                      <ExtensionTextarea v-model="selectedQuestion.hint!.en" name="questionHintEn" class="w-full" :rows="3" :required="false" :disabled="disabled" />
+                                    </ExtensionFormField>
+                                    <ExtensionFormField :label="t('interfaceHelpTextFrench')" name="questionHintFr">
+                                      <ExtensionTextarea v-model="selectedQuestion.hint!.fr" name="questionHintFr" class="w-full" :rows="3" :required="false" :disabled="disabled" />
+                                    </ExtensionFormField>
+                                  </div></ExtensionAssessmentSchemaAccordionSection>
+                                  <div v-if="selectedQuestion.type === 'list'" class="space-y-2 border-t border-default pt-4">
                                     <p class="text-sm text-muted">
-                                      {{ t('interfaceChooseWhichAnswersApplicantsCanSelectForEachAnswerToTheEarlierQuestion') }}
+                                      {{ t('formListFieldsHelp') }}
                                     </p>
-                                    <div v-for="source in sourceChoices" :key="source.value" class="rounded-md border border-default p-3">
-                                      <p class="mb-2 text-sm font-semibold">
-                                        {{ t('interfaceIfTheEarlierAnswerIs') }} “{{ source.label[language] }}”
+                                    <ExtensionButton color="neutral" variant="outline" :disabled="disabled" @click="addFieldsForList">
+                                      {{ t('formAddFieldsForList') }}
+                                    </ExtensionButton>
+                                  </div>
+                                  <template v-if="selectedQuestion.type === 'select' || selectedQuestion.type === 'checkboxes' || selectedQuestion.type === 'multiselect'">
+                                    <ExtensionAssessmentSchemaAccordionSection :title="t('formQuestionChoices')" level="sub" :default-open="true">
+                                      <FormChoiceEditor :question-id="selectedQuestion.id" :options="selectedQuestion.options" :disabled="Boolean(disabled)" @update:options="updateChoices" />
+                                    </ExtensionAssessmentSchemaAccordionSection>
+                                    <ExtensionAssessmentSchemaAccordionSection v-if="selectedQuestion.type === 'select'" :title="t('formQuestionDependencies')" level="sub">
+                                      <ExtensionFormField :label="t('interfaceChoicesDependOn')" name="choiceDependency">
+                                        <ExtensionSelect
+                                          :model-value="selectedQuestion.dependsOn?.questionId ?? 'none'" name="choiceDependency" value-key="value" :disabled="disabled"
+                                          :items="[{ value: 'none', label: t('interfaceNoDependency') }, ...selectOptions.filter((item) => item.value !== selectedQuestion!.id)]"
+                                          @update:model-value="setDependency(String($event))" />
+                                      </ExtensionFormField>
+                                      <FormDesignHelp topic="Dependencies" />
+                                      <p v-if="!selectOptions.length" class="text-sm text-muted">
+                                        {{ t('designNoChoiceSources') }}
                                       </p>
-                                      <p v-if="!selectedQuestion.dependsOn.optionsByValue[source.value]?.length" class="mb-2 text-sm text-warning">
-                                        {{ t('designNoMappedChoices') }}
-                                      </p>
-                                      <div class="grid gap-2">
-                                        <ExtensionCheckbox
-                                          v-for="choice in selectedQuestion.options" :key="choice.value"
-                                          :label="choice.label[language]" :disabled="disabled"
-                                          :model-value="selectedQuestion.dependsOn.optionsByValue[source.value]?.some((item) => item.value === choice.value) ?? false"
-                                          @update:model-value="toggleDependentOption(source.value, choice.value, Boolean($event))" />
+                                      <div v-if="selectedQuestion.dependsOn" class="space-y-3">
+                                        <p class="text-sm text-muted">
+                                          {{ t('interfaceChooseWhichAnswersApplicantsCanSelectForEachAnswerToTheEarlierQuestion') }}
+                                        </p>
+                                        <div v-for="source in sourceChoices" :key="source.value" class="rounded-md border border-default p-3">
+                                          <p class="mb-2 text-sm font-semibold">
+                                            {{ t('interfaceIfTheEarlierAnswerIs') }} “{{ source.label[language] }}”
+                                          </p>
+                                          <p v-if="!selectedQuestion.dependsOn.optionsByValue[source.value]?.length" class="mb-2 text-sm text-warning">
+                                            {{ t('designNoMappedChoices') }}
+                                          </p>
+                                          <div class="grid gap-2">
+                                            <ExtensionCheckbox
+                                              data-field-label-en="Conditional choices" data-field-label-fr="Choix conditionnels"
+                                              v-for="choice in selectedQuestion.options" :key="choice.value"
+                                              :label="choice.label[language]" :disabled="disabled"
+                                              :model-value="selectedQuestion.dependsOn.optionsByValue[source.value]?.some((item) => item.value === choice.value) ?? false" data-ui-target="extension.gcs-ssc-portal-connector.form-creator.selected-question.depends-on.options-by-value-.some-item-item.value-choice.value-false"
+                                              @update:model-value="toggleDependentOption(source.value, choice.value, Boolean($event))" />
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </ExtensionAssessmentSchemaAccordionSection>
+                                  </template>
+                                  <ExtensionAssessmentSchemaAccordionSection v-if="selectedQuestion.type === 'budget' || selectedQuestion.type === 'activities'" :title="t('formQuestionGrant')" level="sub">
+                                    <FormGrantDesigner
+                                      v-if="selectedQuestion.type === 'budget' || selectedQuestion.type === 'activities'"
+                                      :key="selectedQuestion.id" :question="selectedQuestion" :agency-id="agencyId" :stream-id="streamId" :disabled="disabled"
+                                      @configure="selectedQuestion.config = $event as typeof selectedQuestion.config" /></ExtensionAssessmentSchemaAccordionSection>
+                                  <ExtensionAssessmentSchemaAccordionSection v-if="selectedQuestion.type === 'table'" :title="t('formQuestionTable')" level="sub" :default-open="ruleCorrectionQuestionId === selectedQuestion.id">
+                                    <div class="designer-settings-body">
+                                      <ExtensionFormField :label="t('interfaceTotals')" name="tableTotals" :description="t('interfaceOnlyNumberColumnsAreIncludedTotalsUpdateAutomatically')">
+                                        <ExtensionSelect
+                                          :model-value="'totals' in selectedQuestion ? selectedQuestion.totals ?? 'none' : 'none'" name="tableTotals" value-key="value" :disabled="disabled"
+                                          :items="[{ value: 'none', label: t('interfaceNone') }, { value: 'rows', label: t('interfaceRows') }, { value: 'columns', label: t('interfaceColumns') }, { value: 'both', label: t('interfaceRowsAndColumns') }]"
+                                          @update:model-value="Object.assign(selectedQuestion!, { totals: $event }); if (definition.schemaVersion < 4) definition.schemaVersion = 4" />
+                                      </ExtensionFormField>
+                                      <div class="designer-columns">
+                                        <div class="designer-settings-toolbar">
+                                          <h5 class="font-medium">{{ t('interfaceTableColumns') }}</h5>
+                                          <ExtensionButton color="neutral" variant="outline" icon="i-lucide-plus" :disabled="disabled || selectedQuestion.columns.length >= 20" @click="addColumn">
+                                            {{ t('interfaceAddColumn') }}
+                                          </ExtensionButton>
+                                        </div>
+                                        <div v-for="(column, index) in selectedQuestion.columns" :key="index" class="designer-column">
+                                          <div class="designer-settings-toolbar">
+                                            <h6 class="font-medium">{{ t('formTableColumnTitle', { number: index + 1 }) }}</h6>
+                                            <ExtensionButton color="error" variant="outline" icon="i-lucide-trash-2" :disabled="disabled || selectedQuestion.columns.length === 1" @click="removeColumn(index)">
+                                              {{ t('interfaceRemoveColumn') }}
+                                            </ExtensionButton>
+                                          </div>
+                                          <div class="designer-column-fields">
+                                            <ExtensionFormField :label="t('interfaceColumnInEnglish')" :name="`columnEn${index}`" required data-ui-target="extension.gcs-ssc-portal-connector.form-creator.interface-column-in-english">
+                                              <ExtensionInput v-model="column.label.en" :name="`columnEn${index}`" required :disabled="disabled" />
+                                            </ExtensionFormField>
+                                            <ExtensionFormField :label="t('interfaceColumnInFrench')" :name="`columnFr${index}`" required data-ui-target="extension.gcs-ssc-portal-connector.form-creator.interface-column-in-french">
+                                              <ExtensionInput v-model="column.label.fr" :name="`columnFr${index}`" required :disabled="disabled" />
+                                            </ExtensionFormField>
+                                            <ExtensionFormField :label="t('interfaceDataType')" :name="`columnType${index}`" data-ui-target="extension.gcs-ssc-portal-connector.form-creator.interface-data-type">
+                                              <ExtensionSelect
+                                                :model-value="column.type" :name="`columnType${index}`" value-key="value" :disabled="disabled"
+                                                :items="[{ value: 'text', label: t('interfaceText') }, { value: 'number', label: t('interfaceNumber') }, { value: 'date', label: t('interfaceDate') }]"
+                                                @update:model-value="changeColumnType(index, $event as 'text' | 'number' | 'date')" />
+                                            </ExtensionFormField>
+                                            <div class="designer-column-required">
+                                              <ExtensionCheckbox v-model="column.required" :label="t('interfaceRequiredCell')" :disabled="disabled" data-ui-target="extension.gcs-ssc-portal-connector.form-creator.interface-required-cell" />
+                                            </div>
+                                          </div>
+                                          <ExtensionAssessmentSchemaAccordionSection :title="t('fieldRulesTitle')" level="sub" :default-open="ruleCorrectionQuestionId === selectedQuestion.id">
+                                            <FormFieldRules data-field-container="Composite editor; its individual field declarations own their identities."
+                                              :key="column.id" :model-value="column.rules" :question="column" :questions="columnRuleSources(selectedQuestion, index)"
+                                              scope="column" :locale="language" :disabled="disabled" @update:model-value="updateColumnRules(selectedQuestion as Extract<AdvancedQuestion, { type: 'table' }>, index, $event)" />
+                                          </ExtensionAssessmentSchemaAccordionSection>
+                                        </div>
                                       </div>
                                     </div>
-                                  </div>
-                                </ExtensionAssessmentSchemaAccordionSection>
-                                  </template>
-                                <ExtensionAssessmentSchemaAccordionSection v-if="selectedQuestion.type === 'budget' || selectedQuestion.type === 'activities'" :title="t('formQuestionGrant')" level="sub">
-<FormGrantDesigner
-                                  v-if="selectedQuestion.type === 'budget' || selectedQuestion.type === 'activities'"
-                                  :key="selectedQuestion.id" :question="selectedQuestion" :agency-id="agencyId" :stream-id="streamId" :disabled="disabled"
-                                  @configure="selectedQuestion.config = $event as typeof selectedQuestion.config" /></ExtensionAssessmentSchemaAccordionSection>
-                                <ExtensionAssessmentSchemaAccordionSection v-if="selectedQuestion.type === 'table'" :title="t('formQuestionTable')" level="sub" :default-open="ruleCorrectionQuestionId === selectedQuestion.id">
-                                  <div class="designer-settings-body">
-                                  <ExtensionFormField :label="t('interfaceTotals')" name="tableTotals" :description="t('interfaceOnlyNumberColumnsAreIncludedTotalsUpdateAutomatically')">
-                                    <ExtensionSelect :model-value="'totals' in selectedQuestion ? selectedQuestion.totals ?? 'none' : 'none'" name="tableTotals" value-key="value" :disabled="disabled"
-                                      :items="[{ value: 'none', label: t('interfaceNone') }, { value: 'rows', label: t('interfaceRows') }, { value: 'columns', label: t('interfaceColumns') }, { value: 'both', label: t('interfaceRowsAndColumns') }]"
-                                      @update:model-value="Object.assign(selectedQuestion!, { totals: $event }); if (definition.schemaVersion < 4) definition.schemaVersion = 4" />
-                                  </ExtensionFormField>
-                                  <div class="designer-columns">
-                                    <div class="designer-settings-toolbar">
-                                      <h5 class="font-medium">{{ t('interfaceTableColumns') }}</h5>
-                                      <ExtensionButton color="neutral" variant="outline" icon="i-lucide-plus" :disabled="disabled || selectedQuestion.columns.length >= 20" @click="addColumn">
-                                        {{ t('interfaceAddColumn') }}
+                                  </ExtensionAssessmentSchemaAccordionSection>
+                                  <ExtensionAssessmentSchemaAccordionSection v-if="selectedQuestion.type === 'computed'" :title="t('formQuestionCalculation')" level="sub">
+                                    <FormDesignHelp topic="Computed" />
+                                    <p class="text-sm font-medium">
+                                      {{ t('designFormatPreview') }}
+                                    </p>
+                                    <p class="text-sm text-muted" data-computed-format>
+                                      {{ computedFormatLabel }}
+                                    </p>
+                                    <details class="text-sm">
+                                      <summary class="text-primary">
+                                        {{ t('designAdvancedTemplate') }}
+                                      </summary>
+                                      <ExtensionFormField :label="t('designTemplateLabel')" name="computedTemplate" required>
+                                        <ExtensionInput
+                                          v-model="selectedQuestion.template" name="computedTemplate" required :disabled="disabled"
+                                          aria-describedby="computed-template-help computed-template-validation"
+                                          :aria-invalid="!computedTemplateReady(selectedQuestion.template, selectedQuestion.sourceIds)" />
+                                        <p id="computed-template-help" class="text-sm text-muted">
+                                          {{ t('designTemplateHelp') }}
+                                        </p>
+                                        <p id="computed-template-validation" class="text-sm text-warning" aria-live="polite">
+                                          {{ computedTemplateReady(selectedQuestion.template, selectedQuestion.sourceIds) ? '' : t('designTemplateInvalid') }}
+                                        </p>
+                                      </ExtensionFormField>
+                                    </details>
+                                    <p v-if="!computedTemplateReady(selectedQuestion.template, selectedQuestion.sourceIds)" class="text-sm text-warning">
+                                      {{ t('designTemplateInvalid') }}
+                                    </p>
+                                    <p id="computed-sources-label" class="text-sm font-medium">
+                                      {{ t('computedSourcesRequired') }}
+                                    </p>
+                                    <p id="computed-sources-help" class="text-sm">
+                                      {{ t('computedSourcesHelp') }}
+                                    </p>
+                                    <div role="group" aria-labelledby="computed-sources-label" aria-describedby="computed-sources-help" class="grid gap-2">
+                                      <ExtensionCheckbox
+                                        data-field-label-en="Source questions" data-field-label-fr="Questions sources"
+                                        v-for="item in computedSourceOptions" :key="item.value"
+                                        :label="item.label" :disabled="disabled" :model-value="selectedQuestion.sourceIds.includes(item.value)" data-ui-target="extension.gcs-ssc-portal-connector.form-creator.selected-question.source-ids.includes-item.value"
+                                        @update:model-value="toggleComputedSource(item.value, Boolean($event))" />
+                                    </div>
+                                    <p v-if="!computedSourceOptions.length" class="text-sm text-muted">
+                                      {{ t('designNoSources') }}
+                                    </p>
+                                    <div class="flex flex-wrap gap-2">
+                                      <ExtensionButton
+                                        v-for="item in computedSourceOptions.filter((source) => selectedQuestion?.type === 'computed' && selectedQuestion.sourceIds.includes(source.value))"
+                                        :key="item.value" color="neutral" variant="outline" :disabled="disabled" @click="insertComputedReference(item.value)">
+                                        {{ t('designInsertReference', { label: item.label }) }}
+                                      </ExtensionButton>
+                                      <ExtensionButton
+                                        color="neutral" variant="ghost" :disabled="disabled || !selectedQuestion.sourceIds.length"
+                                        @click="selectedQuestion.template += ' / '">
+                                        {{ t('designAddSeparator') }}
                                       </ExtensionButton>
                                     </div>
-                                  <div v-for="(column, index) in selectedQuestion.columns" :key="index" class="designer-column">
-                                    <div class="designer-settings-toolbar">
-                                      <h6 class="font-medium">{{ t('formTableColumnTitle', { number: index + 1 }) }}</h6>
-                                      <ExtensionButton color="error" variant="outline" icon="i-lucide-trash-2" :disabled="disabled || selectedQuestion.columns.length === 1" @click="removeColumn(index)">
-                                        {{ t('interfaceRemoveColumn') }}
-                                      </ExtensionButton>
+                                  </ExtensionAssessmentSchemaAccordionSection>
+                                  <ExtensionAssessmentSchemaAccordionSection :title="t('formQuestionVisibility')" level="sub">
+                                    <div class="designer-settings-body">
+                                      <p class="text-sm font-medium">{{ t('interfaceShowThisQuestionWhen') }}</p>
+                                      <FormCondition data-field-container="Composite editor; its individual field declarations own their identities." v-model="selectedQuestion.visibleWhen" :questions="questionConditionOptions" :locale="language" :disabled="disabled" />
+                                      <FormDesignHelp topic="Visibility" />
                                     </div>
-                                    <div class="designer-column-fields">
-                                    <ExtensionFormField :label="t('interfaceColumnInEnglish')" :name="`columnEn${index}`" required>
-                                      <ExtensionInput v-model="column.label.en" :name="`columnEn${index}`" required :disabled="disabled" />
-                                    </ExtensionFormField>
-                                    <ExtensionFormField :label="t('interfaceColumnInFrench')" :name="`columnFr${index}`" required>
-                                      <ExtensionInput v-model="column.label.fr" :name="`columnFr${index}`" required :disabled="disabled" />
-                                    </ExtensionFormField>
-                                    <ExtensionFormField :label="t('interfaceDataType')" :name="`columnType${index}`">
-                                      <ExtensionSelect
-                                        :model-value="column.type" :name="`columnType${index}`" value-key="value" :disabled="disabled"
-                                        :items="[{ value: 'text', label: t('interfaceText') }, { value: 'number', label: t('interfaceNumber') }, { value: 'date', label: t('interfaceDate') }]"
-                                        @update:model-value="changeColumnType(index, $event as 'text' | 'number' | 'date')" />
-                                    </ExtensionFormField>
-                                    <div class="designer-column-required">
-                                      <ExtensionCheckbox v-model="column.required" :label="t('interfaceRequiredCell')" :disabled="disabled" />
-                                    </div>
-                                    </div>
-                                    <ExtensionAssessmentSchemaAccordionSection :title="t('fieldRulesTitle')" level="sub" :default-open="ruleCorrectionQuestionId === selectedQuestion.id">
-                                      <FormFieldRules :key="column.id" :model-value="column.rules" :question="column" :questions="columnRuleSources(selectedQuestion, index)"
-                                        scope="column" :locale="language" :disabled="disabled" @update:model-value="updateColumnRules(selectedQuestion as Extract<AdvancedQuestion, { type: 'table' }>, index, $event)" />
-                                    </ExtensionAssessmentSchemaAccordionSection>
-                                  </div>
-                                  </div>
-                                  </div>
-                                </ExtensionAssessmentSchemaAccordionSection>
-                                <ExtensionAssessmentSchemaAccordionSection v-if="selectedQuestion.type === 'computed'" :title="t('formQuestionCalculation')" level="sub">
-                                  <FormDesignHelp topic="Computed" />
-                                  <p class="text-sm font-medium">
-                                    {{ t('designFormatPreview') }}
-                                  </p>
-                                  <p class="text-sm text-muted" data-computed-format>
-                                    {{ computedFormatLabel }}
-                                  </p>
-                                  <details class="text-sm">
-                                    <summary class="text-primary">
-                                      {{ t('designAdvancedTemplate') }}
-                                    </summary>
-                                    <ExtensionFormField :label="t('designTemplateLabel')" name="computedTemplate" required>
-                                      <ExtensionInput
-                                        v-model="selectedQuestion.template" name="computedTemplate" required :disabled="disabled"
-                                        aria-describedby="computed-template-help computed-template-validation"
-                                        :aria-invalid="!computedTemplateReady(selectedQuestion.template, selectedQuestion.sourceIds)" />
-                                      <p id="computed-template-help" class="text-sm text-muted">
-                                        {{ t('designTemplateHelp') }}
-                                      </p>
-                                      <p id="computed-template-validation" class="text-sm text-warning" aria-live="polite">
-                                        {{ computedTemplateReady(selectedQuestion.template, selectedQuestion.sourceIds) ? '' : t('designTemplateInvalid') }}
-                                      </p>
-                                    </ExtensionFormField>
-                                  </details>
-                                  <p v-if="!computedTemplateReady(selectedQuestion.template, selectedQuestion.sourceIds)" class="text-sm text-warning">
-                                    {{ t('designTemplateInvalid') }}
-                                  </p>
-                                  <p id="computed-sources-label" class="text-sm font-medium">
-                                    {{ t('computedSourcesRequired') }}
-                                  </p>
-                                  <p id="computed-sources-help" class="text-sm">
-                                    {{ t('computedSourcesHelp') }}
-                                  </p>
-                                  <div role="group" aria-labelledby="computed-sources-label" aria-describedby="computed-sources-help" class="grid gap-2">
-                                    <ExtensionCheckbox
-                                      v-for="item in computedSourceOptions" :key="item.value"
-                                      :label="item.label" :disabled="disabled" :model-value="selectedQuestion.sourceIds.includes(item.value)"
-                                      @update:model-value="toggleComputedSource(item.value, Boolean($event))" />
-                                  </div>
-                                  <p v-if="!computedSourceOptions.length" class="text-sm text-muted">
-                                    {{ t('designNoSources') }}
-                                  </p>
-                                  <div class="flex flex-wrap gap-2">
-                                    <ExtensionButton
-                                      v-for="item in computedSourceOptions.filter((source) => selectedQuestion?.type === 'computed' && selectedQuestion.sourceIds.includes(source.value))"
-                                      :key="item.value" color="neutral" variant="outline" :disabled="disabled" @click="insertComputedReference(item.value)">
-                                      {{ t('designInsertReference', { label: item.label }) }}
-                                    </ExtensionButton>
-                                    <ExtensionButton
-                                      color="neutral" variant="ghost" :disabled="disabled || !selectedQuestion.sourceIds.length"
-                                      @click="selectedQuestion.template += ' / '">
-                                      {{ t('designAddSeparator') }}
-                                    </ExtensionButton>
-                                  </div>
-                                </ExtensionAssessmentSchemaAccordionSection>
-                                <ExtensionAssessmentSchemaAccordionSection :title="t('formQuestionVisibility')" level="sub">
-                                  <div class="designer-settings-body">
-                                    <p class="text-sm font-medium">{{ t('interfaceShowThisQuestionWhen') }}</p>
-                                    <FormCondition v-model="selectedQuestion.visibleWhen" :questions="questionConditionOptions" :locale="language" :disabled="disabled" />
-                                    <FormDesignHelp topic="Visibility" />
-                                  </div>
-                                </ExtensionAssessmentSchemaAccordionSection>
+                                  </ExtensionAssessmentSchemaAccordionSection>
                                 </div>
                                 <div class="flex justify-end border-t border-default pt-3"><ExtensionButton color="error" variant="solid" :disabled="disabled" @click="pendingDeleteId = selectedQuestion.id">
-                                    {{ t('formDeleteQuestion') }}
-                                  </ExtensionButton></div>
+                                  {{ t('formDeleteQuestion') }}
+                                </ExtensionButton></div>
                               </div>
                             </ExtensionAssessmentSchemaAccordionSection>
                           </div>
@@ -1544,10 +1552,10 @@ watch(() => props.agencyId, () => {
                           <p class="text-xs font-semibold uppercase tracking-wide text-muted">
                             {{ t('interfaceIfRule') }} {{ index + 1 }}
                           </p>
-                          <FormCondition
+                          <FormCondition data-field-container="Composite editor; its individual field declarations own their identities."
                             purpose="branch" :model-value="branch.when" :questions="branchConditionOptions" :locale="language" :disabled="disabled"
                             @update:model-value="setBranchCondition(selected!.item as AdvancedSurvey['pages'][number], index, $event)" />
-                          <ExtensionFormField :label="t('interfaceThenGoTo')" :name="`branchDestination${index}`">
+                          <ExtensionFormField :label="t('interfaceThenGoTo')" :name="`branchDestination${index}`" data-ui-target="extension.gcs-ssc-portal-connector.form-creator.interface-then-go-to">
                             <ExtensionSelect
                               :model-value="branch.destination.kind === 'end' ? 'end' : branch.destination.pageId"
                               :name="`branchDestination${index}`" value-key="value" :disabled="disabled" :items="pageDestinations(selected.item as AdvancedSurvey['pages'][number])"

@@ -32,7 +32,7 @@ const categoryLabel = (id?: string) => question.value.type === 'budget' ? questi
 </script>
 
 <template>
-  <fieldset class="min-w-0 space-y-5" :aria-describedby="`${field.id}-instructions${field.errorMessage ? ` ${field.id}-rule-error` : ''}`">
+  <fieldset class="min-w-0 space-y-5" :aria-describedby="`${field.id}-instructions${field.errorMessage ? ` ${field.id}-rule-error` : ''}`" data-field-exclude="Dynamically authored portal grant elements use their question help text.">
     <legend class="text-lg font-semibold">
       {{ field.label }}{{ field.required ? ` ${t('previewRequired')}` : '' }}
     </legend>

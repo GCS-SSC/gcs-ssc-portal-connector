@@ -60,7 +60,7 @@ const previous = (back: () => void, complete: boolean, pageIndex: number) => {
     <p class="text-sm text-muted">
       {{ t('previewNotice') }}
     </p>
-    <HeadlessSurvey v-model="answers" :definition="definition" :locale="locale">
+    <HeadlessSurvey data-field-exclude="Authored runtime questions retain their own help and are outside static field help." v-model="answers" :definition="definition" :locale="locale">
       <template #default="{ fields, page, pageIndex, canBack, isLastPage, complete, errors, next, back }">
         <form class="preview-form space-y-6" novalidate @submit.prevent="navigate(next)">
           <header class="space-y-2 border-b border-default pb-5">

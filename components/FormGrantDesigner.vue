@@ -108,14 +108,14 @@ const sourceCategories = (id: string) => budget.value!.categories.filter(categor
 </script>
 
 <template>
-  <div class="space-y-4 border-t border-default pt-4">
+  <div class="space-y-4 border-t border-default pt-4" data-field-scope="extension.gcs-ssc-portal-connector.form-grant-designer">
     <h4 class="font-semibold">
       {{ t('grantSetup') }}
     </h4>
     <p class="text-sm text-muted">
       {{ t('grantSetupHelp') }}
     </p>
-    <ExtensionFormField :label="t('grantStream')" :name="`${question.id}-stream`">
+    <ExtensionFormField :label="t('grantStream')" :name="`${question.id}-stream`" data-ui-target="extension.gcs-ssc-portal-connector.form-grant-designer.grant-stream">
       <ExtensionSelect v-model="stream" :name="`${question.id}-stream`" :items="items(streams)" value-key="value" :disabled="disabled || busy" :placeholder="t('grantChoose')" />
     </ExtensionFormField>
     <div class="flex flex-wrap gap-2">
@@ -138,7 +138,7 @@ const sourceCategories = (id: string) => budget.value!.categories.filter(categor
     <p v-if="error" role="alert" class="text-sm text-error">
       {{ error }}
     </p>
-    <ExtensionFormField :label="t('grantMaxRows')" :name="`${question.id}-maxRows`" required>
+    <ExtensionFormField :label="t('grantMaxRows')" :name="`${question.id}-maxRows`" required data-ui-target="extension.gcs-ssc-portal-connector.form-grant-designer.grant-max-rows">
       <ExtensionInput
         :model-value="question.config.maxRows" :name="`${question.id}-maxRows`" type="number" min="1" max="100" required :disabled="disabled"
         @update:model-value="question.config.maxRows = Number($event)" />
@@ -156,8 +156,9 @@ const sourceCategories = (id: string) => budget.value!.categories.filter(categor
         </p>
         <div class="flex flex-wrap gap-3">
           <ExtensionCheckbox
+            data-field-label-en="Allowed currencies" data-field-label-fr="Devises autorisées"
             v-for="currency in ['CAD', 'USD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'NZD'] as const" :key="currency" :label="currency" :disabled="disabled"
-            :model-value="budget.currencies.includes(currency)" @update:model-value="budget.currencies = $event ? [...budget.currencies, currency] : budget.currencies.filter(item => item !== currency)" />
+            :model-value="budget.currencies.includes(currency)" data-ui-target="extension.gcs-ssc-portal-connector.form-grant-designer.budget.currencies.includes-currency" @update:model-value="budget.currencies = $event ? [...budget.currencies, currency] : budget.currencies.filter(item => item !== currency)" />
         </div>
       </fieldset>
       <GrantOptionEditor :title="t('grantCategories')" :options="budget.categories" :prefix="`${question.id}-categories`" :disabled="locked" @add="add('categories')" @remove="remove('categories', $event)" />
@@ -167,30 +168,30 @@ const sourceCategories = (id: string) => budget.value!.categories.filter(categor
       </p>
       <GrantOptionEditor :title="t('grantCostItems')" :options="budget.costItems" :prefix="`${question.id}-costs`" :disabled="locked" @add="add('costItems')" @remove="remove('costItems', $event)">
         <template #default="{ option }">
-          <ExtensionFormField :label="t('grantCategory')" :name="`${question.id}-${option.id}-category`" required>
+          <ExtensionFormField :label="t('grantCategory')" :name="`${question.id}-${option.id}-category`" required data-ui-target="extension.gcs-ssc-portal-connector.form-grant-designer.grant-category">
             <ExtensionSelect v-model="costItem(option.id).categoryId" :name="`${question.id}-${option.id}-category`" :items="items(budget.categories)" value-key="value" required :disabled="locked" />
           </ExtensionFormField>
-          <ExtensionFormField :label="t('grantRatio')" :name="`${question.id}-${option.id}-ratio`">
+          <ExtensionFormField :label="t('grantRatio')" :name="`${question.id}-${option.id}-ratio`" data-ui-target="extension.gcs-ssc-portal-connector.form-grant-designer.grant-ratio">
             <ExtensionInput
               :model-value="costItem(option.id).costSharingRatio ?? ''" :name="`${question.id}-${option.id}-ratio`" type="number" step="0.01" min="-999.99" max="999.99" :disabled="locked"
               @update:model-value="costItem(option.id).costSharingRatio = $event === '' || $event == null ? null : Number($event)" />
           </ExtensionFormField>
-          <ExtensionFormField :label="t('grantMode')" :name="`${question.id}-${option.id}-mode`" required>
+          <ExtensionFormField :label="t('grantMode')" :name="`${question.id}-${option.id}-mode`" required data-ui-target="extension.gcs-ssc-portal-connector.form-grant-designer.grant-mode">
             <ExtensionSelect
               :model-value="costItem(option.id).calculation.mode" :name="`${question.id}-${option.id}-mode`" required :disabled="locked" value-key="value"
               :items="[{ value: 'manual', label: t('grantManual') }, { value: 'category', label: t('grantCategoryPercentage') }, { value: 'all_other', label: t('grantAllOther') }]"
               @update:model-value="setMode(option.id, $event)" />
           </ExtensionFormField>
           <template v-if="costItem(option.id).calculation.mode !== 'manual'">
-            <ExtensionFormField v-if="costItem(option.id).calculation.mode === 'category'" :label="t('grantSourceCategory')" :name="`${question.id}-${option.id}-source`" required>
+            <ExtensionFormField v-if="costItem(option.id).calculation.mode === 'category'" :label="t('grantSourceCategory')" :name="`${question.id}-${option.id}-source`" required data-ui-target="extension.gcs-ssc-portal-connector.form-grant-designer.grant-source-category">
               <ExtensionSelect v-model="costItem(option.id).calculation.sourceCategoryId" :name="`${question.id}-${option.id}-source`" required :disabled="locked" value-key="value" :items="items(sourceCategories(option.id))" />
             </ExtensionFormField>
-            <ExtensionFormField :label="t('grantPercentage')" :name="`${question.id}-${option.id}-percentage`" required>
+            <ExtensionFormField :label="t('grantPercentage')" :name="`${question.id}-${option.id}-percentage`" required data-ui-target="extension.gcs-ssc-portal-connector.form-grant-designer.grant-percentage">
               <ExtensionInput
                 :model-value="costItem(option.id).calculation.percentage ?? ''" :name="`${question.id}-${option.id}-percentage`" required type="number" min="0" max="100" step="0.01" :disabled="locked"
                 @update:model-value="costItem(option.id).calculation.percentage = $event === '' || $event == null ? null : Number($event)" />
             </ExtensionFormField>
-            <ExtensionCheckbox v-model="costItem(option.id).calculation.allowOverride" :label="t('grantOverride')" :disabled="locked" />
+            <ExtensionCheckbox v-model="costItem(option.id).calculation.allowOverride" :label="t('grantOverride')" :disabled="locked" data-ui-target="extension.gcs-ssc-portal-connector.form-grant-designer.grant-override" />
           </template>
         </template>
       </GrantOptionEditor>
@@ -199,22 +200,22 @@ const sourceCategories = (id: string) => budget.value!.categories.filter(categor
       </p>
       <GrantOptionEditor :title="t('grantFundingTypes')" :options="budget.fundingTypes" :prefix="`${question.id}-types`" :disabled="locked" @add="add('fundingTypes')" @remove="remove('fundingTypes', $event)">
         <template #default="{ option }">
-          <ExtensionCheckbox v-model="fundingType(option.id).stacking" :label="t('grantStacking')" :disabled="locked" />
-          <ExtensionCheckbox v-model="fundingType(option.id).costSharing" :label="t('grantCostSharing')" :disabled="locked" />
+          <ExtensionCheckbox v-model="fundingType(option.id).stacking" :label="t('grantStacking')" :disabled="locked" data-ui-target="extension.gcs-ssc-portal-connector.form-grant-designer.grant-stacking" />
+          <ExtensionCheckbox v-model="fundingType(option.id).costSharing" :label="t('grantCostSharing')" :disabled="locked" data-ui-target="extension.gcs-ssc-portal-connector.form-grant-designer.grant-cost-sharing" />
         </template>
       </GrantOptionEditor>
       <GrantOptionEditor :title="t('grantFundingSubtypes')" :options="budget.fundingSubtypes" :prefix="`${question.id}-subtypes`" :disabled="locked" @add="add('fundingSubtypes')" @remove="remove('fundingSubtypes', $event)">
         <template #default="{ option }">
-          <ExtensionFormField :label="t('grantFundingType')" :name="`${question.id}-${option.id}-type`" required>
+          <ExtensionFormField :label="t('grantFundingType')" :name="`${question.id}-${option.id}-type`" required data-ui-target="extension.gcs-ssc-portal-connector.form-grant-designer.grant-funding-type">
             <ExtensionSelect v-model="fundingSubtype(option.id).typeId" :name="`${question.id}-${option.id}-type`" value-key="value" required :disabled="locked" :items="items(budget.fundingTypes)" />
           </ExtensionFormField>
         </template>
       </GrantOptionEditor>
     </template>
     <template v-if="activities">
-      <ExtensionCheckbox v-model="activities.requireOutcomes" :label="t('grantRequireOutcomes')" :disabled="disabled" />
-      <ExtensionCheckbox v-model="activities.requireResponsibleParties" :label="t('grantRequireParties')" :disabled="disabled" />
-      <ExtensionCheckbox v-model="activities.bilingual" :label="t('grantBilingual')" :disabled="disabled" />
+      <ExtensionCheckbox v-model="activities.requireOutcomes" :label="t('grantRequireOutcomes')" :disabled="disabled" data-ui-target="extension.gcs-ssc-portal-connector.form-grant-designer.grant-require-outcomes" />
+      <ExtensionCheckbox v-model="activities.requireResponsibleParties" :label="t('grantRequireParties')" :disabled="disabled" data-ui-target="extension.gcs-ssc-portal-connector.form-grant-designer.grant-require-parties" />
+      <ExtensionCheckbox v-model="activities.bilingual" :label="t('grantBilingual')" :disabled="disabled" data-ui-target="extension.gcs-ssc-portal-connector.form-grant-designer.grant-bilingual" />
       <p class="text-sm text-muted">
         {{ t('grantBilingualHelp') }}
       </p>

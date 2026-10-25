@@ -155,7 +155,7 @@ watch(() => props.agencyId, () => {
 </script>
 
 <template>
-  <div class="space-y-5">
+  <div class="space-y-5" data-field-scope="extension.gcs-ssc-portal-connector.form-library">
     <div class="flex flex-wrap items-end justify-between gap-4">
       <div>
         <h3 class="text-xl font-semibold text-highlighted">{{ t('formLibraryTitle') }}</h3>
@@ -169,14 +169,15 @@ watch(() => props.agencyId, () => {
     </p>
     <p v-if="loading" role="status" class="text-sm text-muted">{{ t('formLibraryLoading') }}</p>
 
-    <ExtensionResourceLayoutCard v-else-if="!error" v-model:search="search" v-model:pagination="pagination"
+    <ExtensionResourceLayoutCard
+      v-else-if="!error" v-model:search="search" v-model:pagination="pagination"
       :data="visibleForms" :columns="columns" :total-records="filteredForms.length"
       :show-button="false"
       :search-placeholder="t('formLibrarySearch')">
       <template #filters>
         <label class="flex items-center gap-2 text-sm text-highlighted">
           <span>{{ t('formLibraryStatus') }}</span>
-          <select v-model="statusFilter" class="rounded-md border border-default bg-default px-3 py-2 text-sm text-highlighted">
+          <select data-field-label-en="Status filter" data-field-label-fr="Filtre de statut" v-model="statusFilter" class="rounded-md border border-default bg-default px-3 py-2 text-sm text-highlighted" data-ui-target="extension.gcs-ssc-portal-connector.form-library.status-filter">
             <option value="all">{{ t('formLibraryAllStatuses') }}</option>
             <option value="published">{{ t('formLibraryPublished') }}</option>
             <option value="changes">{{ t('formLibraryChanges') }}</option>
@@ -185,7 +186,8 @@ watch(() => props.agencyId, () => {
         </label>
       </template>
       <template #form-cell="{ row }">
-        <button type="button" class="text-left font-semibold text-highlighted underline-offset-2 hover:underline focus-visible:underline"
+        <button
+          type="button" class="text-left font-semibold text-highlighted underline-offset-2 hover:underline focus-visible:underline"
           @click="emit('open', row.original.id)">{{ row.original.title[language] || row.original.title.en || row.original.id }}</button>
         <div class="mt-1 text-xs text-muted"><template v-if="row.original.revision > 0">{{ t('formLibraryRevision') }} {{ row.original.revision }} · </template>{{ row.original.id }}</div>
       </template>
@@ -206,7 +208,8 @@ watch(() => props.agencyId, () => {
       <template #updated-cell="{ row }"><span class="whitespace-nowrap text-muted">{{ dateLabel(row.original.updatedAt) }}</span></template>
       <template #actions-cell="{ row }">
         <div class="flex justify-end">
-          <ExtensionButton icon="i-lucide-eye" color="neutral" variant="ghost"
+          <ExtensionButton
+            icon="i-lucide-eye" color="neutral" variant="ghost"
             :aria-label="`${t('formLibraryEdit')}: ${row.original.title[language] || row.original.title.en || row.original.id}`"
             @click="emit('open', row.original.id)" />
         </div>
@@ -219,7 +222,8 @@ watch(() => props.agencyId, () => {
         <p v-else class="py-8 text-center text-sm text-muted">{{ t('formLibraryNoMatch') }}</p>
       </template>
     </ExtensionResourceLayoutCard>
-    <ExtensionModal v-model:open="createOpen" :dismissible="!createBusy"
+    <ExtensionModal
+      v-model:open="createOpen" :dismissible="!createBusy"
       :title="t('formDetailsCreateTitle')" :description="t('formDetailsCreateHelp')">
       <template #body>
         <form class="space-y-4" @submit.prevent="createForm">
@@ -230,11 +234,13 @@ watch(() => props.agencyId, () => {
             <ExtensionInput v-model="createDraft.titleFr" name="formTitleFr" required :maxlength="200" :disabled="createBusy" />
           </ExtensionFormField>
           <ExtensionFormField :label="t('formIntroductionEnglish')" name="formDescriptionEn" :required="introductionRequired">
-            <ExtensionTextarea v-model="createDraft.introductionEn" name="formDescriptionEn"
+            <ExtensionTextarea
+              v-model="createDraft.introductionEn" name="formDescriptionEn"
               :required="introductionRequired" :maxlength="2000" :disabled="createBusy" />
           </ExtensionFormField>
           <ExtensionFormField :label="t('formIntroductionFrench')" name="formDescriptionFr" :required="introductionRequired">
-            <ExtensionTextarea v-model="createDraft.introductionFr" name="formDescriptionFr"
+            <ExtensionTextarea
+              v-model="createDraft.introductionFr" name="formDescriptionFr"
               :required="introductionRequired" :maxlength="2000" :disabled="createBusy" />
           </ExtensionFormField>
           <p v-if="createError" role="alert" class="text-sm text-error">{{ createError }}</p>
