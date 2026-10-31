@@ -4,7 +4,7 @@ import { computed, h, onMounted, ref, watch, type Ref } from 'vue'
 import type { ExtensionEntityTabContext } from '@gcs-ssc/extensions'
 import {
   ExtensionBadge, ExtensionButton, ExtensionFormField, ExtensionInput, ExtensionModal,
-  ExtensionResourceLayoutCard, ExtensionTextarea, useExtensionApi, useExtensionI18n,
+  ExtensionResourceLayout, ExtensionTextarea, useExtensionApi, useExtensionI18n,
   useExtensionToast, useHostApi
 } from '@gcs-ssc/extensions/ui'
 import { messages } from '../i18n/messages'
@@ -171,7 +171,7 @@ watch(() => [agencies.value, proponentId.value], load)
             </div>
           </ExtensionFormField>
           <p v-if="searchedTerm !== null && !searchResults.length" role="status" class="text-sm text-muted">{{ t('noMatchingOrganizations') }}</p>
-          <ExtensionResourceLayoutCard
+          <ExtensionResourceLayout
             v-if="searchedTerm !== null && searchResults.length"
             v-model:pagination="pagination" :data="visibleResults" :columns="columns"
             :total-records="searchResults.length" :show-toolbar="false" :show-button="false" :show-column-toggle="false">
@@ -182,7 +182,7 @@ watch(() => [agencies.value, proponentId.value], load)
             </template>
             <template #owner-cell="{ row }">{{ row.original.ownerName }}<span class="block text-sm text-muted">{{ row.original.ownerEmail }}</span></template>
             <template #actions-cell="{ row }"><ExtensionButton size="sm" @click="select(row.original)">{{ t('verifyAction') }}</ExtensionButton></template>
-          </ExtensionResourceLayoutCard>
+          </ExtensionResourceLayout>
         </template>
       </section>
       <div v-if="!currentVerification && !canLink && !error" class="space-y-2 text-sm text-muted">

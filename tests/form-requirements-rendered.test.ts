@@ -135,10 +135,10 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
     ExtensionTooltip: defineComponent({ inheritAttrs: false, setup(_, { slots }) { return () => slots.default?.() } }),
     ExtensionCheckbox: checkbox, ExtensionButton: button, ExtensionSaveButton: button,
     ExtensionIcon: defineComponent({ setup() { return () => h('span') } }),
-    ExtensionTable: resourceTable, ExtensionTextarea: textarea, ExtensionModal: modal, ExtensionResourceLayoutCard: resourceTable,
+    ExtensionTable: resourceTable, ExtensionTextarea: textarea, ExtensionModal: modal, ExtensionResourceLayout: resourceTable,
     ExtensionAssessmentSchemaPageSection: pageSection, ExtensionAssessmentSchemaAccordionSection: accordionSection,
     ExtensionFlowDiagram: flowDiagram,
-    ExtensionEntityEditorWorkspace: workspace, ExtensionEntityHero: hero, ExtensionRouteTabs: routeTabs,
+    ExtensionEntityEditorWorkspace: workspace, ExtensionEntityHero: hero, ExtensionTranslatedTabs: routeTabs,
     ExtensionBadge: defineComponent({ setup(_, { slots }) { return () => h('span', slots.default?.()) } }),
     ExtensionAlert: defineComponent({ props: ['title'], setup(props, { slots }) {
       return () => h('div', { role: 'alert' }, [h('strong', props.title), slots.description?.()])
@@ -155,7 +155,7 @@ import OpportunityForms from '../components/OpportunityForms.vue'
 import FormTest from '../components/FormTest.vue'
 import FormTestControl from '../components/FormTestControl.vue'
 import type { SurveyField } from '@gcs-ssc/survey/vue'
-import { ExtensionSelect, ExtensionModal, ExtensionResourceLayoutCard } from '@gcs-ssc/extensions/ui'
+import { ExtensionSelect, ExtensionModal, ExtensionResourceLayout } from '@gcs-ssc/extensions/ui'
 import type { FlowDiagramDefinition } from '@gcs-ssc/extensions/ui'
 import { readFormDraft } from '../components/form-draft-session'
 import PortalConnection from '../components/PortalConnection.vue'
@@ -2277,7 +2277,7 @@ describe('opportunity forms agency layout', () => {
     get.mockResolvedValue({ forms: six, published: false, canWrite: true })
     const wrapper = mount(OpportunityForms, { props: { context }, global: { stubs: { FormCreator: true } } })
     await flushPromises()
-    wrapper.findComponent(ExtensionResourceLayoutCard).vm.$emit('update:pagination', { pageIndex: 1, pageSize: 5 })
+    wrapper.findComponent(ExtensionResourceLayout).vm.$emit('update:pagination', { pageIndex: 1, pageSize: 5 })
     await flushPromises()
     expect(wrapper.findAll('[data-table-row]')).toHaveLength(1)
     get.mockResolvedValue({ forms: six.slice(0, 5), published: false, canWrite: true })

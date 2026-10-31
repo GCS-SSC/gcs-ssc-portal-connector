@@ -2,7 +2,7 @@
 import { feedback, useLocalizedFeedback } from './localized-feedback'
 import { computed, ref, watch } from 'vue'
 import type { ExtensionEntityTabContext } from '@gcs-ssc/extensions'
-import { ExtensionBadge, ExtensionButton, ExtensionResourceLayoutCard, useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
+import { ExtensionBadge, ExtensionButton, ExtensionResourceLayout, useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
 import { messages } from '../i18n/messages'
 import FormCreator from './FormCreator.vue'
 
@@ -121,7 +121,7 @@ const act = async (action: 'publish' | 'withdraw') => {
       <p v-if="error" role="alert" class="text-sm text-error">{{ error }}
         <button type="button" class="ml-2 underline" @click="load">{{ t('formLibraryRetry') }}</button>
       </p>
-      <ExtensionResourceLayoutCard v-if="!loading && !error" v-model:search="search" v-model:pagination="pagination"
+      <ExtensionResourceLayout v-if="!loading && !error" v-model:search="search" v-model:pagination="pagination"
         :data="visibleForms" :columns="columns" :total-records="filteredForms.length" :show-button="false"
         :search-placeholder="t('formLibrarySearch')">
         <template #order-cell="{ row }"><span class="text-muted">{{ row.original.order }}</span></template>
@@ -160,7 +160,7 @@ const act = async (action: 'publish' | 'withdraw') => {
           </div>
           <p v-else class="py-8 text-center text-sm text-muted">{{ t('formLibraryNoMatch') }}</p>
         </template>
-      </ExtensionResourceLayoutCard>
+      </ExtensionResourceLayout>
       <div v-if="writable && !loading && !error" class="flex flex-wrap gap-3">
         <ExtensionButton v-if="!published" icon="i-lucide-upload" :disabled="busy || !forms.length" :loading="busy" @click="act('publish')">
           {{ t('opportunityFormsPublish') }}</ExtensionButton>

@@ -2,7 +2,7 @@
 import { feedback, useLocalizedFeedback } from './localized-feedback'
 import { computed, ref, watch } from 'vue'
 import { FetchResponseError } from '@gcs-ssc/extensions'
-import { ExtensionBadge, ExtensionButton, ExtensionFormField, ExtensionInput, ExtensionModal, ExtensionResourceLayoutCard, ExtensionTextarea, useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
+import { ExtensionBadge, ExtensionButton, ExtensionFormField, ExtensionInput, ExtensionModal, ExtensionResourceLayout, ExtensionTextarea, useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
 import { messages } from '../i18n/messages'
 
 type Bilingual = { en: string; fr: string }
@@ -169,7 +169,7 @@ watch(() => props.agencyId, () => {
     </p>
     <p v-if="loading" role="status" class="text-sm text-muted">{{ t('formLibraryLoading') }}</p>
 
-    <ExtensionResourceLayoutCard
+    <ExtensionResourceLayout
       v-else-if="!error" v-model:search="search" v-model:pagination="pagination"
       :data="visibleForms" :columns="columns" :total-records="filteredForms.length"
       :show-button="false"
@@ -221,7 +221,7 @@ watch(() => props.agencyId, () => {
         </div>
         <p v-else class="py-8 text-center text-sm text-muted">{{ t('formLibraryNoMatch') }}</p>
       </template>
-    </ExtensionResourceLayoutCard>
+    </ExtensionResourceLayout>
     <ExtensionModal
       v-model:open="createOpen" :dismissible="!createBusy"
       :title="t('formDetailsCreateTitle')" :description="t('formDetailsCreateHelp')">

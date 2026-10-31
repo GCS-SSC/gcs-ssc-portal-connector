@@ -4,7 +4,7 @@ import { FetchResponseError } from '@gcs-ssc/extensions'
 import { computed, h, onMounted, ref, watch, type Ref } from 'vue'
 import {
   ExtensionAlert, ExtensionBadge, ExtensionButton, ExtensionCheckbox, ExtensionFormField, ExtensionInput, ExtensionSaveButton,
-  ExtensionModal, ExtensionResourceLayoutCard, ExtensionSelect, ExtensionTextarea,
+  ExtensionModal, ExtensionResourceLayout, ExtensionSelect, ExtensionTextarea,
   useExtensionApi, useExtensionI18n, useExtensionToast, useHostApi
 } from '@gcs-ssc/extensions/ui'
 import { readImportDiagnostic } from '../shared/import-diagnostics'
@@ -626,7 +626,7 @@ watch(() => props.agencyId, searchProponents)
         <ExtensionButton :disabled="locked || busy || !connection" :loading="busy" @click="refreshOrganizationChoices">{{ t('refreshOrganizations') }}</ExtensionButton>
       </div>
       <p v-if="!unverifiedOrganizations.length" class="text-sm text-muted">{{ t('noUnverifiedOrganizations') }}</p>
-      <ExtensionResourceLayoutCard
+      <ExtensionResourceLayout
         v-else v-model:search="organizationSearch" v-model:pagination="organizationPagination"
         :data="visibleOrganizations" :columns="organizationColumns" :total-records="filteredOrganizations.length"
         :show-button="false" :show-column-toggle="false" :search-placeholder="t('searchOrganizations')">
@@ -640,7 +640,7 @@ watch(() => props.agencyId, searchProponents)
         <template #state-cell="{ row }">{{ row.original.active ? t('active') : t('inactive') }}<span v-if="row.original.verifiedAt" class="block text-muted">{{ new Date(row.original.verifiedAt).toLocaleDateString(locale) }}</span></template>
         <template #actions-cell="{ row }"><ExtensionButton v-if="row.original.active && !row.original.verified && !locked" :disabled="busy" @click="openVerification(row.original)">{{ t('verifyAction') }}</ExtensionButton></template>
         <template #empty>{{ t('noMatchingOrganizations') }}</template>
-      </ExtensionResourceLayoutCard>
+      </ExtensionResourceLayout>
       <ExtensionModal v-model:open="verificationConfirmOpen" :title="t('verifyOrganization')" :description="t('verificationIrreversible')">
         <template #body>
           <div class="space-y-4">
@@ -697,7 +697,7 @@ watch(() => props.agencyId, searchProponents)
         </template>
       </ExtensionAlert>
       <p v-if="!inbound.length" class="text-sm text-muted">{{ t('emptyInbound') }}</p>
-      <ExtensionResourceLayoutCard
+      <ExtensionResourceLayout
         v-else v-model:search="inboundSearch" v-model:pagination="inboundPagination"
         :data="visibleInbound" :columns="inboundColumns" :total-records="filteredInbound.length"
         :show-button="false" :show-column-toggle="false" :search-placeholder="t('searchInbound')">
@@ -708,11 +708,11 @@ watch(() => props.agencyId, searchProponents)
           <span v-if="row.original.lastError" class="mt-1 block text-sm text-error">{{ diagnosticMessage(row.original.lastError) }}</span>
         </template>
         <template #empty>{{ t('noMatchingInbound') }}</template>
-      </ExtensionResourceLayoutCard>
+      </ExtensionResourceLayout>
       <div class="space-y-4 border-t border-default pt-6">
         <h4 class="text-base font-semibold text-highlighted">{{ t('receipts') }}</h4>
         <p v-if="!receipts.length" class="text-sm text-muted">{{ t('none') }}</p>
-        <ExtensionResourceLayoutCard
+        <ExtensionResourceLayout
           v-else v-model:search="receiptSearch" v-model:pagination="receiptPagination"
           :data="visibleReceipts" :columns="receiptColumns" :total-records="filteredReceipts.length"
           :show-button="false" :show-column-toggle="false" :search-placeholder="t('searchReceipts')">
@@ -731,7 +731,7 @@ watch(() => props.agencyId, searchProponents)
               @click="openReceipt(row.original)" /></div>
           </template>
           <template #empty>{{ t('noMatchingReceipts') }}</template>
-        </ExtensionResourceLayoutCard>
+        </ExtensionResourceLayout>
       </div>
     </section>
     <ExtensionModal v-model:open="receiptEvidenceOpen" :title="t('receiptEvidence')" :description="t('receiptEvidenceDescription')" :ui="{ content: 'sm:max-w-2xl' }">
@@ -776,7 +776,7 @@ watch(() => props.agencyId, searchProponents)
           :disabled="locked || busy || !connection" :loading="busy" @click="pushAllBacklog">{{ t('pushAll') }}</ExtensionButton>
       </div>
       <p v-if="!backlog.length" class="text-sm text-muted">{{ t('emptyBacklog') }}</p>
-      <ExtensionResourceLayoutCard
+      <ExtensionResourceLayout
         v-else v-model:search="backlogSearch" v-model:pagination="backlogPagination"
         :data="visibleBacklog" :columns="backlogColumns" :total-records="filteredBacklog.length"
         :show-button="false" :show-column-toggle="false" :search-placeholder="t('searchBacklog')">
@@ -795,7 +795,7 @@ watch(() => props.agencyId, searchProponents)
           </div>
         </template>
         <template #empty>{{ t('noMatchingBacklog') }}</template>
-      </ExtensionResourceLayoutCard>
+      </ExtensionResourceLayout>
       <ExtensionModal
         :open="selectedBacklog !== null" :title="t('deliveryDetails')"
         :ui="{ content: 'sm:max-w-2xl' }" @update:open="(value: boolean) => { if (!value) selectedBacklog = null }">
@@ -848,7 +848,7 @@ watch(() => props.agencyId, searchProponents)
       <div class="space-y-4 border-t border-default pt-6">
         <h4 class="text-base font-semibold text-highlighted">{{ t('outcomeBacklog') }}</h4>
         <p v-if="!outcomeBacklog.length" class="text-sm text-muted">{{ t('emptyOutcomeBacklog') }}</p>
-        <ExtensionResourceLayoutCard
+        <ExtensionResourceLayout
           v-else v-model:search="outcomeSearch" v-model:pagination="outcomePagination"
           :data="visibleOutcomeBacklog" :columns="outcomeColumns" :total-records="filteredOutcomeBacklog.length"
           :show-button="false" :show-column-toggle="false" :search-placeholder="t('searchOutcomeBacklog')">
@@ -860,7 +860,7 @@ watch(() => props.agencyId, searchProponents)
             <span v-if="row.original.lastError" class="mt-1 block text-sm text-error">{{ diagnosticMessage(row.original.lastError) }}</span>
           </template>
           <template #empty>{{ t('noMatchingOutcomeBacklog') }}</template>
-        </ExtensionResourceLayoutCard>
+        </ExtensionResourceLayout>
       </div>
     </section>
     <p v-if="error && section !== 'connection'" role="alert" class="text-sm text-error">{{ error }}</p>

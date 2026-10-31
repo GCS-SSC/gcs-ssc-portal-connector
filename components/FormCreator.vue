@@ -5,7 +5,7 @@ import { customAlphabet } from 'nanoid'
 import { grantConfigurationReady, emptyBudgetConfig, emptyActivityConfig, designerSurveySchema, upgradeToAdvancedSurvey, type AdvancedGroup, type AdvancedQuestion,
   type AdvancedSurvey, type FieldRule, type SurveyCondition } from '@gcs-ssc/survey'
 import { ExtensionAssessmentSchemaAccordionSection, ExtensionAssessmentSchemaPageSection, ExtensionButton, ExtensionCheckbox, ExtensionEntityEditorWorkspace, ExtensionEntityHero,
-  ExtensionFormField, ExtensionIcon, ExtensionInput, ExtensionModal, ExtensionRouteTabs, ExtensionSaveButton,
+  ExtensionFormField, ExtensionIcon, ExtensionInput, ExtensionModal, ExtensionTranslatedTabs, ExtensionSaveButton,
   ExtensionSelect, ExtensionTextarea, ExtensionTooltip, useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
 import { messages } from '../i18n/messages'
 import { updateFormChoices } from '../shared/form-choices'
@@ -1139,7 +1139,7 @@ watch(() => props.agencyId, () => {
     </p>
     <ExtensionEntityEditorWorkspace content-test-id="form-detail-content">
       <template #sidebar>
-        <ExtensionRouteTabs data-field-container="Page navigation state, not a business input field."
+        <ExtensionTranslatedTabs ordering="localized" data-field-container="Page navigation state, not a business input field."
           v-model="tab" :items="workflowTabs" :external-panel-id="editorPanelId" :priority-values="['edit', 'test', 'publish', 'flow']" orientation="vertical"
           :ui="{ root: 'w-full', list: 'w-full flex-col items-stretch p-0', trigger: 'w-full justify-start' }" />
         <nav class="designer-sidebar-outline" :aria-label="t('interfaceFormPagesAndSections')">
