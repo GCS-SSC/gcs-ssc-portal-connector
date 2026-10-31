@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { formatMoneyText, parseCurrencyMoney } from '@gcs-ssc/extensions/money'
 import { computed } from 'vue'
 import { nanoid } from 'nanoid'
-import { fundingFields, type ActivityRow, type BudgetRow, type GrantQuestion } from '@gcs-ssc/survey'
+import { fundingFields, type ActivityRow, type BudgetRow, type BudgetTotal, type GrantQuestion } from '@gcs-ssc/survey'
 import { useGrantElement, type SurveyField } from '@gcs-ssc/survey/vue'
 import { ExtensionButton, ExtensionCheckbox } from '@gcs-ssc/extensions/ui'
 import { translateGcsExtensionMessage } from '@gcs-ssc/extensions'
@@ -14,6 +15,12 @@ const question = computed(() => props.field.question as GrantQuestion)
 const editor = useGrantElement({ question, value: () => props.field.value, locale: () => props.locale,
   showErrors: () => Boolean(props.field.error), disabled: () => props.field.disabled,
   createId: () => `r_${nanoid()}`, onChange: value => props.field.setValue(value) })
+const summaryFields = (total: BudgetTotal) => [
+  { key: 'grantTotalCost', amount: total.totalCost }, { key: 'grantProgramFunding', amount: total.programFunding },
+  { key: 'grantOtherFunding', amount: total.otherFunding }, { key: 'grantGap', amount: total.gap },
+  { key: 'grantStackingTotal', amount: total.stacking }, { key: 'grantCostSharingTotal', amount: total.costSharing }
+]
+const moneyLabel = (value: string, currency: string) => formatMoneyText(parseCurrencyMoney(value, currency), props.locale)
 const rowId = (id: string, path: string) => `${props.field.id}-${id}-${path.replaceAll('.', '-')}`
 const budgetRow = (row: BudgetRow | ActivityRow) => row as BudgetRow
 const activityRow = (row: BudgetRow | ActivityRow) => row as ActivityRow
@@ -58,7 +65,7 @@ const categoryLabel = (id?: string) => question.value.type === 'budget' ? questi
       <div class="grid gap-4 sm:grid-cols-2">
         <FormGrantInput
           v-for="input in editor.fields(row)" :id="rowId(row.id, input.path)" :key="input.path" :input="input" :disabled="field.disabled" :locale="locale"
-          :error="editor.error(index, input.path)" :class="input.type === 'textarea' ? 'grant-wide' : ''" @change="editor.change(row.id, input.path, $event)" />
+          :currency="question.type === 'budget' ? budgetRow(row).currency : undefined" :error="editor.error(index, input.path)" :class="input.type === 'textarea' ? 'grant-wide' : ''" @change="editor.change(row.id, input.path, $event)" />
       </div>
       <template v-if="question.type === 'activities'">
         <fieldset
@@ -89,7 +96,7 @@ const categoryLabel = (id?: string) => question.value.type === 'budget' ? questi
           <div class="grid gap-3 sm:grid-cols-2">
             <FormGrantInput
               v-for="input in fundingFields(question.config, source, locale)" :id="rowId(source.id, input.path)" :key="input.path" :input="input" :disabled="field.disabled" :locale="locale"
-              :error="editor.error(index, `otherFunding.${sourceIndex}.${input.path}`)" @change="editor.changeFunding(row.id, source.id, input.path, $event)" />
+              :currency="budgetRow(row).currency" :error="editor.error(index, `otherFunding.${sourceIndex}.${input.path}`)" @change="editor.changeFunding(row.id, source.id, input.path, $event)" />
           </div>
           <ExtensionButton type="button" color="neutral" variant="ghost" icon="i-lucide-trash-2" :disabled="field.disabled" @click="editor.removeFunding(row.id, source.id)">
             {{ t('grantRemoveFunding') }}
@@ -115,11 +122,11 @@ const categoryLabel = (id?: string) => question.value.type === 'budget' ? questi
           {{ yearLabel(total.fiscalYearId) }} · {{ total.currency }}
         </h5>
         <dl class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm tabular-nums">
-          <template v-for="[label, value] in [[t('grantTotalCost'), total.totalCost], [t('grantProgramFunding'), total.programFunding], [t('grantOtherFunding'), total.otherFunding], [t('grantGap'), total.gap], [t('grantStackingTotal'), total.stacking], [t('grantCostSharingTotal'), total.costSharing]]" :key="label">
+          <template v-for="summary in summaryFields(total)" :key="summary.key">
             <dt class="text-muted">
-              {{ label }}
+              {{ t(summary.key) }}
             </dt><dd class="text-right font-medium">
-              {{ value }}
+              {{ moneyLabel(summary.amount, total.currency) }}
             </dd>
           </template>
         </dl>
@@ -131,7 +138,7 @@ const categoryLabel = (id?: string) => question.value.type === 'budget' ? questi
         <dl class="mt-3 grid grid-cols-2 gap-2 text-sm tabular-nums">
           <template v-for="total in editor.categoryTotals.value" :key="`${total.fiscalYearId}:${total.currency}:${total.categoryId}`">
             <dt>{{ categoryLabel(total.categoryId) }} · {{ yearLabel(total.fiscalYearId) }} · {{ total.currency }}</dt><dd class="text-right">
-              {{ total.totalCost }}
+              {{ moneyLabel(total.totalCost, total.currency) }}
             </dd>
           </template>
         </dl>

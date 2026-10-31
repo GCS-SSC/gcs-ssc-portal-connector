@@ -45,14 +45,14 @@ const update = (eventId: string, itemSubmissionId: string): PortalUpdate => ({
  * @returns The verified organization's original Claim export.
  */
 const submission = (itemSubmissionId: string): PortalSubmission => ({
-  schemaVersion: 1, submissionId: 'submission-1', organizationId: 'organization-1',
+  schemaVersion: 2, submissionId: 'submission-1', organizationId: 'organization-1',
   agreementReference: { externalApplicantRecipientId: '55', externalStreamId: '44' },
   items: [{ kind: 'claim', itemSubmissionId, mappingComplete: true, claim: {
     agreementId: '33', applicantRecipientId: '55', streamId: '44', fiscalYearId: '77', isFinalForYear: false,
     periodStart: 0, periodEnd: 0, receivedDate: '2026-09-26T00:00:00.000Z',
     lineItems: [{ budgetLineItemId: '66', submittedCostCategory: null,
       submittedCostSubsection: null, submittedLineItem: null,
-      description: 'Eligible cost', amount: '1.00', currency: 'CAD' }]
+      description: 'Eligible cost', amount: { amount: '100', currency: 'CAD' }, currency: 'CAD' }]
   } }]
 })
 
@@ -61,7 +61,7 @@ const forecastSubmission = (): PortalSubmission => ({
   items: [{ kind: 'forecast', itemSubmissionId: 'item-1', mappingComplete: true,
     forecast: { agreementId: '33', header: { egcs_fc_fiscalyear: '77' },
       lineItems: [{ egcs_fc_fundingagreementbudgetlineitem: '66', egcs_fc_month: 0,
-        egcs_fc_amount: '1000.00', egcs_fc_currency: 'CAD' }] }
+        egcs_fc_amount: { amount: '100000', currency: 'CAD' }, egcs_fc_currency: 'CAD' }] }
   }]
 })
 
@@ -277,7 +277,7 @@ describe('portal Claim receipt transaction', () => {
     expect(portal.consume).toHaveBeenCalledTimes(2)
   })
 
-  it.each([false, true])('imports a Forecast without assigning a version (historical zero: %s)', async legacy => {
+  it('imports a Forecast without assigning a version', async () => {
     const createForecast = vi.fn(async () => ({
       status: 'created', forecastId: '91', version: '3', lineItemIds: ['92'], draftStatusId: '90'
     }))
@@ -286,12 +286,8 @@ describe('portal Claim receipt transaction', () => {
       items: [{ kind: 'forecast', itemSubmissionId: 'item-1', mappingComplete: true,
         forecast: { agreementId: '33', header: { egcs_fc_fiscalyear: '77' },
           lineItems: [{ egcs_fc_fundingagreementbudgetlineitem: '66', egcs_fc_month: 0,
-            egcs_fc_amount: '1000.00', egcs_fc_currency: 'CAD' }] }
+            egcs_fc_amount: { amount: '100000', currency: 'CAD' }, egcs_fc_currency: 'CAD' }] }
       }]
-    }
-    if (legacy) {
-      const item = portal.submission.items[0] as unknown as { forecast: { lineItems: object[] } }
-      Object.assign(item.forecast.lineItems[0]!, { egcs_fc_version: '0' })
     }
     const { syncPortal } = await import('../server/sync.ts')
     const result = await syncPortal({ db, params: { agencyId: '11' },
@@ -299,7 +295,7 @@ describe('portal Claim receipt transaction', () => {
     expect(result.imported).toEqual([{ itemSubmissionId: 'item-1', kind: 'forecast', entityId: '91' }])
     expect(createForecast).toHaveBeenCalledWith(expect.anything(), {
       agreementId: '33', streamId: '44', fiscalYearId: '77', applicantRecipientId: '55',
-      lineItems: [{ budgetLineItemId: '66', month: 0, amount: '1000.00', currency: 'CAD' }]
+      lineItems: [{ budgetLineItemId: '66', month: 0, amount: { amount: '100000', currency: 'CAD' }, currency: 'CAD' }]
     })
     expect(portal.consume).toHaveBeenCalledWith('12', '91')
   })
@@ -354,7 +350,7 @@ describe('portal Claim receipt transaction', () => {
     expect(portal.consume).not.toHaveBeenCalled()
   })
   it('retries a failed other-form outcome acknowledgement without duplicating durable evidence', async () => {
-    portal.submission = { schemaVersion: 1, submissionId: 'submission-1', organizationId: 'organization-1',
+    portal.submission = { schemaVersion: 2, submissionId: 'submission-1', organizationId: 'organization-1',
       agreementReference: null, sourceSystem: 'gcs-ssc-form', application: null,
       items: [{ kind: 'survey', itemSubmissionId: 'item-1', answers: { title: 'Submitted project' },
         survey: { id: 'form', kind: 'survey', surveyId: 'V-ABCDE', surveyRevision: 1 },

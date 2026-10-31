@@ -6,7 +6,7 @@ const forecastItem = () => ({
   forecast: {
     agreementId: '33', header: { egcs_fc_fiscalyear: '77' },
     lineItems: [{ egcs_fc_fundingagreementbudgetlineitem: '66', egcs_fc_month: 0,
-      egcs_fc_amount: '1000.00', egcs_fc_currency: 'CAD' }]
+      egcs_fc_amount: { amount: '100000', currency: 'CAD' }, egcs_fc_currency: 'CAD' }]
   }
 })
 
@@ -15,10 +15,10 @@ describe('Portal forecast import contract', () => {
     expect(forecastItemSchema.parse(forecastItem())).toEqual(forecastItem())
   })
 
-  it('strips the fixed zero from retained Portal exports', () => {
-    const legacy = forecastItem()
-    Object.assign(legacy.forecast.lineItems[0]!, { egcs_fc_version: '0' })
-    expect(forecastItemSchema.parse(legacy)).toEqual(forecastItem())
+  it('rejects obsolete fixed-zero line versions', () => {
+    const obsolete = forecastItem()
+    Object.assign(obsolete.forecast.lineItems[0]!, { egcs_fc_version: '0' })
+    expect(forecastItemSchema.safeParse(obsolete).success).toBe(false)
   })
 
   it('rejects invented line versions and caller assigned header versions', () => {

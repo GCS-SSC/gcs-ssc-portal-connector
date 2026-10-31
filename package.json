@@ -8,7 +8,8 @@
     "test:unit": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:integration:postgres": "vitest run --config vitest.postgres.config.ts",
-    "seed:demo": "bun scripts/seed-health-canada.ts"
+    "seed:demo": "bun scripts/seed-health-canada.ts",
+    "test:e2e": "bun run scripts/test-e2e-managed.ts"
   },
   "dependencies": {
     "@gcs-ssc/extensions": "^0.4.0",
@@ -31,6 +32,7 @@
     "vue": "^3.5.28",
     "vue-tsc": "^3.2.4",
     "vite": "^8.3.5",
-    "vitest": "^4.1.12"
+    "vitest": "^4.1.12",
+    "@playwright/test": "^1.58.2"
   }
 }

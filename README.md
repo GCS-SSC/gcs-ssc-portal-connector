@@ -86,3 +86,9 @@ Existing connections and edited forms survive restarts. `GCS_PORTAL_DEMO_SEED=0`
 disables automatic initialization, and production processes never initialize this
 local fixture. Override `PORTAL_DEMO_URL`, `PORTAL_DEMO_HEALTH_CANADA_AGENCY_ID`
 or `PORTAL_DEMO_HEALTH_CANADA_TOKEN` for a different local companion configuration.
+
+## Currency money cutover
+
+Published Agreement budget amounts and imported Claim/Forecast amounts use the shared SDK money object: `{ "amount": "12345", "currency": "USD" }` represents USD 123.45. The integer string is a count of the actual currency's minor units, including JPY whole units, KWD thousandths and MGA fifths. Submission exports now require `schemaVersion: 2`. The companion Portal must be updated together with GCS to use this contract; major-unit decimal strings and numeric amounts are rejected. Claims and Forecasts retain their existing currency metadata and must match the amount object's denomination. Monetary database projections read integer NUMERIC values as text before constructing money. The pending-publication detail formats through the shared exact formatter rather than converting to a JavaScript number. Obsolete caller-assigned Forecast line versions are rejected. This is a clean cutover with no old wire reader.
+
+Run the owning real-browser grant regression with `bun run test:e2e -- tests/e2e/currency-grant-preview.spec.ts`. Its managed runner builds the actual host, seeds a disposable PGlite database, holds the Nuxt artifact lock through shutdown and exercises local saved-form preview. It does not contact or claim to test the external companion Portal.

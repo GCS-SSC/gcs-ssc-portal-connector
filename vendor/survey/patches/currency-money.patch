@@ -1,0 +1,379 @@
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@gcs-ssc/survey",
+-  "version": "0.3.0",
++  "version": "0.4.0-gcs-portal.1",
+   "type": "module",
+   "exports": {
+     ".": {
+@@ -17,12 +17,13 @@
+     }
+   },
+   "dependencies": {
+-    "zod": "^4.6.5"
++    "zod": "^4.6.5",
++    "@gcs-ssc/extensions": "^0.4.0"
+   },
+   "peerDependencies": {
+     "vue": "^3.5.0"
+   },
+-  "description": "Unstyled, headless survey model, Vue provider and designer primitives for GCS–SSC applications",
++  "description": "Unstyled, headless survey model, Vue provider and designer primitives for GCS\u2013SSC applications",
+   "license": "MIT",
+   "scripts": {
+     "build": "tsc -p tsconfig.json",
+--- a/README.md
++++ b/README.md
+@@ -193,3 +193,7 @@
+ Schema version 4 adds portable `budget` and `activities` questions. Their configs hold frozen bilingual catalogs, optional external references and calculation settings. Answers are version-1 JSON strings containing stable rows. `grantIssues`, `calculateBudget`, `normalizeBudgetAnswer`, field descriptors and the optional Vue `useGrantElement` support host-controlled rendering and validation. Version 3 remains strict. No database transfer or themed renderer is supplied. Budgets preserve exact decimal money, signed cost/program adjustments, nonnegative distinct outside funding allocations and year/currency percentage calculations rounded to whole dollars. Activities preserve bilingual text, calendar dates, outcomes and responsible-party selections. Hosts must validate incomplete draft catalogs at publication and resolve external identities before transferring data.
+ 
+ Version 4 also provides `checkboxes` and `multiselect` questions with bilingual options. Answers are JSON arrays of unique allowed option IDs; required means at least one selection on submit. Multiple-choice conditions support exact `contains` membership and answered/unanswered. Ordinary v4 table questions can specify `totals: 'none' | 'rows' | 'columns' | 'both'`; `tableTotals` derives exact decimal row/column sums from numeric cells, returning null for totals affected by invalid nonempty cells. Totals are display-only and do not add answer keys.
++
++## Currency-aware grant budgets
++
++Grant form drafts keep human major-unit decimal strings. Every monetary validation, calculation and aggregate uses the public `@gcs-ssc/extensions/money` implementation backed by Dinero and the row's actual currency. Fractional minor units are rejected; JPY whole units, KWD thousandths, CLF ten-thousandths and MGA fifths are supported. The currency catalog is the SDK's supported settlement catalog, with no guessed two-decimal fallback. Percentage charges preserve the explicit whole-major-unit half-away-from-zero rounding rule. Normalized human decimal strings omit insignificant trailing zeros. The former `moneyCents` and `centsText` exports are removed.
+--- a/src/grants.ts
++++ b/src/grants.ts
+@@ -1,3 +1,4 @@
++import { addMoney, compareMoney, isPersistableMoney, majorMoneyText, parseCurrencyMoney, parseDecimalText, percentageMoney, supportedCurrencyCodes, sumMoney, zeroMoney, type DecimalText, type Money } from '@gcs-ssc/extensions/money'
+ import { z } from 'zod'
+ 
+ // Portable form data: hosts resolve optional external IDs; this package never writes funding records.
+@@ -21,7 +22,7 @@
+ export const budgetConfigSchema = z.object({
+   source: grantSourceSchema, maxRows: z.number().int().min(1).max(100),
+   categories: options, fiscalYears: options,
+-  currencies: z.array(z.enum(['CAD', 'USD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'NZD'])).min(1).max(8).refine(values => new Set(values).size === values.length),
++  currencies: z.array(z.enum(supportedCurrencyCodes.map(currency => currency.toUpperCase()))).min(1).max(supportedCurrencyCodes.length).refine(values => new Set(values).size === values.length),
+   costItems: z.array(grantOptionSchema.extend({ categoryId: key, calculation,
+     costSharingRatio: z.number().min(-999.99).max(999.99).refine(value => /^-?\d+(?:\.\d{1,2})?$/.test(String(value))).nullable().optional() }).strict()).max(200).refine(unique, 'Cost item IDs must be unique'),
+   fundingTypes: z.array(grantOptionSchema.extend({ stacking: z.boolean(), costSharing: z.boolean() }).strict()).max(100).refine(unique, 'Funding type IDs must be unique'),
+@@ -61,12 +62,12 @@
+ const text = z.string().max(5000)
+ const pair = z.object({ en: text, fr: text }).strict()
+ // Partial values are retained in drafts; submit checks required content separately.
+-const fundingRow = z.object({ id: rowId, subtypeId: z.string().max(64), amount: z.string().max(30),
++const fundingRow = z.object({ id: rowId, subtypeId: z.string().max(64), amount: z.string().max(44),
+   description: pair }).strict()
+ export const budgetAnswerSchema = z.object({ version: z.literal(1), rows: z.array(z.object({
+   id: rowId, fiscalYearId: z.string().max(64), costItemId: z.string().max(64),
+   subsection: z.string().max(255), description: text, currency: z.string().max(3),
+-  totalCost: z.string().max(30), programFunding: z.string().max(30), percentage: z.string().max(6),
++  totalCost: z.string().max(44), programFunding: z.string().max(44), percentage: z.string().max(6),
+   otherFunding: z.array(fundingRow).max(50).refine(unique, 'Funding row IDs must be unique')
+ }).strict()).max(100).refine(unique, 'Row IDs must be unique') }).strict()
+ export const activityAnswerSchema = z.object({ version: z.literal(1), rows: z.array(z.object({
+@@ -86,23 +87,15 @@
+ export const readActivityAnswer = (raw: string): ActivityAnswer | null => {
+   try { return activityAnswerSchema.parse(JSON.parse(raw)) } catch { return null }
+ }
+-const ZERO = BigInt(0)
+-export const moneyCents = (value: string): bigint => {
+-  if (!/^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(value)) throw new Error('Invalid money')
+-  const negative = value.startsWith('-')
+-  const [units = '0', fraction = ''] = (negative ? value.slice(1) : value).split('.')
+-  const cents = BigInt(units) * BigInt(100) + BigInt(fraction.padEnd(2, '0'))
+-  if (cents > BigInt('9999999999999999999')) throw new Error('Money exceeds numeric(19,2)')
+-  return negative ? -cents : cents
+-}
+-export const centsText = (value: bigint): string => {
+-  const negative = value < ZERO
+-  const absolute = negative ? -value : value
+-  return `${negative ? '-' : ''}${absolute / BigInt(100)}.${String(absolute % BigInt(100)).padStart(2, '0')}`
+-}
+-const percentageHundredths = (value: string): bigint => {
++/** Human draft decimals become actual-currency minor-unit money before any calculation. */
++export const readBudgetMoney = (value: string, currency: string): Money => {
++  const amount = parseCurrencyMoney(value, currency)
++  if (!isPersistableMoney(amount)) throw new Error('Money exceeds persisted minor-unit precision')
++  return amount
++}
++const budgetPercentage = (value: string): DecimalText => {
+   if (!/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(value) || Number(value) > 100) throw new Error('Invalid percentage')
+-  return moneyCents(value)
++  return parseDecimalText(value)
+ }
+ /** Matches GCS: category charges first, all-other second; program funding only; nearest dollar. */
+ export const calculateBudget = (config: BudgetConfig, rows: BudgetRow[]): BudgetRow[] => {
+@@ -114,14 +107,11 @@
+     if (mode === 'all_other' && group.filter(other => config.costItems.find(option => option.id === other.costItemId)?.calculation.mode === mode).length > 1) throw new Error('Duplicate all-other charge')
+     const sources = group.filter(other => other.id !== row.id && (mode === 'all_other'
+       || config.costItems.find(option => option.id === other.costItemId)?.categoryId === item.calculation.sourceCategoryId))
+-    const base = sources.reduce((total, source) => total + (source.programFunding === '' ? ZERO : moneyCents(source.programFunding)), ZERO)
++    const base = sumMoney(sources.map(source => source.programFunding === '' ? zeroMoney(row.currency) : readBudgetMoney(source.programFunding, row.currency)), row.currency)
+     const percentage = item.calculation.allowOverride && row.percentage !== '' ? row.percentage : String(item.calculation.percentage)
+-    const numerator = base * percentageHundredths(percentage)
+-    const absolute = numerator < ZERO ? -numerator : numerator
+-    const rounded = ((absolute + BigInt(500000)) / BigInt(1000000)) * BigInt(100)
+-    const amount = numerator < ZERO ? -rounded : rounded
+-    if ((amount < ZERO ? -amount : amount) > BigInt('9999999999999999999')) throw new Error('Calculated funding exceeds numeric(19,2)')
+-    row.programFunding = centsText(amount)
++    const amount = percentageMoney(base, budgetPercentage(percentage), { scale: 0, rounding: 'halfAwayFromZero' })
++    if (!isPersistableMoney(amount)) throw new Error('Calculated funding exceeds persisted minor-unit precision')
++    row.programFunding = majorMoneyText(amount)
+   }
+   return result
+ }
+@@ -149,9 +139,9 @@
+     if (!value) { if (mode === 'submit') add(path, 'required') }
+     else if (!allowed.some(option => option.id === value)) add(path, 'choice')
+   }
+-  const money = (value: string, path: string): bigint | null => {
++  const money = (value: string, path: string, currency: string): Money | null => {
+     if (!value) { if (mode === 'submit') add(path, 'required'); return null }
+-    try { return moneyCents(value) } catch { add(path, 'money'); return null }
++    try { return readBudgetMoney(value, currency) } catch { add(path, 'money'); return null }
+   }
+   if (question.type === 'budget') {
+     const config = question.config
+@@ -164,28 +154,31 @@
+       choose(row.costItemId, config.costItems, `${path}.costItemId`)
+       choose(row.currency, config.currencies.map(id => ({ id })), `${path}.currency`)
+       required(row.subsection, `${path}.subsection`, 255); required(row.description, `${path}.description`)
+-      const total = money(row.totalCost, `${path}.totalCost`)
++      const total = money(row.totalCost, `${path}.totalCost`, row.currency)
+       const item = config.costItems.find(option => option.id === row.costItemId)
+       if (row.percentage && (!item?.calculation.allowOverride || item.calculation.mode === 'manual')) add(`${path}.percentage`, 'choice')
+-      if (row.percentage) try { percentageHundredths(row.percentage) } catch { add(`${path}.percentage`, 'calculation') }
++      if (row.percentage) try { budgetPercentage(row.percentage) } catch { add(`${path}.percentage`, 'calculation') }
+       const program = money(item?.calculation.mode === 'manual' || !item ? row.programFunding
+-        : calculated[index]?.programFunding ?? '', `${path}.programFunding`)
+-      if (item && item.calculation.mode !== 'manual' && row.programFunding && row.programFunding !== calculated[index]?.programFunding) add(`${path}.programFunding`, 'calculation')
+-      let other = ZERO
++        : calculated[index]?.programFunding ?? '', `${path}.programFunding`, row.currency)
++      if (item && item.calculation.mode !== 'manual' && row.programFunding && program !== null) {
++        const submitted = money(row.programFunding, `${path}.programFunding`, row.currency)
++        if (submitted !== null && compareMoney(submitted, program) !== 0) add(`${path}.programFunding`, 'calculation')
++      }
++      const other: Money[] = []
+       const subtypes = new Set<string>()
+       row.otherFunding.forEach((source, sourceIndex) => {
+         const sourcePath = `${path}.otherFunding.${sourceIndex}`
+         choose(source.subtypeId, config.fundingSubtypes, `${sourcePath}.subtypeId`)
+         if (source.subtypeId && subtypes.has(source.subtypeId)) add(`${sourcePath}.subtypeId`, 'choice')
+         subtypes.add(source.subtypeId)
+-        const amount = money(source.amount, `${sourcePath}.amount`)
++        const amount = money(source.amount, `${sourcePath}.amount`, row.currency)
+         if (amount !== null) {
+-          if (amount < ZERO) add(`${sourcePath}.amount`, 'negative')
+-          other += amount
++          if (compareMoney(amount, zeroMoney(amount.currency)) < 0) add(`${sourcePath}.amount`, 'negative')
++          other.push(amount)
+         }
+         if (source.description.en.length > 255 || source.description.fr.length > 255) add(`${sourcePath}.description`, 'length')
+       })
+-      if (total !== null && program !== null && program + other > total) add(`${path}.totalCost`, 'coverage')
++      if (total !== null && program !== null && compareMoney(addMoney(program, sumMoney(other, row.currency)), total) > 0) add(`${path}.totalCost`, 'coverage')
+     })
+   } else {
+     const config = question.config
+@@ -217,9 +210,9 @@
+ /** Canonical response serialization recomputes derived money rather than trusting submitted totals. */
+ export const normalizeBudgetAnswer = (config: BudgetConfig, answer: BudgetAnswer): BudgetAnswer => ({
+   version: 1, rows: calculateBudget(config, answer.rows).map(row => ({ ...row,
+-    totalCost: row.totalCost === '' ? '' : centsText(moneyCents(row.totalCost)),
+-    programFunding: row.programFunding === '' ? '' : centsText(moneyCents(row.programFunding)),
+-    otherFunding: row.otherFunding.map(source => ({ ...source, amount: source.amount === '' ? '' : centsText(moneyCents(source.amount)) }))
++    totalCost: row.totalCost === '' ? '' : majorMoneyText(readBudgetMoney(row.totalCost, row.currency)),
++    programFunding: row.programFunding === '' ? '' : majorMoneyText(readBudgetMoney(row.programFunding, row.currency)),
++    otherFunding: row.otherFunding.map(source => ({ ...source, amount: source.amount === '' ? '' : majorMoneyText(readBudgetMoney(source.amount, row.currency)) }))
+   }))
+ })
+ 
+--- a/src/grant-fields.ts
++++ b/src/grant-fields.ts
+@@ -1,4 +1,5 @@
+-import { calculateBudget, centsText, moneyCents, type ActivityConfig, type ActivityRow, type BudgetConfig, type BudgetRow, type GrantOption } from './grants.js'
++import { addMoney, majorMoneyText, subtractMoney, zeroMoney } from '@gcs-ssc/extensions/money'
++import { calculateBudget, readBudgetMoney, type ActivityConfig, type ActivityRow, type BudgetConfig, type BudgetRow, type GrantOption } from './grants.js'
+ export interface GrantInput {
+   path: string
+   label: string
+@@ -52,21 +53,22 @@
+     const group = groups.get(groupKey) ?? []; group.push({ row, categoryId }); groups.set(groupKey, group)
+   }
+   return [...groups.values()].map(group => {
+-    let total = BigInt(0), program = BigInt(0), other = BigInt(0), stacking = BigInt(0), costSharing = BigInt(0)
++    const currency = group[0]!.row.currency
++    let total = zeroMoney(currency), program = zeroMoney(currency), other = zeroMoney(currency), stacking = zeroMoney(currency), costSharing = zeroMoney(currency)
+     for (const { row } of group) {
+-      total += row.totalCost ? moneyCents(row.totalCost) : BigInt(0)
+-      program += row.programFunding ? moneyCents(row.programFunding) : BigInt(0)
++      total = addMoney(total, row.totalCost ? readBudgetMoney(row.totalCost, row.currency) : zeroMoney(currency))
++      program = addMoney(program, row.programFunding ? readBudgetMoney(row.programFunding, row.currency) : zeroMoney(currency))
+       for (const funding of row.otherFunding) {
+-        const amount = funding.amount ? moneyCents(funding.amount) : BigInt(0)
+-        other += amount
++        const amount = funding.amount ? readBudgetMoney(funding.amount, row.currency) : zeroMoney(currency)
++        other = addMoney(other, amount)
+         const subtype = config.fundingSubtypes.find(option => option.id === funding.subtypeId)
+         const type = config.fundingTypes.find(option => option.id === subtype?.typeId)
+-        if (type?.stacking) stacking += amount
+-        if (type?.costSharing) costSharing += amount
++        if (type?.stacking) stacking = addMoney(stacking, amount)
++        if (type?.costSharing) costSharing = addMoney(costSharing, amount)
+       }
+     }
+     return { fiscalYearId: group[0]!.row.fiscalYearId, currency: group[0]!.row.currency, categoryId: group[0]!.categoryId,
+-      totalCost: centsText(total), programFunding: centsText(program), otherFunding: centsText(other), gap: centsText(total - program - other),
+-      stacking: centsText(stacking), costSharing: centsText(costSharing) }
++      totalCost: majorMoneyText(total), programFunding: majorMoneyText(program), otherFunding: majorMoneyText(other), gap: majorMoneyText(subtractMoney(subtractMoney(total, program), other)),
++      stacking: majorMoneyText(stacking), costSharing: majorMoneyText(costSharing) }
+   })
+ }
+--- a/tests/grants.test.ts
++++ b/tests/grants.test.ts
+@@ -2,7 +2,7 @@
+ import { ref } from 'vue'
+ import { useGrantElement } from '../src/grant-editor'
+ import { activityConfigSchema, budgetConfigSchema, budgetTotals, calculateBudget, emptyActivityConfig, emptyBudgetConfig,
+-  grantConfigurationReady, grantIssues, moneyCents, newActivityRow, newBudgetRow, normalizeBudgetAnswer, readActivityAnswer,
++  grantConfigurationReady, grantIssues, readBudgetMoney, newActivityRow, newBudgetRow, normalizeBudgetAnswer, readActivityAnswer,
+   readBudgetAnswer, surveySchema, surveyV3Schema, surveyV4Schema, validateSurveyAnswers, type BudgetConfig, type BudgetRow } from '../src/index'
+ const option = (id: string, gcsId?: string) => ({ id, label: { en: id, fr: id }, ...(gcsId ? { gcsId } : {}) })
+ import { config, row, manual } from './fixtures/grants.js'
+@@ -64,7 +64,7 @@
+     const rows = [row(), row('r_category', 'category_charge'), row('r_all', 'all_charge')]
+     rows[0]!.programFunding = '1005.00'
+     const result = calculateBudget(config(), rows)
+-    expect(result.map(item => item.programFunding)).toEqual(['1005.00', '101.00', '55.00'])
++    expect(result.map(item => item.programFunding)).toEqual(['1005.00', '101', '55'])
+     expect(rows[1]!.programFunding).toBe('1000.00')
+   })
+   it('isolates year and currency, ignores other funding, and honors allowed overrides', () => {
+@@ -72,26 +72,26 @@
+     const charge = row('r_charge', 'category_charge'); charge.percentage = '12.5'
+     const next = { ...row('r_next'), fiscalYearId: 'next', programFunding: '9999' }
+     const usd = { ...row('r_usd'), currency: 'USD', programFunding: '9999' }
+-    expect(calculateBudget(config(), [source, charge, next, usd])[1]!.programFunding).toBe('125.00')
++    expect(calculateBudget(config(), [source, charge, next, usd])[1]!.programFunding).toBe('125')
+     const totals = budgetTotals(config(), [source, charge, next, usd])
+     expect(totals).toHaveLength(3)
+-    expect(totals[0]).toMatchObject({ programFunding: '1125.00', otherFunding: '1000.00', stacking: '1000.00', costSharing: '0.00', gap: '1875.00' })
++    expect(totals[0]).toMatchObject({ programFunding: '1125', otherFunding: '1000', stacking: '1000', costSharing: '0', gap: '1875' })
+   })
+   it('groups category totals and independent funding indicators', () => {
+     const source = row(); source.otherFunding = [{ id: 'r_source', subtypeId: 'donor', amount: '123.45', description: { en: '', fr: '' } }]
+     const totals = budgetTotals(config(), [source], 'category')
+-    expect(totals[0]).toMatchObject({ categoryId: 'staff', costSharing: '123.45', stacking: '0.00' })
++    expect(totals[0]).toMatchObject({ categoryId: 'staff', costSharing: '123.45', stacking: '0' })
+   })
+   it('rejects duplicate all-other lines only within the same year/currency', () => {
+     expect(() => calculateBudget(config(), [row('r_one', 'all_charge'), row('r_two', 'all_charge')])).toThrow()
+     expect(() => calculateBudget(config(), [row('r_one', 'all_charge'), { ...row('r_two', 'all_charge'), fiscalYearId: 'next' }])).not.toThrow()
+   })
+-  it.each(['', '1e3', '1.001', 'NaN', ' 1', '01', '100000000000000000.00'])('rejects invalid money %s', value => {
++  it.each(['', '1e3', '1.001', 'NaN', ' 1', '01', '1000000000000000000000000000000000000.00'])('rejects invalid money %s', value => {
+     const input = row(); input.programFunding = value
+     expect(grantIssues(budget(), raw([input])).some(issue => issue.path.endsWith('programFunding'))).toBe(true)
+   })
+-  it('keeps valid zero and exact numeric(19,2) values', () => {
+-    expect(moneyCents('99999999999999999.99')).toBe(BigInt('9999999999999999999'))
++  it('keeps valid zero and exact large minor-unit values', () => {
++    expect(readBudgetMoney('99999999999999999.99', 'CAD').amount).toBe('9999999999999999999')
+     const input = row(); input.programFunding = '0'; input.totalCost = '0'
+     expect(grantIssues(budget(), raw([input]))).toEqual([])
+   })
+@@ -118,8 +118,8 @@
+     const value = surveyV4Schema.parse(definition()); const input = row(); input.programFunding = '1000'; input.totalCost = '2000'
+     const result = validateSurveyAnswers(value, { budget: raw([input]) })
+     expect(result.errors).toEqual({})
+-    expect(readBudgetAnswer(result.answers.budget!)!.rows[0]!.programFunding).toBe('1000.00')
+-    expect(normalizeBudgetAnswer(config(), { version: 1, rows: [input] }).rows[0]!.totalCost).toBe('2000.00')
++    expect(readBudgetAnswer(result.answers.budget!)!.rows[0]!.programFunding).toBe('1000')
++    expect(normalizeBudgetAnswer(config(), { version: 1, rows: [input] }).rows[0]!.totalCost).toBe('2000')
+   })
+   it('does not accept duplicate IDs, unknown properties, malformed JSON or hidden row payloads', () => {
+     expect(readBudgetAnswer(raw([row(), row()]))).toBeNull()
+@@ -181,7 +181,7 @@
+   it('matches whole-dollar rounding away from zero and keeps outside funding nonnegative', () => {
+     const base = row(); base.totalCost = '-100'; base.programFunding = '-95'
+     const charge = row('r_charge', 'category_charge'); charge.totalCost = '0'; charge.programFunding = '-10.00'
+-    expect(calculateBudget(config(), [base, charge])[1]!.programFunding).toBe('-10.00')
++    expect(calculateBudget(config(), [base, charge])[1]!.programFunding).toBe('-10')
+     base.totalCost = '0'
+     expect(grantIssues(budget(), raw([base, charge]))).toEqual([])
+     base.otherFunding = [{ id: 'r_source', subtypeId: 'province', amount: '-1', description: { en: '', fr: '' } }]
+--- a/tests/grant-editor.test.ts
++++ b/tests/grant-editor.test.ts
+@@ -15,7 +15,7 @@
+     model.changeFunding('r_a', source.id, 'subtypeId', 'province'); model.changeFunding('r_a', source.id, 'amount', '500')
+     model.changeFunding('r_a', source.id, 'description.fr', 'Source confirmée')
+     expect(JSON.parse(value.value).rows[0].otherFunding[0]).toMatchObject({ amount: '500', description: { en: '', fr: 'Source confirmée' } })
+-    expect(model.totals.value[0]).toMatchObject({ otherFunding: '500.00', stacking: '500.00', costSharing: '0.00' })
++    expect(model.totals.value[0]).toMatchObject({ otherFunding: '500', stacking: '500', costSharing: '0' })
+     expect(model.categoryTotals.value[0]?.categoryId).toBe('staff')
+     model.add(); expect(model.rows.value).toHaveLength(2)
+     model.removeFunding('r_a', source.id); expect(JSON.parse(value.value).rows[0].otherFunding).toEqual([])
+@@ -28,9 +28,9 @@
+     model.change('r_a', 'programFunding', 'bad')
+     expect(JSON.parse(value.value).rows[1].programFunding).toBe('')
+     expect(model.totals.value).toEqual([]); expect(model.categoryTotals.value).toEqual([])
+-    model.change('r_a', 'programFunding', '1000'); expect(JSON.parse(value.value).rows[1].programFunding).toBe('100.00')
++    model.change('r_a', 'programFunding', '1000'); expect(JSON.parse(value.value).rows[1].programFunding).toBe('100')
+     const before = value.value; model.change('r_derived', 'programFunding', '999'); expect(value.value).toBe(before)
+-    model.change('r_derived', 'percentage', '20'); expect(JSON.parse(value.value).rows[1].programFunding).toBe('200.00')
++    model.change('r_derived', 'percentage', '20'); expect(JSON.parse(value.value).rows[1].programFunding).toBe('200')
+     model.change('r_derived', 'costItemId', 'salary'); expect(JSON.parse(value.value).rows[1]).toMatchObject({ percentage: '', programFunding: '' })
+     expect(model.fields(model.rows.value[0]!).find(field => field.path === 'costItemId')?.options?.[0]?.label).toBe('staff / salary')
+   })
+@@ -55,6 +55,6 @@
+     expect(budgetFields(config(), row('r_calc', 'all_charge'), 'en').find(field => field.path === 'percentage')?.readonly).toBe(true)
+     expect(fundingFields(config(), { id: 'r_source', subtypeId: 'province', amount: '1', description: { en: '', fr: '' } }, 'fr').map(field => field.required)).toEqual([true, true, false, false])
+     expect(activityFields({ ...emptyActivityConfig(), bilingual: true }, newActivityRow('r_activity'), 'en')).toHaveLength(8)
+-    expect(budgetTotals(config(), [{ ...row(), otherFunding: [{ id: 'r_source', subtypeId: 'donor', amount: '50', description: { en: '', fr: '' } }] }])[0]).toMatchObject({ costSharing: '50.00', stacking: '0.00' })
++    expect(budgetTotals(config(), [{ ...row(), otherFunding: [{ id: 'r_source', subtypeId: 'donor', amount: '50', description: { en: '', fr: '' } }] }])[0]).toMatchObject({ costSharing: '50', stacking: '0' })
+   })
+ })
+--- a/tests/currency-money.test.ts
++++ b/tests/currency-money.test.ts
+@@ -0,0 +1,47 @@
++import { describe, expect, it } from 'vitest'
++import { budgetConfigSchema, budgetTotals, calculateBudget, emptyBudgetConfig, grantIssues, newBudgetRow, normalizeBudgetAnswer, type BudgetConfig, type BudgetRow } from '../src/index.js'
++
++const option = (id: string) => ({ id, label: { en: id, fr: id } })
++const config = (currency: string): BudgetConfig => ({
++  ...emptyBudgetConfig(), currencies: [currency], categories: [option('costs'), option('charges')], fiscalYears: [option('year')],
++  costItems: [
++    { ...option('cost'), categoryId: 'costs', calculation: { mode: 'manual', percentage: null, sourceCategoryId: null, allowOverride: false } },
++    { ...option('charge'), categoryId: 'charges', calculation: { mode: 'category', percentage: 10, sourceCategoryId: 'costs', allowOverride: false } }
++  ]
++})
++const row = (currency: string, amount: string, id = 'r_cost'): BudgetRow => ({
++  ...newBudgetRow(id, config(currency)), costItemId: 'cost', subsection: 'Delivery', description: 'Exact currency money',
++  totalCost: amount, programFunding: amount
++})
++
++describe('vendored survey currency money', () => {
++  it.each([['JPY', '1', '2'], ['CAD', '0.01', '0.02'], ['KWD', '0.001', '0.002'], ['CLF', '0.0001', '0.0002'], ['MGA', '0.2', '0.4']])(
++    'calculates actual %s minor-unit totals', (currency, unit, total) => {
++      const settings = config(currency)
++      expect(budgetConfigSchema.safeParse(settings).success).toBe(true)
++      const rows = [row(currency, unit), row(currency, unit, 'r_second')]
++      expect(grantIssues({ type: 'budget', required: true, config: settings }, JSON.stringify({ version: 1, rows }))).toEqual([])
++      expect(budgetTotals(settings, rows)[0]).toMatchObject({ totalCost: total, programFunding: total, gap: '0' })
++      expect(normalizeBudgetAnswer(settings, { version: 1, rows }).rows[0]?.programFunding).toBe(unit)
++    }
++  )
++  it.each([['JPY', '0.1'], ['KWD', '0.0001'], ['CLF', '0.00001'], ['MGA', '0.1']])('rejects fractional %s minor units', (currency, amount) => {
++    expect(grantIssues({ type: 'budget', required: true, config: config(currency) }, JSON.stringify({ version: 1, rows: [row(currency, amount)] })))
++      .toContainEqual({ path: 'rows.0.programFunding', code: 'money' })
++    expect(() => budgetTotals(config(currency), [row(currency, amount)])).toThrow()
++  })
++  it('keeps the explicit whole-major-unit budget percentage rounding rule', () => {
++    for (const [currency, basis] of [['KWD', '12.345'], ['MGA', '5']]) {
++      const charge = { ...row(currency!, '10', 'r_charge'), costItemId: 'charge', programFunding: '' }
++      expect(calculateBudget(config(currency!), [row(currency!, basis!), charge])[1]?.programFunding).toBe('1')
++    }
++  })
++  it('retains adjacent large smallest units and independent currencies', () => {
++    const settings = { ...config('KWD'), currencies: ['KWD', 'JPY'] }
++    const totals = budgetTotals(settings, [row('KWD', '9007199254740993.001'), row('KWD', '0.001', 'r_second'), row('JPY', '1', 'r_yen')])
++    expect(totals.map(total => [total.currency, total.programFunding])).toEqual([['KWD', '9007199254740993.002'], ['JPY', '1']])
++  })
++  it('does not offer currencies without a settlement subdivision', () => {
++    expect(budgetConfigSchema.safeParse(config('XDR')).success).toBe(false)
++  })
++})

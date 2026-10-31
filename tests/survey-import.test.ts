@@ -11,7 +11,7 @@ const definition = { schemaVersion: 3, title: { en: 'Project', fr: 'Projet' },
   pages: [{ id: 'page_1', title: { en: 'Details', fr: 'Détails' }, questionIds: ['title'], groups: [], branches: [] }] }
 const item = (id: string) => ({ kind: 'survey', itemSubmissionId: id, answers: { title: 'Northern health' },
   survey: { id: 'form', kind: 'survey', surveyId: 'V-ABCDE', surveyRevision: 1 }, definition })
-const submission = (application = false): PortalSubmission => ({ schemaVersion: 1,
+const submission = (application = false): PortalSubmission => ({ schemaVersion: 2,
   submissionId: 'K-ABCDE', organizationId: 'N-ABCDE', agreementReference: null,
   sourceSystem: application ? 'gcs-ssc-opportunity' : 'gcs-ssc-form',
   application: application ? { callId: 'D-ABCDE', sourceSystem: 'gcs-ssc-opportunity', foreignSystemId: '110' } : null,

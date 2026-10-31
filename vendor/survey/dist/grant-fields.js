@@ -1,4 +1,5 @@
-import { calculateBudget, centsText, moneyCents } from './grants.js';
+import { addMoney, majorMoneyText, subtractMoney, zeroMoney } from '@gcs-ssc/extensions/money';
+import { calculateBudget, readBudgetMoney } from './grants.js';
 const choices = (options, locale) => options.map(option => ({ value: option.id, label: option.label[locale] }));
 export const budgetFields = (config, row, locale) => {
     const item = config.costItems.find(option => option.id === row.costItemId);
@@ -43,23 +44,24 @@ export const budgetTotals = (config, rows, groupBy = 'year') => {
         groups.set(groupKey, group);
     }
     return [...groups.values()].map(group => {
-        let total = BigInt(0), program = BigInt(0), other = BigInt(0), stacking = BigInt(0), costSharing = BigInt(0);
+        const currency = group[0].row.currency;
+        let total = zeroMoney(currency), program = zeroMoney(currency), other = zeroMoney(currency), stacking = zeroMoney(currency), costSharing = zeroMoney(currency);
         for (const { row } of group) {
-            total += row.totalCost ? moneyCents(row.totalCost) : BigInt(0);
-            program += row.programFunding ? moneyCents(row.programFunding) : BigInt(0);
+            total = addMoney(total, row.totalCost ? readBudgetMoney(row.totalCost, row.currency) : zeroMoney(currency));
+            program = addMoney(program, row.programFunding ? readBudgetMoney(row.programFunding, row.currency) : zeroMoney(currency));
             for (const funding of row.otherFunding) {
-                const amount = funding.amount ? moneyCents(funding.amount) : BigInt(0);
-                other += amount;
+                const amount = funding.amount ? readBudgetMoney(funding.amount, row.currency) : zeroMoney(currency);
+                other = addMoney(other, amount);
                 const subtype = config.fundingSubtypes.find(option => option.id === funding.subtypeId);
                 const type = config.fundingTypes.find(option => option.id === subtype?.typeId);
                 if (type?.stacking)
-                    stacking += amount;
+                    stacking = addMoney(stacking, amount);
                 if (type?.costSharing)
-                    costSharing += amount;
+                    costSharing = addMoney(costSharing, amount);
             }
         }
         return { fiscalYearId: group[0].row.fiscalYearId, currency: group[0].row.currency, categoryId: group[0].categoryId,
-            totalCost: centsText(total), programFunding: centsText(program), otherFunding: centsText(other), gap: centsText(total - program - other),
-            stacking: centsText(stacking), costSharing: centsText(costSharing) };
+            totalCost: majorMoneyText(total), programFunding: majorMoneyText(program), otherFunding: majorMoneyText(other), gap: majorMoneyText(subtractMoney(subtractMoney(total, program), other)),
+            stacking: majorMoneyText(stacking), costSharing: majorMoneyText(costSharing) };
     });
 };

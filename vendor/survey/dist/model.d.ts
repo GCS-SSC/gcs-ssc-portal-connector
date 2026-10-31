@@ -1795,14 +1795,7 @@ export declare const grantQuestionSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             gcsId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>>;
         currencies: z.ZodArray<z.ZodEnum<{
-            CAD: "CAD";
-            USD: "USD";
-            EUR: "EUR";
-            GBP: "GBP";
-            JPY: "JPY";
-            CHF: "CHF";
-            AUD: "AUD";
-            NZD: "NZD";
+            [x: string]: string;
         }>>;
         costItems: z.ZodArray<z.ZodObject<{
             id: z.ZodString;
@@ -2465,14 +2458,7 @@ export declare const questionV4Schema: z.ZodUnion<readonly [z.ZodDiscriminatedUn
             gcsId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>>;
         currencies: z.ZodArray<z.ZodEnum<{
-            CAD: "CAD";
-            USD: "USD";
-            EUR: "EUR";
-            GBP: "GBP";
-            JPY: "JPY";
-            CHF: "CHF";
-            AUD: "AUD";
-            NZD: "NZD";
+            [x: string]: string;
         }>>;
         costItems: z.ZodArray<z.ZodObject<{
             id: z.ZodString;
@@ -3801,14 +3787,7 @@ export declare const surveyV4Schema: z.ZodObject<{
                 gcsId: z.ZodOptional<z.ZodString>;
             }, z.core.$strict>>;
             currencies: z.ZodArray<z.ZodEnum<{
-                CAD: "CAD";
-                USD: "USD";
-                EUR: "EUR";
-                GBP: "GBP";
-                JPY: "JPY";
-                CHF: "CHF";
-                AUD: "AUD";
-                NZD: "NZD";
+                [x: string]: string;
             }>>;
             costItems: z.ZodArray<z.ZodObject<{
                 id: z.ZodString;
@@ -5050,14 +5029,7 @@ export declare const designerSurveySchema: z.ZodUnion<readonly [z.ZodObject<{
                 gcsId: z.ZodOptional<z.ZodString>;
             }, z.core.$strict>>;
             currencies: z.ZodArray<z.ZodEnum<{
-                CAD: "CAD";
-                USD: "USD";
-                EUR: "EUR";
-                GBP: "GBP";
-                JPY: "JPY";
-                CHF: "CHF";
-                AUD: "AUD";
-                NZD: "NZD";
+                [x: string]: string;
             }>>;
             costItems: z.ZodArray<z.ZodObject<{
                 id: z.ZodString;
@@ -6692,14 +6664,7 @@ export declare const surveySchema: z.ZodUnion<readonly [z.ZodObject<{
                 gcsId: z.ZodOptional<z.ZodString>;
             }, z.core.$strict>>;
             currencies: z.ZodArray<z.ZodEnum<{
-                CAD: "CAD";
-                USD: "USD";
-                EUR: "EUR";
-                GBP: "GBP";
-                JPY: "JPY";
-                CHF: "CHF";
-                AUD: "AUD";
-                NZD: "NZD";
+                [x: string]: string;
             }>>;
             costItems: z.ZodArray<z.ZodObject<{
                 id: z.ZodString;

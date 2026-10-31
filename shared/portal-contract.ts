@@ -1,7 +1,8 @@
+import { isPersistableMoney, MoneySchema } from '@gcs-ssc/extensions/money'
 import { z } from 'zod'
 
+const money = MoneySchema.refine(isPersistableMoney, { message: 'Money exceeds persisted minor-unit precision' })
 const externalId = z.string().regex(/^[1-9]\d{0,18}$/).refine((value) => BigInt(value) <= BigInt('9223372036854775807'))
-const money = z.string().regex(/^-?(?:0|[1-9]\d{0,16})\.\d{2}$/)
 
 export const updateSchema = z.object({
   eventId: externalId,
@@ -26,8 +27,8 @@ const claimLineSchema = z.object({
   submittedLineItem: z.string().nullable(),
   description: z.string(),
   amount: money,
-  currency: z.string()
-})
+  currency: z.string().min(1)
+}).refine(line => line.amount.currency === line.currency.toUpperCase(), { path: ['amount'], message: 'Currency mismatch' })
 export const claimItemSchema = z.object({
   kind: z.literal('claim'),
   itemSubmissionId: z.string().min(1),
@@ -55,14 +56,12 @@ export const forecastItemSchema = z.object({
       egcs_fc_fundingagreementbudgetlineitem: externalId,
       egcs_fc_month: z.number().int().min(0).max(11),
       egcs_fc_amount: money,
-      egcs_fc_currency: z.string().min(1),
-      // Retained Portal exports used a fixed zero; discard that transport-only field.
-      egcs_fc_version: z.literal('0').optional()
-    }).transform(({ egcs_fc_version: _legacyVersion, ...line }) => line)).min(1).max(2400)
+      egcs_fc_currency: z.string().min(1)
+    }).refine(line => line.egcs_fc_amount.currency === line.egcs_fc_currency.toUpperCase(), { path: ['egcs_fc_amount'], message: 'Currency mismatch' })).min(1).max(2400)
   })
 })
 export const submissionSchema = z.object({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(2),
   submissionId: z.string().min(1),
   organizationId: z.string().min(1),
   agreementReference: z.object({

@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import { supportedCurrencyCodes } from '@gcs-ssc/extensions/money'
 import { feedback, useLocalizedFeedback } from './localized-feedback'
 import { computed, onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import { nanoid } from 'nanoid'
 import type { ActivityConfig, AdvancedQuestion, BudgetConfig, GrantOption } from '@gcs-ssc/survey'
-import { ExtensionButton, ExtensionCheckbox, ExtensionFormField, ExtensionInput, ExtensionSelect, useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
+import { ExtensionButton, ExtensionCheckbox, ExtensionFormField, ExtensionInput, ExtensionSelect, ExtensionSelectMenu, useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
 import { messages } from '../i18n/messages'
 import GrantOptionEditor from './GrantOptionEditor.vue'
 
@@ -17,6 +18,7 @@ const stream: Ref<string> = ref(question.value.config.source.streamId ?? props.s
 const busy: Ref<boolean> = ref(false)
 const error = useLocalizedFeedback(t)
 const locked = computed(() => props.disabled || busy.value || question.value.config.source.mode === 'stream')
+const currencyOptions = supportedCurrencyCodes.map(code => ({ value: code.toUpperCase(), label: code.toUpperCase() }))
 const budget = computed(() => question.value.type === 'budget' ? question.value.config : null)
 const activities = computed(() => question.value.type === 'activities' ? question.value.config : null)
 const items = (options: GrantOption[]) => options.map(option => ({ value: option.id, label: option.label[/^fr(?:-|$)/i.test(locale.value) ? 'fr' : 'en'] }))
@@ -148,18 +150,20 @@ const sourceCategories = (id: string) => budget.value!.categories.filter(categor
     </p>
     <template v-if="budget">
       <fieldset class="space-y-2">
-        <legend class="text-sm font-medium">
-          {{ t('grantCurrencies') }}
+        <legend :id="`${question.id}-currency-label`" class="text-sm font-medium">
+          {{ t('grantCurrencies') }} {{ t('previewRequired') }}
         </legend>
-        <p class="text-xs text-muted">
+        <p :id="`${question.id}-currency-hint`" class="text-xs text-muted">
           {{ t('grantSelectOne') }}
         </p>
-        <div class="flex flex-wrap gap-3">
-          <ExtensionCheckbox
-            data-field-label-en="Allowed currencies" data-field-label-fr="Devises autorisées"
-            v-for="currency in ['CAD', 'USD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'NZD'] as const" :key="currency" :label="currency" :disabled="disabled"
-            :model-value="budget.currencies.includes(currency)" data-ui-target="extension.gcs-ssc-portal-connector.form-grant-designer.budget.currencies.includes-currency" @update:model-value="budget.currencies = $event ? [...budget.currencies, currency] : budget.currencies.filter(item => item !== currency)" />
-        </div>
+        <ExtensionSelectMenu
+          :id="`${question.id}-currencies`" :name="`${question.id}-currencies`" multiple
+          :aria-labelledby="`${question.id}-currency-label`" :aria-describedby="`${question.id}-currency-hint`" :aria-required="true" :required="true"
+          :items="currencyOptions" value-key="value" :disabled="disabled"
+          :model-value="budget.currencies" :placeholder="t('grantSelectOne')"
+          data-field-label-en="Available currencies" data-field-label-fr="Devises offertes"
+          data-ui-target="extension.gcs-ssc-portal-connector.form-grant-designer.budget.currencies.includes-currency"
+          @update:model-value="budget.currencies = $event ?? []" />
       </fieldset>
       <GrantOptionEditor :title="t('grantCategories')" :options="budget.categories" :prefix="`${question.id}-categories`" :disabled="locked" @add="add('categories')" @remove="remove('categories', $event)" />
       <GrantOptionEditor :title="t('grantYears')" :options="budget.fiscalYears" :prefix="`${question.id}-years`" :disabled="locked" @add="add('fiscalYears')" @remove="remove('fiscalYears', $event)" />

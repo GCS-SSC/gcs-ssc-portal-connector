@@ -946,100 +946,6 @@ export declare const pushSurvey: (options: {
                     fr: string;
                 };
                 required: boolean;
-                type: "table";
-                maxRows: number;
-                columns: {
-                    id: string;
-                    label: {
-                        en: string;
-                        fr: string;
-                    };
-                    type: "number" | "date" | "text";
-                    required: boolean;
-                }[];
-                hint?: {
-                    en: string;
-                    fr: string;
-                } | undefined;
-                visibleWhen?: {
-                    match: "any" | "all";
-                    conditions: ({
-                        questionId: string;
-                        operator: "equals" | "notEquals" | "contains" | "greaterThan" | "lessThan";
-                        value: string;
-                    } | {
-                        questionId: string;
-                        operator: "answered" | "notAnswered";
-                    })[];
-                } | undefined;
-                totals?: "rows" | "columns" | "none" | "both" | undefined;
-            } | {
-                id: string;
-                label: {
-                    en: string;
-                    fr: string;
-                };
-                required: boolean;
-                type: "checkboxes";
-                options: {
-                    value: string;
-                    label: {
-                        en: string;
-                        fr: string;
-                    };
-                }[];
-                hint?: {
-                    en: string;
-                    fr: string;
-                } | undefined;
-                visibleWhen?: {
-                    match: "any" | "all";
-                    conditions: ({
-                        questionId: string;
-                        operator: "equals" | "notEquals" | "contains" | "greaterThan" | "lessThan";
-                        value: string;
-                    } | {
-                        questionId: string;
-                        operator: "answered" | "notAnswered";
-                    })[];
-                } | undefined;
-            } | {
-                id: string;
-                label: {
-                    en: string;
-                    fr: string;
-                };
-                required: boolean;
-                type: "multiselect";
-                options: {
-                    value: string;
-                    label: {
-                        en: string;
-                        fr: string;
-                    };
-                }[];
-                hint?: {
-                    en: string;
-                    fr: string;
-                } | undefined;
-                visibleWhen?: {
-                    match: "any" | "all";
-                    conditions: ({
-                        questionId: string;
-                        operator: "equals" | "notEquals" | "contains" | "greaterThan" | "lessThan";
-                        value: string;
-                    } | {
-                        questionId: string;
-                        operator: "answered" | "notAnswered";
-                    })[];
-                } | undefined;
-            } | {
-                id: string;
-                label: {
-                    en: string;
-                    fr: string;
-                };
-                required: boolean;
                 type: "budget";
                 config: {
                     source: {
@@ -1065,7 +971,7 @@ export declare const pushSurvey: (options: {
                         };
                         gcsId?: string | undefined;
                     }[];
-                    currencies: ("CAD" | "USD" | "EUR" | "GBP" | "JPY" | "CHF" | "AUD" | "NZD")[];
+                    currencies: string[];
                     costItems: {
                         id: string;
                         label: {
@@ -1153,6 +1059,100 @@ export declare const pushSurvey: (options: {
                     requireResponsibleParties: boolean;
                     bilingual: boolean;
                 };
+                hint?: {
+                    en: string;
+                    fr: string;
+                } | undefined;
+                visibleWhen?: {
+                    match: "any" | "all";
+                    conditions: ({
+                        questionId: string;
+                        operator: "equals" | "notEquals" | "contains" | "greaterThan" | "lessThan";
+                        value: string;
+                    } | {
+                        questionId: string;
+                        operator: "answered" | "notAnswered";
+                    })[];
+                } | undefined;
+            } | {
+                id: string;
+                label: {
+                    en: string;
+                    fr: string;
+                };
+                required: boolean;
+                type: "table";
+                maxRows: number;
+                columns: {
+                    id: string;
+                    label: {
+                        en: string;
+                        fr: string;
+                    };
+                    type: "number" | "date" | "text";
+                    required: boolean;
+                }[];
+                hint?: {
+                    en: string;
+                    fr: string;
+                } | undefined;
+                visibleWhen?: {
+                    match: "any" | "all";
+                    conditions: ({
+                        questionId: string;
+                        operator: "equals" | "notEquals" | "contains" | "greaterThan" | "lessThan";
+                        value: string;
+                    } | {
+                        questionId: string;
+                        operator: "answered" | "notAnswered";
+                    })[];
+                } | undefined;
+                totals?: "rows" | "columns" | "none" | "both" | undefined;
+            } | {
+                id: string;
+                label: {
+                    en: string;
+                    fr: string;
+                };
+                required: boolean;
+                type: "checkboxes";
+                options: {
+                    value: string;
+                    label: {
+                        en: string;
+                        fr: string;
+                    };
+                }[];
+                hint?: {
+                    en: string;
+                    fr: string;
+                } | undefined;
+                visibleWhen?: {
+                    match: "any" | "all";
+                    conditions: ({
+                        questionId: string;
+                        operator: "equals" | "notEquals" | "contains" | "greaterThan" | "lessThan";
+                        value: string;
+                    } | {
+                        questionId: string;
+                        operator: "answered" | "notAnswered";
+                    })[];
+                } | undefined;
+            } | {
+                id: string;
+                label: {
+                    en: string;
+                    fr: string;
+                };
+                required: boolean;
+                type: "multiselect";
+                options: {
+                    value: string;
+                    label: {
+                        en: string;
+                        fr: string;
+                    };
+                }[];
                 hint?: {
                     en: string;
                     fr: string;

@@ -1,3 +1,4 @@
+import { moneyFromMinorUnits } from '@gcs-ssc/extensions/money'
 import { sql } from 'kysely'
 import { asConnectorDb } from './db.ts'
 
@@ -96,5 +97,5 @@ export const projectAgreement = async (
   `.execute(db)).rows
   if (!fiscalYears.length || !lines.length) throw new Error('Publish a current Agreement budget before sending it to the portal.')
   if (fiscalYears.length > 20 || lines.length > 200) throw new Error('The Agreement exceeds the portal budget limits.')
-  return { agreement, fiscalYears, lines }
+  return { agreement, fiscalYears, lines: lines.map(line => ({ ...line, program_funding: moneyFromMinorUnits(line.program_funding, line.currency) })) }
 }

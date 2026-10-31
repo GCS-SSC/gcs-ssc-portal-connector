@@ -1,3 +1,4 @@
+import { addMoney, compareMoney, isPersistableMoney, majorMoneyText, parseCurrencyMoney, parseDecimalText, percentageMoney, supportedCurrencyCodes, sumMoney, zeroMoney } from '@gcs-ssc/extensions/money';
 import { z } from 'zod';
 // Portable form data: hosts resolve optional external IDs; this package never writes funding records.
 const key = z.string().regex(/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/).refine(value => !['__proto__', 'constructor', 'prototype'].includes(value));
@@ -20,7 +21,7 @@ const calculation = z.object({
 export const budgetConfigSchema = z.object({
     source: grantSourceSchema, maxRows: z.number().int().min(1).max(100),
     categories: options, fiscalYears: options,
-    currencies: z.array(z.enum(['CAD', 'USD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'NZD'])).min(1).max(8).refine(values => new Set(values).size === values.length),
+    currencies: z.array(z.enum(supportedCurrencyCodes.map(currency => currency.toUpperCase()))).min(1).max(supportedCurrencyCodes.length).refine(values => new Set(values).size === values.length),
     costItems: z.array(grantOptionSchema.extend({ categoryId: key, calculation,
         costSharingRatio: z.number().min(-999.99).max(999.99).refine(value => /^-?\d+(?:\.\d{1,2})?$/.test(String(value))).nullable().optional() }).strict()).max(200).refine(unique, 'Cost item IDs must be unique'),
     fundingTypes: z.array(grantOptionSchema.extend({ stacking: z.boolean(), costSharing: z.boolean() }).strict()).max(100).refine(unique, 'Funding type IDs must be unique'),
@@ -58,12 +59,12 @@ const rowId = z.string().regex(/^r_[a-zA-Z0-9_-]{1,40}$/);
 const text = z.string().max(5000);
 const pair = z.object({ en: text, fr: text }).strict();
 // Partial values are retained in drafts; submit checks required content separately.
-const fundingRow = z.object({ id: rowId, subtypeId: z.string().max(64), amount: z.string().max(30),
+const fundingRow = z.object({ id: rowId, subtypeId: z.string().max(64), amount: z.string().max(44),
     description: pair }).strict();
 export const budgetAnswerSchema = z.object({ version: z.literal(1), rows: z.array(z.object({
         id: rowId, fiscalYearId: z.string().max(64), costItemId: z.string().max(64),
         subsection: z.string().max(255), description: text, currency: z.string().max(3),
-        totalCost: z.string().max(30), programFunding: z.string().max(30), percentage: z.string().max(6),
+        totalCost: z.string().max(44), programFunding: z.string().max(44), percentage: z.string().max(6),
         otherFunding: z.array(fundingRow).max(50).refine(unique, 'Funding row IDs must be unique')
     }).strict()).max(100).refine(unique, 'Row IDs must be unique') }).strict();
 export const activityAnswerSchema = z.object({ version: z.literal(1), rows: z.array(z.object({
@@ -88,26 +89,17 @@ export const readActivityAnswer = (raw) => {
         return null;
     }
 };
-const ZERO = BigInt(0);
-export const moneyCents = (value) => {
-    if (!/^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(value))
-        throw new Error('Invalid money');
-    const negative = value.startsWith('-');
-    const [units = '0', fraction = ''] = (negative ? value.slice(1) : value).split('.');
-    const cents = BigInt(units) * BigInt(100) + BigInt(fraction.padEnd(2, '0'));
-    if (cents > BigInt('9999999999999999999'))
-        throw new Error('Money exceeds numeric(19,2)');
-    return negative ? -cents : cents;
+/** Human draft decimals become actual-currency minor-unit money before any calculation. */
+export const readBudgetMoney = (value, currency) => {
+    const amount = parseCurrencyMoney(value, currency);
+    if (!isPersistableMoney(amount))
+        throw new Error('Money exceeds persisted minor-unit precision');
+    return amount;
 };
-export const centsText = (value) => {
-    const negative = value < ZERO;
-    const absolute = negative ? -value : value;
-    return `${negative ? '-' : ''}${absolute / BigInt(100)}.${String(absolute % BigInt(100)).padStart(2, '0')}`;
-};
-const percentageHundredths = (value) => {
+const budgetPercentage = (value) => {
     if (!/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(value) || Number(value) > 100)
         throw new Error('Invalid percentage');
-    return moneyCents(value);
+    return parseDecimalText(value);
 };
 /** Matches GCS: category charges first, all-other second; program funding only; nearest dollar. */
 export const calculateBudget = (config, rows) => {
@@ -122,15 +114,12 @@ export const calculateBudget = (config, rows) => {
                 throw new Error('Duplicate all-other charge');
             const sources = group.filter(other => other.id !== row.id && (mode === 'all_other'
                 || config.costItems.find(option => option.id === other.costItemId)?.categoryId === item.calculation.sourceCategoryId));
-            const base = sources.reduce((total, source) => total + (source.programFunding === '' ? ZERO : moneyCents(source.programFunding)), ZERO);
+            const base = sumMoney(sources.map(source => source.programFunding === '' ? zeroMoney(row.currency) : readBudgetMoney(source.programFunding, row.currency)), row.currency);
             const percentage = item.calculation.allowOverride && row.percentage !== '' ? row.percentage : String(item.calculation.percentage);
-            const numerator = base * percentageHundredths(percentage);
-            const absolute = numerator < ZERO ? -numerator : numerator;
-            const rounded = ((absolute + BigInt(500000)) / BigInt(1000000)) * BigInt(100);
-            const amount = numerator < ZERO ? -rounded : rounded;
-            if ((amount < ZERO ? -amount : amount) > BigInt('9999999999999999999'))
-                throw new Error('Calculated funding exceeds numeric(19,2)');
-            row.programFunding = centsText(amount);
+            const amount = percentageMoney(base, budgetPercentage(percentage), { scale: 0, rounding: 'halfAwayFromZero' });
+            if (!isPersistableMoney(amount))
+                throw new Error('Calculated funding exceeds persisted minor-unit precision');
+            row.programFunding = majorMoneyText(amount);
         }
     return result;
 };
@@ -167,14 +156,14 @@ export const grantIssues = (question, raw, mode = 'submit') => {
         else if (!allowed.some(option => option.id === value))
             add(path, 'choice');
     };
-    const money = (value, path) => {
+    const money = (value, path, currency) => {
         if (!value) {
             if (mode === 'submit')
                 add(path, 'required');
             return null;
         }
         try {
-            return moneyCents(value);
+            return readBudgetMoney(value, currency);
         }
         catch {
             add(path, 'money');
@@ -198,22 +187,25 @@ export const grantIssues = (question, raw, mode = 'submit') => {
             choose(row.currency, config.currencies.map(id => ({ id })), `${path}.currency`);
             required(row.subsection, `${path}.subsection`, 255);
             required(row.description, `${path}.description`);
-            const total = money(row.totalCost, `${path}.totalCost`);
+            const total = money(row.totalCost, `${path}.totalCost`, row.currency);
             const item = config.costItems.find(option => option.id === row.costItemId);
             if (row.percentage && (!item?.calculation.allowOverride || item.calculation.mode === 'manual'))
                 add(`${path}.percentage`, 'choice');
             if (row.percentage)
                 try {
-                    percentageHundredths(row.percentage);
+                    budgetPercentage(row.percentage);
                 }
                 catch {
                     add(`${path}.percentage`, 'calculation');
                 }
             const program = money(item?.calculation.mode === 'manual' || !item ? row.programFunding
-                : calculated[index]?.programFunding ?? '', `${path}.programFunding`);
-            if (item && item.calculation.mode !== 'manual' && row.programFunding && row.programFunding !== calculated[index]?.programFunding)
-                add(`${path}.programFunding`, 'calculation');
-            let other = ZERO;
+                : calculated[index]?.programFunding ?? '', `${path}.programFunding`, row.currency);
+            if (item && item.calculation.mode !== 'manual' && row.programFunding && program !== null) {
+                const submitted = money(row.programFunding, `${path}.programFunding`, row.currency);
+                if (submitted !== null && compareMoney(submitted, program) !== 0)
+                    add(`${path}.programFunding`, 'calculation');
+            }
+            const other = [];
             const subtypes = new Set();
             row.otherFunding.forEach((source, sourceIndex) => {
                 const sourcePath = `${path}.otherFunding.${sourceIndex}`;
@@ -221,16 +213,16 @@ export const grantIssues = (question, raw, mode = 'submit') => {
                 if (source.subtypeId && subtypes.has(source.subtypeId))
                     add(`${sourcePath}.subtypeId`, 'choice');
                 subtypes.add(source.subtypeId);
-                const amount = money(source.amount, `${sourcePath}.amount`);
+                const amount = money(source.amount, `${sourcePath}.amount`, row.currency);
                 if (amount !== null) {
-                    if (amount < ZERO)
+                    if (compareMoney(amount, zeroMoney(amount.currency)) < 0)
                         add(`${sourcePath}.amount`, 'negative');
-                    other += amount;
+                    other.push(amount);
                 }
                 if (source.description.en.length > 255 || source.description.fr.length > 255)
                     add(`${sourcePath}.description`, 'length');
             });
-            if (total !== null && program !== null && program + other > total)
+            if (total !== null && program !== null && compareMoney(addMoney(program, sumMoney(other, row.currency)), total) > 0)
                 add(`${path}.totalCost`, 'coverage');
         });
     }
@@ -272,9 +264,9 @@ export const grantIssues = (question, raw, mode = 'submit') => {
 /** Canonical response serialization recomputes derived money rather than trusting submitted totals. */
 export const normalizeBudgetAnswer = (config, answer) => ({
     version: 1, rows: calculateBudget(config, answer.rows).map(row => ({ ...row,
-        totalCost: row.totalCost === '' ? '' : centsText(moneyCents(row.totalCost)),
-        programFunding: row.programFunding === '' ? '' : centsText(moneyCents(row.programFunding)),
-        otherFunding: row.otherFunding.map(source => ({ ...source, amount: source.amount === '' ? '' : centsText(moneyCents(source.amount)) }))
+        totalCost: row.totalCost === '' ? '' : majorMoneyText(readBudgetMoney(row.totalCost, row.currency)),
+        programFunding: row.programFunding === '' ? '' : majorMoneyText(readBudgetMoney(row.programFunding, row.currency)),
+        otherFunding: row.otherFunding.map(source => ({ ...source, amount: source.amount === '' ? '' : majorMoneyText(readBudgetMoney(source.amount, row.currency)) }))
     }))
 });
 export const grantConfigurationReady = (question) => question.type === 'budget'

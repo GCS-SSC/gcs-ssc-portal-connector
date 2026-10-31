@@ -17,7 +17,7 @@ it.each(['source', 'status selection', 'remote revision'])('publishes new revisi
       status_id: '91', status_name_en: 'Active', status_name_fr: 'Actif', status_colour: '#123456', terminal: false },
     fiscalYears: [{ id: '41', start_year: 2026 }],
     lines: [{ id: '51', fiscal_year_id: '41', name_en: 'Costs', name_fr: 'Coûts', category_en: 'Operations',
-      subsection: '', program_funding: '100.00', currency: 'CAD' }]
+      subsection: '', program_funding: { amount: '10000', currency: 'CAD' }, currency: 'CAD' }]
   }
   projectAgreement.mockImplementation(async () => structuredClone(source))
   const connection = { portal_url: 'https://portal.example/', portal_agency_id: 'G-ABCDE', portal_status_ids: [] as string[] }

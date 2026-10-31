@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatMoneyText, parseMoney } from '@gcs-ssc/extensions/money'
 import { feedback, useLocalizedFeedback, type Feedback } from './localized-feedback'
 import { FetchResponseError } from '@gcs-ssc/extensions'
 import { computed, h, onMounted, ref, watch, type Ref } from 'vue'
@@ -171,12 +172,10 @@ const fiscalYearLabel = (id: unknown): string => detailText(
   detailFiscalYears.value.find(year => String(year.id) === String(id))?.startYear ?? id
 )
 const budgetAmountLabel = (line: Record<string, unknown>): string => {
-  const amount = Number(line.budgetedAmount)
-  const currency = String(line.currency ?? '').toUpperCase()
-  if (Number.isFinite(amount) && /^[A-Z]{3}$/.test(currency))
-    return new Intl.NumberFormat(locale.value, { style: 'currency', currency }).format(amount)
-  return `${detailText(line.budgetedAmount)} ${currency}`.trim()
+  try { return formatMoneyText(parseMoney(line.budgetedAmount), locale.value) }
+  catch { return '—' }
 }
+
 const openBacklogDetail = async (item: BacklogItem) => {
   selectedBacklog.value = item
   backlogDetail.value = null

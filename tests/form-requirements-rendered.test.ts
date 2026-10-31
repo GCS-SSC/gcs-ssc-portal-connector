@@ -18,7 +18,8 @@ const post = vi.fn()
 const put = vi.fn()
 const hostGet = vi.fn()
 
-vi.mock('@gcs-ssc/extensions/ui', () => {
+vi.mock('@gcs-ssc/extensions/ui', async () => {
+  const { majorMoneyText, parseCurrencyMoney } = await import('@gcs-ssc/extensions/money')
   const field = defineComponent({
     props: ['label', 'name', 'required', 'description', 'error'],
     setup(props, { slots }) {
@@ -36,6 +37,21 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
       return () => h('input', { ...attrs, name: props.name, type: props.type, value: props.modelValue,
         required: props.required, disabled: props.disabled, min: props.min, max: props.max,
         onInput: (event: Event) => emit('update:modelValue', (event.target as HTMLInputElement).value) })
+    }
+  })
+  const currencyInput = defineComponent({
+    props: ['modelValue', 'name', 'currency', 'required', 'disabled'], emits: ['update:modelValue'],
+    setup(props, { attrs, emit }) {
+      const value = () => {
+        const money = props.modelValue as import('@gcs-ssc/extensions/money').MoneyInput
+        return money == null ? '' : 'draft' in money ? money.draft : majorMoneyText(money)
+      }
+      return () => h('input', { ...attrs, name: props.name, type: 'text', value: value(), required: props.required, disabled: props.disabled,
+        onInput: (event: Event) => {
+          const raw = (event.target as HTMLInputElement).value
+          try { emit('update:modelValue', raw ? parseCurrencyMoney(raw, String(props.currency)) : null) }
+          catch { emit('update:modelValue', { draft: raw }) }
+        } })
     }
   })
   const select = defineComponent({
@@ -131,7 +147,7 @@ vi.mock('@gcs-ssc/extensions/ui', () => {
       state.toastAdd({ ...notification, title: toastText(notification.title), description: toastText(notification.description) })
     } }),
     useExtensionApi: () => ({ get, post, put }), useHostApi: () => ({ get: hostGet, patch: vi.fn() }),
-    ExtensionFormField: field, ExtensionInput: input, ExtensionSelect: select, ExtensionSelectMenu: select,
+    ExtensionFormField: field, ExtensionCurrencyInput: currencyInput, ExtensionInput: input, ExtensionSelect: select, ExtensionSelectMenu: select,
     ExtensionTooltip: defineComponent({ inheritAttrs: false, setup(_, { slots }) { return () => slots.default?.() } }),
     ExtensionCheckbox: checkbox, ExtensionButton: button, ExtensionSaveButton: button,
     ExtensionIcon: defineComponent({ setup() { return () => h('span') } }),
@@ -621,7 +637,7 @@ describe('connector form requirements', () => {
             agreementNumber: 'HC-51', nameEn: 'Community agreement', nameFr: 'Entente communautaire',
             streamId: 'stream-1', config: { fiscalYears: [{ id: 'year-1', startYear: 2026 }],
               budgetLines: [{ id: 'line-1', nameEn: 'Outreach', nameFr: 'Sensibilisation',
-                fiscalYearId: 'year-1', budgetedAmount: '1200', currency: 'CAD' }] }
+                fiscalYearId: 'year-1', budgetedAmount: { amount: '120000', currency: 'CAD' }, currency: 'CAD' }] }
           } } }
         : defaultGet(path))
     const wrapper = mount(PortalConnection, { props: { agencyId: '1', section: 'queue', enabled: true } })
@@ -1847,6 +1863,21 @@ describe('structured budget and activity controls', () => {
     field.setValue = (value: string) => { field.value = value; void wrapper.setProps({ field: { ...field } }) }
     return wrapper
   }
+  it.each(['en', 'fr'] as const)('names and describes the required currency selector in %s', async locale => {
+    state.locale = locale
+    const question = grantForm().questions.find(question => question.type === 'budget')!
+    const wrapper = mount(FormGrantDesigner, { props: { agencyId: '1', disabled: false, question } })
+    const selector = wrapper.get('select[name="budget-currencies"]')
+    expect(selector.attributes('required')).toBeDefined()
+    expect(selector.attributes('aria-required')).toBe('true')
+    expect(selector.attributes('aria-labelledby')).toBe('budget-currency-label')
+    expect(selector.attributes('aria-describedby')).toBe('budget-currency-hint')
+    expect(wrapper.get('#budget-currency-label').text()).toContain(locale === 'fr' ? 'obligatoire' : 'required')
+    expect(wrapper.get('#budget-currency-hint').text()).toBe(locale === 'fr' ? 'Sélectionnez au moins un choix.' : 'Select at least one.')
+    expect(selector.findAll('option').map(option => option.text())).toEqual(expect.arrayContaining(['JPY', 'KWD', 'CLF', 'MGA']))
+    expect(selector.findAll('option').map(option => option.text())).not.toContain('XDR')
+    wrapper.unmount()
+  })
   it('adds budget rows with native required controls and readable choices; removing preserves sibling data', async () => {
     const field = grantField('budget', JSON.stringify({ version: 1, rows: [budgetEntry('r_one'), budgetEntry('r_two')] }))
     const wrapper = render(field)
@@ -1868,16 +1899,33 @@ describe('structured budget and activity controls', () => {
     await wrapper.get(`select[name="budget-${source.id}-subtypeId"]`).setValue('province')
     await wrapper.get(`input[name="budget-${source.id}-amount"]`).setValue('500.00')
     await flushPromises()
-    expect(wrapper.text()).toContain('1500.00')
+    expect(wrapper.text()).toContain('1,500.00')
     expect(wrapper.text()).toContain('Other funding included in stacking')
-    expect(readBudgetAnswer(field.value)!.rows[0]!.otherFunding[0]!.amount).toBe('500.00')
+    expect(readBudgetAnswer(field.value)!.rows[0]!.otherFunding[0]!.amount).toBe('500')
     await wrapper.findAll('button').find(button => button.text() === 'Add a cost')!.trigger('click')
     await flushPromises()
     const charge = readBudgetAnswer(field.value)!.rows[1]!
     await wrapper.get(`select[name="budget-${charge.id}-costItemId"]`).setValue('admin')
     await flushPromises()
-    expect(readBudgetAnswer(field.value)!.rows[1]!.programFunding).toBe('100.00')
+    expect(readBudgetAnswer(field.value)!.rows[1]!.programFunding).toBe('100')
     expect(wrapper.get(`input[name="budget-${charge.id}-programFunding"]`).attributes('readonly')).toBeDefined()
+    wrapper.unmount()
+  })
+  it.each([['KWD', '0.001', '0.0001'], ['JPY', '1', '0.1']])('edits %s with its own valid monetary unit', async (currency, valid, invalid) => {
+    const row = { ...budgetEntry(), currency, totalCost: valid, programFunding: valid }
+    const field = grantField('budget', JSON.stringify({ version: 1, rows: [row] }))
+    if (field.question.type !== 'budget') throw new Error('Expected a budget question')
+    field.question.config = { ...budgetConfig(), currencies: [currency] }
+    field.error = 'choice'
+    const wrapper = render(field)
+    expect(wrapper.text()).toContain(currency === 'JPY' ? '¥1' : '0.001')
+    await wrapper.get(`input[name="budget-${row.id}-programFunding"]`).setValue(invalid)
+    await flushPromises()
+    expect(readBudgetAnswer(field.value)!.rows[0]!.programFunding).toBe(invalid)
+    expect(wrapper.text()).toContain('smallest unit')
+    await wrapper.get(`input[name="budget-${row.id}-programFunding"]`).setValue(valid)
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('smallest unit')
     wrapper.unmount()
   })
   it('renders field-local money and coverage errors, and switches preview language', async () => {

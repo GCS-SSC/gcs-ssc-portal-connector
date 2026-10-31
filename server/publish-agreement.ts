@@ -1,3 +1,4 @@
+import { compareMoney, parseMoney } from '@gcs-ssc/extensions/money'
 import { createHash } from 'node:crypto'
 import { sql } from 'kysely'
 import { z } from 'zod'
@@ -91,7 +92,7 @@ export const publishAgreementCore = async (
     })),
     budgetLines: lines.map((line) => {
       const old = priorLines.find((entry) => entry.id === line.id)
-      const sameBudget = old?.budgetedAmount === line.program_funding
+      const sameBudget = old !== undefined && compareMoney(parseMoney(old.budgetedAmount), line.program_funding) === 0
       return {
         nameEn: line.name_en, nameFr: line.name_fr,
         id: line.id, fiscalYearId: line.fiscal_year_id, foreignSystemId: line.id,

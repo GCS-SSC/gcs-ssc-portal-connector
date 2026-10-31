@@ -20,7 +20,7 @@ describe('current portal Agreement budget projection', () => {
       CREATE TABLE "Agency_Cost_Category" (id bigint PRIMARY KEY, egcs_ay_name_en text, egcs_ay_active boolean DEFAULT true, _deleted boolean DEFAULT false);
       CREATE TABLE "Agency_Cost_Category_Line_Item" (id bigint PRIMARY KEY, egcs_ay_organizationcostcategory bigint, egcs_ay_name_en text, egcs_ay_name_fr text, egcs_ay_active boolean DEFAULT true, _deleted boolean DEFAULT false);
       CREATE TABLE "Transfer_Payment_Stream_Cost_Category_Line_Item" (id bigint PRIMARY KEY, egcs_tp_organizationcostcategory bigint, egcs_tp_active boolean DEFAULT true, _deleted boolean DEFAULT false);
-      CREATE TABLE "Funding_Case_Agreement_Budget_Line_Item" (id bigint PRIMARY KEY, egcs_fc_originalbudgetlineitem bigint, egcs_fc_fundingagreementbudgetfiscalyear bigint, egcs_fc_organizationcostcategory bigint, egcs_fc_costsubsection text, egcs_fc_programfunding numeric(19,2), egcs_fc_currency text, _deleted boolean DEFAULT false);
+      CREATE TABLE "Funding_Case_Agreement_Budget_Line_Item" (id bigint PRIMARY KEY, egcs_fc_originalbudgetlineitem bigint, egcs_fc_fundingagreementbudgetfiscalyear bigint, egcs_fc_organizationcostcategory bigint, egcs_fc_costsubsection text, egcs_fc_programfunding numeric, egcs_fc_currency text, _deleted boolean DEFAULT false);
     `)
   })
   beforeEach(async () => {
@@ -37,7 +37,7 @@ describe('current portal Agreement budget projection', () => {
       INSERT INTO "Agency_Cost_Category" VALUES (1,'Operations',true,false);
       INSERT INTO "Agency_Cost_Category_Line_Item" VALUES (2,1,'Eligible costs','Coûts admissibles',true,false);
       INSERT INTO "Transfer_Payment_Stream_Cost_Category_Line_Item" VALUES (3,2,true,false);
-      INSERT INTO "Funding_Case_Agreement_Budget_Line_Item" VALUES (51,50,41,3,'Delivery',9007199254740993.01,'CAD',false);
+      INSERT INTO "Funding_Case_Agreement_Budget_Line_Item" VALUES (51,50,41,3,'Delivery',900719925474099301,'CAD',false);
     `)
   })
   afterAll(async () => { await db.destroy() })
@@ -48,7 +48,7 @@ describe('current portal Agreement budget projection', () => {
       stream_id: '21', program_id: '11', status_name_fr: 'Actif' })
     expect(result.fiscalYears).toEqual([{ id: '40', start_year: 2026 }])
     expect(result.lines).toEqual([{ id: '50', fiscal_year_id: '40', name_en: 'Eligible costs', name_fr: 'Coûts admissibles',
-      category_en: 'Operations', subsection: 'Delivery', program_funding: '9007199254740993.01', currency: 'CAD' }])
+      category_en: 'Operations', subsection: 'Delivery', program_funding: { amount: '900719925474099301', currency: 'CAD' }, currency: 'CAD' }])
   })
   it.each([['2', '31', '71'], ['1', '32', '71'], ['1', '31', '72']])('rejects unavailable Agency/Agreement/recipient %s/%s/%s', async (agency, agreement, proponent) => {
     await expect(projectAgreement(db, agency, agreement, proponent)).rejects.toThrow('not linked to that recipient in this Agency')
@@ -79,9 +79,9 @@ describe('current portal Agreement budget projection', () => {
   })
   it('accepts two hundred budget lines and rejects the next without rounding their amounts', async () => {
     await engine.exec(`INSERT INTO "Funding_Case_Agreement_Budget_Line_Item"
-      SELECT n,null,41,3,'Delivery ' || n,0.01,'CAD',false FROM generate_series(1000,1198) n`)
+      SELECT n,null,41,3,'Delivery ' || n,1,'CAD',false FROM generate_series(1000,1198) n`)
     expect((await projectAgreement(db, '1', '31', '71')).lines).toHaveLength(200)
-    await engine.exec(`INSERT INTO "Funding_Case_Agreement_Budget_Line_Item" VALUES (1199,null,41,3,'Delivery 1199',0.01,'CAD',false)`)
+    await engine.exec(`INSERT INTO "Funding_Case_Agreement_Budget_Line_Item" VALUES (1199,null,41,3,'Delivery 1199',1,'CAD',false)`)
     await expect(projectAgreement(db, '1', '31', '71')).rejects.toThrow('portal budget limits')
   })
 })

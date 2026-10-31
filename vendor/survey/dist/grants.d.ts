@@ -1,3 +1,4 @@
+import { type Money } from '@gcs-ssc/extensions/money';
 import { z } from 'zod';
 export declare const grantOptionSchema: z.ZodObject<{
     id: z.ZodString;
@@ -44,14 +45,7 @@ export declare const budgetConfigSchema: z.ZodObject<{
         gcsId: z.ZodOptional<z.ZodString>;
     }, z.core.$strict>>;
     currencies: z.ZodArray<z.ZodEnum<{
-        CAD: "CAD";
-        USD: "USD";
-        EUR: "EUR";
-        GBP: "GBP";
-        JPY: "JPY";
-        CHF: "CHF";
-        AUD: "AUD";
-        NZD: "NZD";
+        [x: string]: string;
     }>>;
     costItems: z.ZodArray<z.ZodObject<{
         id: z.ZodString;
@@ -193,8 +187,8 @@ export type GrantIssue = {
 };
 export declare const readBudgetAnswer: (raw: string) => BudgetAnswer | null;
 export declare const readActivityAnswer: (raw: string) => ActivityAnswer | null;
-export declare const moneyCents: (value: string) => bigint;
-export declare const centsText: (value: bigint) => string;
+/** Human draft decimals become actual-currency minor-unit money before any calculation. */
+export declare const readBudgetMoney: (value: string, currency: string) => Money;
 /** Matches GCS: category charges first, all-other second; program funding only; nearest dollar. */
 export declare const calculateBudget: (config: BudgetConfig, rows: BudgetRow[]) => BudgetRow[];
 export declare const newBudgetRow: (id: string, config: BudgetConfig) => BudgetRow;
