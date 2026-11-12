@@ -2,6 +2,8 @@ import { z } from 'zod'
 import type { GcsExtensionRouteContext } from '@gcs-ssc/extensions/server'
 import { authorizedWrite } from './authorization.ts'
 import { clientForAgency } from './portal-context.ts'
+import { asConnectorDb } from './db.ts'
+import { PortalOperationPendingError, retryCallFormsOperation } from './operations.ts'
 import { formPublicationIssues } from './form-readiness.ts'
 import { upgradeToAdvancedSurvey } from '@gcs-ssc/survey'
 import { designerSurveySchema } from '@gcs-ssc/survey'
@@ -14,6 +16,7 @@ const commandSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('saveForms'), forms: z.array(z.object({
     surveyId: portalCode, revision: z.number().int().positive()
   }).strict()).max(10) }).strict(),
+  z.object({ action: z.literal('attachOpportunityForm'), operationId: z.string().regex(/^[1-9]\d{0,18}$/) }).strict(),
   z.object({ action: z.literal('publish') }).strict(),
   z.object({ action: z.literal('withdraw') }).strict(),
   z.object({ action: z.literal('saveForm'), surveyId: portalCode.optional(),
@@ -62,14 +65,20 @@ export const manageOpportunity = async (context: GcsExtensionRouteContext) => {
     throw new Error('Opportunity is unavailable in this agency.')
   if (command.action === 'publish' && !projection.active)
     throw new Error('Activate the Funding Opportunity before publishing it to the portal.')
-  if ((command.action === 'saveForms' || command.action === 'saveForm') && !projection.editable)
+  if ((command.action === 'saveForms' || command.action === 'saveForm' || command.action === 'attachOpportunityForm') && !projection.editable)
     throw new Error('This Funding Opportunity is locked for editing.')
-  const { connection, client } = await clientForAgency(context)
+  const { agencyId, connection, client } = await clientForAgency(context)
   let structure = await client.structure()
   let call = structure.calls.find(item => isOpportunityCall(item, opportunityId))
   if (command.action === 'withdraw') {
     if (call?.published) await client.withdrawCall(call.id)
     return { callId: call?.id ?? null, published: false }
+  }
+  if (command.action === 'attachOpportunityForm') {
+    if (!call) throw new Error('The portal opportunity is unavailable.')
+    // This resumes admitted durable work, even if the call has since been published.
+    await retryCallFormsOperation(asConnectorDb(context.db), agencyId, command.operationId, call.id)
+    return { attached: true }
   }
   const portalProgramId = structure.programs.find(program => program.sourceSystem === 'gcs-ssc'
     && program.foreignSystemId === projection.program.id)?.id ?? await client.createProgram({
@@ -114,18 +123,22 @@ export const manageOpportunity = async (context: GcsExtensionRouteContext) => {
       throw new Error('The saved form revision is required when editing.')
     if (command.surveyId && !call.forms.some(form => form.surveyId === command.surveyId))
       throw new Error('Form is not attached to this opportunity.')
-    if (!command.surveyId && call.forms.length >= 10)
+    const forms = (await client.structure()).calls.find(item => item.id === call.id)?.forms ?? []
+    if (!command.surveyId && forms.length >= 10)
       throw new Error('An opportunity may have at most ten forms.')
     const survey = command.surveyId
       ? await client.updateSurvey(command.surveyId, command.expectedRevision!, command.definition)
       : await client.createSurvey(command.definition)
-    const forms = (await client.structure()).calls.find(item => item.id === call.id)?.forms ?? []
     const next = command.surveyId
       ? forms.map(form => form.surveyId === survey.id ? { surveyId: survey.id, revision: survey.revision } : form)
       : [...forms, { surveyId: survey.id, revision: survey.revision }]
-    if (next.length > 10) throw new Error('An opportunity may have at most ten forms.')
-    await client.attachCallForms(call.id, next)
-    return { survey, attached: true }
+    try {
+      await client.attachCallForms(call.id, next)
+      return { survey, attached: true }
+    } catch (error) {
+      if (!(error instanceof PortalOperationPendingError)) throw error
+      return { survey, attached: false, attachmentOperationId: error.operationId }
+    }
   }
   if (call.published) return { callId: call.id, published: true }
   const current = (await client.structure()).calls.find(item => item.id === call.id)

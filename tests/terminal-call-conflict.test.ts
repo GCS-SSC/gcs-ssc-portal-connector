@@ -31,7 +31,7 @@ it('retains a rejected call update without blocking later portal operations', as
     vi.stubGlobal('fetch', transport)
     const client = queuePortalClient(db as never, '1', {
       portalUrl: 'https://portal.example/', portalAgencyId: 'G-ABCDE', key: `gcs_${'a'.repeat(43)}`
-    })
+    }, { kind: 'worker' })
     await expect(client.updateCall('D-ABCDE', 1, { nameEn: 'A' }))
       .rejects.toBeInstanceOf(PortalRequestError)
     expect((await sql<{ state: string }>`SELECT state FROM extensions.gcs_ssc_portal_connector_operation ORDER BY id`.execute(db)).rows)

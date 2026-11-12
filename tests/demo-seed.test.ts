@@ -186,15 +186,15 @@ describe('automatic local Portal demo', () => {
       .mockImplementation(async () => Response.json({ set: { id: 'S-ABCDE', revision: 1 } }))
     vi.stubGlobal('fetch', transport)
     const connection = { portalUrl: 'http://localhost:3003/', portalAgencyId: 'G-NFAFV', key: options.portalKey }
-    const first = queuePortalClient(db, '11', connection, 'agreement-delivery:123')
+    const first = queuePortalClient(db, '11', connection, { kind: 'worker' }, 'agreement-delivery:123')
     await expect(first.createSet({ nameEn: 'Claim set' })).rejects.toThrow('Response lost')
     await sql`UPDATE extensions.gcs_ssc_portal_connector_operation SET next_attempt_at=now()`.execute(db)
     expect((await drainOperations(db, 1)).results[0]?.delivered).toBe(true)
-    const retried = queuePortalClient(db, '11', connection, 'agreement-delivery:123')
+    const retried = queuePortalClient(db, '11', connection, { kind: 'worker' }, 'agreement-delivery:123')
     expect(await retried.createSet({ nameEn: 'Claim set' })).toEqual({ id: 'S-ABCDE', revision: 1 })
     expect(transport).toHaveBeenCalledTimes(2)
     expect(await db.selectFrom('extensions.gcs_ssc_portal_connector_operation').select('id').execute()).toHaveLength(1)
-    await queuePortalClient(db, '11', connection, 'agreement-delivery:124').createSet({ nameEn: 'Claim set' })
+    await queuePortalClient(db, '11', connection, { kind: 'worker' }, 'agreement-delivery:124').createSet({ nameEn: 'Claim set' })
     expect(transport).toHaveBeenCalledTimes(3)
   })
 

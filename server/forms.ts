@@ -4,7 +4,7 @@ import { designerSurveySchema, upgradeToAdvancedSurvey } from '@gcs-ssc/survey'
 import type { GcsExtensionRouteContext } from '@gcs-ssc/extensions/server'
 import { agencyIdFromContext, authorizedWrite } from './authorization.ts'
 import { asConnectorDb } from './db.ts'
-import { createPortalClient } from './portal-client.ts'
+import type { createPortalClient } from './portal-client.ts'
 import { clientForAgency } from './portal-context.ts'
 import { formPublicationIssues } from './form-readiness.ts'
 import { foreignId } from './form-identity.ts'
@@ -49,9 +49,11 @@ export const publishedAgreementTargets = (
     return agreement && verified.has(publication.portal_organization_id)
       ? [[`${agreement.id}:${publication.portal_organization_id}`, {
           ...agreement, organizationId: publication.portal_organization_id
-        }] as const] : []
+        }] as const]
+      : []
   })).values()]
 }
+
 export const agreementTargetsForScope = (
   agreements: FormAgreement[], streams: FormStream[], scope: 'program' | 'stream', scopeId: string
 ) => {
@@ -113,7 +115,8 @@ export const listForms = async (context: GcsExtensionRouteContext) => {
   const local = await db.selectFrom('extensions.gcs_ssc_portal_connector_form').selectAll()
     .where('agency_id', '=', agencyId).execute()
   const localSurveys = local.map(form => ({ id: form.id, revision: form.revision,
-    title: form.revision === 0 ? z.object({ title: draftTitle }).parse(form.definition).title
+    title: form.revision === 0
+      ? z.object({ title: draftTitle }).parse(form.definition).title
       : designerSurveySchema.parse(form.definition).title, updatedAt: new Date(form.updated_at).toISOString(),
     synced: Boolean(form.portal_id && form.portal_revision === form.revision) }))
   type Client = Awaited<ReturnType<typeof clientForAgency>>['client']
@@ -210,17 +213,19 @@ export const manageForm = async (context: GcsExtensionRouteContext) => {
       throw intakeError('intakeFormRevisionRequired', 400)
     const known = command.surveyId
       ? await asConnectorDb(context.db).selectFrom('extensions.gcs_ssc_portal_connector_form').select('id')
-        .where('agency_id', '=', agencyId).where('id', '=', command.surveyId).executeTakeFirst()
+          .where('agency_id', '=', agencyId).where('id', '=', command.surveyId).executeTakeFirst()
       : null
-    const remote = command.surveyId && !known
-      ? await (await clientForAgency(context)).client.survey(command.surveyId)
-      : null
+    const remoteSource = command.surveyId && !known ? await clientForAgency(context) : null
+    const remote = remoteSource && command.surveyId ? await remoteSource.client.survey(command.surveyId) : null
     if (remote && remote.revision !== command.expectedRevision)
       throw new Error('Reload the latest saved form revision before editing.')
-    return authorizedWrite(context, async transaction => {
+    const write = remoteSource
+      ? remoteSource.client.write :
+        <T>(operation: Parameters<typeof authorizedWrite<T>>[1]) => authorizedWrite(context, operation)
+    return write(async transaction => {
       const previous = command.surveyId
         ? await transaction.selectFrom('extensions.gcs_ssc_portal_connector_form').selectAll()
-          .where('agency_id', '=', agencyId).where('id', '=', command.surveyId).forUpdate().executeTakeFirst()
+            .where('agency_id', '=', agencyId).where('id', '=', command.surveyId).forUpdate().executeTakeFirst()
         : null
       if (command.surveyId && !previous && !remote)
         throw new Error('The form is unavailable in this agency.')

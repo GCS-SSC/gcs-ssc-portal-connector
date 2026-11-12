@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { feedback, useLocalizedFeedback } from './localized-feedback'
-import { computed, onMounted, ref, watch, type Ref } from 'vue'
+import { computed, ref, watch, type Ref } from 'vue'
 import type { ExtensionEntityTabContext } from '@gcs-ssc/extensions'
 import {
   ExtensionButton, ExtensionFormField, ExtensionInput, ExtensionSelect,
   useExtensionApi, useExtensionI18n, useHostApi
 } from '@gcs-ssc/extensions/ui'
 import { messages } from '../i18n/messages'
+import { usePortalRequest } from './usePortalRequest'
 
 interface Recipient {
   egcs_fc_applicantrecipient: string
@@ -36,8 +37,11 @@ const portalUrl = ref('')
 const connected = ref(false)
 const recipientId = ref('')
 const organizationId = ref('')
-const busy = ref(false)
-const loading = ref(true)
+type Subject = { agencyId: string; agreementId: string }
+const loadRequest = usePortalRequest()
+const publishRequest = usePortalRequest()
+const busy = publishRequest.pending
+const loading = loadRequest.pending
 const error = useLocalizedFeedback(t)
 const message = useLocalizedFeedback(t)
 const agreementId = computed(() => props.context?.agreementId ?? props.agreementId ?? '')
@@ -52,44 +56,74 @@ const portalLink = (publication: Publication) => {
   if (!portalUrl.value) return ''
   return new URL(`/organizations/${encodeURIComponent(publication.organizationId)}/agreements/${encodeURIComponent(publication.agreementId)}`, portalUrl.value).href
 }
-const refreshPublications = async () => {
-  publications.value = (await api.get<{ publications: Publication[] }>(
-    `/agencies/${agencyId.value}/agreements/${agreementId.value}/publications`
-  )).publications
-}
+const fetchPublications = async (subject: Subject) => (await api.get<{ publications: Publication[] }>(
+  `/agencies/${subject.agencyId}/agreements/${subject.agreementId}/publications`
+)).publications
 const load = async () => {
-  if (!agreementId.value || !agencyId.value) return
-  loading.value = true; error.value = ''; message.value = ''
+  const request = loadRequest.begin()
+  if (!request) return
+  const subject = { agencyId: agencyId.value, agreementId: agreementId.value }
+  publishRequest.invalidate()
+  recipients.value = []; publications.value = []; portalUrl.value = ''; connected.value = false
+  recipientId.value = ''; error.value = ''; message.value = ''
+  if (!subject.agreementId || !subject.agencyId) {
+    loadRequest.invalidate()
+    return
+  }
+  let failed = false
   try {
     const [connection, recipientResult] = await Promise.all([
-      api.get<{ connection: { portalUrl: string; hasCredential: boolean } | null }>(`/agencies/${agencyId.value}/connection`),
-      hostApi.get<{ items: Recipient[] }>(`/api/agreements/${agreementId.value}/applicant-recipients`)
+      api.get<{ connection: { portalUrl: string; hasCredential: boolean } | null }>(`/agencies/${subject.agencyId}/connection`),
+      hostApi.get<{ items: Recipient[] }>(`/api/agreements/${subject.agreementId}/applicant-recipients`)
     ])
+    if (!loadRequest.isCurrent(request)) return
     connected.value = connection.connection?.hasCredential === true
     portalUrl.value = connection.connection?.portalUrl ?? ''
     recipients.value = recipientResult.items
-    if (!recipients.value.some((item) => item.egcs_fc_applicantrecipient === recipientId.value))
-      recipientId.value = recipients.value.length === 1 ? recipients.value[0]!.egcs_fc_applicantrecipient : ''
-  } catch { error.value = feedback('recipientLoadFailed') }
-  try { await refreshPublications() } catch { error.value = feedback('publicationLoadFailed') }
-  finally { loading.value = false }
+    recipientId.value = recipients.value.length === 1 ? recipients.value[0]!.egcs_fc_applicantrecipient : ''
+  } catch {
+    if (!loadRequest.isCurrent(request)) return
+    failed = true
+    error.value = feedback('recipientLoadFailed')
+  }
+  try {
+    const result = await fetchPublications(subject)
+    if (loadRequest.isCurrent(request)) publications.value = result
+  } catch {
+    failed = true
+    if (loadRequest.isCurrent(request)) error.value = feedback('publicationLoadFailed')
+  } finally {
+    if (failed) loadRequest.fail(request)
+    else loadRequest.succeed(request)
+  }
 }
 const publish = async () => {
-  if (!valid.value || busy.value || !agreementId.value) return
-  busy.value = true; error.value = ''; message.value = ''
+  if (!valid.value || busy.value || loading.value || !agreementId.value) return
+  const request = publishRequest.begin()
+  if (!request) return
+  const subject = { agencyId: agencyId.value, agreementId: agreementId.value }
+  const organization = organizationId.value
+  let failed = false
+  error.value = ''; message.value = ''
   try {
     const result = await api.post<{ agreementId: string; setIds: string[] }>(
-      `/agencies/${agencyId.value}/publish-agreement`,
-      { agreementId: agreementId.value, proponentId: recipientId.value, portalOrganizationId: organizationId.value }
+      `/agencies/${subject.agencyId}/publish-agreement`,
+      { agreementId: subject.agreementId, proponentId: recipientId.value, portalOrganizationId: organization }
     )
+    if (!publishRequest.isCurrent(request)) return
     message.value = feedback('published', { agreement: result.agreementId, count: result.setIds.length,
-      organization: organizationId.value })
-    await refreshPublications()
-  } catch { error.value = feedback('publishFailed') }
-  finally { busy.value = false }
+      organization })
+    const resultPublications = await fetchPublications(subject)
+    if (publishRequest.isCurrent(request)) publications.value = resultPublications
+  } catch {
+    failed = true
+    if (publishRequest.isCurrent(request)) error.value = feedback('publishFailed')
+  } finally {
+    if (failed) publishRequest.fail(request)
+    else publishRequest.succeed(request)
+  }
 }
-onMounted(load)
-watch(() => [agreementId.value, agencyId.value], load)
+watch([agreementId, agencyId], load, { immediate: true, flush: 'sync' })
 </script>
 
 <template>

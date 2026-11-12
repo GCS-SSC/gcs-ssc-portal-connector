@@ -3,10 +3,10 @@ import { createHash } from 'node:crypto'
 import { importSurvey } from './survey-import.ts'
 import { defineGcsExtensionRouteHandler, createGcsExtensionUserError, type GcsExtensionRouteContext } from '@gcs-ssc/extensions/server'
 import { claimItemSchema, forecastItemSchema, type PortalSubmission, type PortalUpdate } from '../shared/portal-contract.ts'
-import { agencyIdFromContext, authorizedWrite } from './authorization.ts'
+import { agencyIdFromContext } from './authorization.ts'
 import { readPortalCredential } from './connection.ts'
 import { asConnectorDb, type ConnectorDb } from './db.ts'
-import { queuePortalClient } from './operations.ts'
+import { queuePortalClient, type PortalWrite } from './operations.ts'
 
 const loadConnection = async (context: GcsExtensionRouteContext) => {
   const agencyId = agencyIdFromContext(context)
@@ -21,7 +21,7 @@ const loadConnection = async (context: GcsExtensionRouteContext) => {
       portalUrl: row.portal_url,
       portalAgencyId: row.portal_agency_id,
       key: await readPortalCredential(context, agencyId)
-    })
+    }, { kind: 'route', context })
   }
 }
 
@@ -50,10 +50,10 @@ const agreementRecipientAvailable = async (
 
 const importClaim = async (
   context: GcsExtensionRouteContext, agencyId: string,
-  update: PortalUpdate, submission: PortalSubmission
+  update: PortalUpdate, submission: PortalSubmission, write: PortalWrite
 ): Promise<string> => {
   const item = claimItemSchema.parse(submission.items.find((candidate) => candidate.itemSubmissionId === update.itemSubmissionId))
-  return authorizedWrite(context, async (transaction) => {
+  return write(async (transaction) => {
     const identity = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_identity').select('proponent_id')
       .where('agency_id', '=', agencyId).where('portal_organization_id', '=', submission.organizationId)
       .executeTakeFirst()
@@ -113,13 +113,13 @@ const importClaim = async (
 
 const importForecast = async (
   context: GcsExtensionRouteContext, agencyId: string,
-  update: PortalUpdate, submission: PortalSubmission
+  update: PortalUpdate, submission: PortalSubmission, write: PortalWrite
 ): Promise<string> => {
   const item = forecastItemSchema.parse(submission.items.find((candidate) => candidate.itemSubmissionId === update.itemSubmissionId))
   const proponentId = submission.agreementReference?.externalApplicantRecipientId
   const streamId = submission.agreementReference?.externalStreamId
   if (!proponentId || !streamId) throw new Error('The organization has no verified GCS agreement and proponent mapping.')
-  return authorizedWrite(context, async (transaction) => {
+  return write(async (transaction) => {
     const identity = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_identity').select('proponent_id')
       .where('agency_id', '=', agencyId).where('portal_organization_id', '=', submission.organizationId)
       .executeTakeFirst()
@@ -167,9 +167,9 @@ const importForecast = async (
 }
 
 const retainUnsupported = async (
-  context: GcsExtensionRouteContext, agencyId: string,
+  write: PortalWrite, agencyId: string,
   update: PortalUpdate, evidence: unknown, kind: string
-) => authorizedWrite(context, async (transaction) => {
+) => write(async (transaction) => {
   const itemId = update.itemSubmissionId ?? update.detailId ?? `event:${update.eventId}`
   const existing = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_receipt').select('id')
     .where('agency_id', '=', agencyId).where('event_id', '=', update.eventId).executeTakeFirst()
@@ -194,14 +194,14 @@ export const syncPortal = async (context: GcsExtensionRouteContext) => {
     const batch = await client.updates(after)
     hasMore = batch.nextCursor !== null
     for (const update of batch.updates) {
-      await asConnectorDb(context.db).insertInto('extensions.gcs_ssc_portal_connector_inbox').values({
+      await client.write(transaction => transaction.insertInto('extensions.gcs_ssc_portal_connector_inbox').values({
         agency_id: agencyId, event_id: update.eventId, kind: update.kind,
         submission_id: update.submissionId, item_submission_id: update.itemSubmissionId,
         created_at: new Date(update.createdAt), last_error: null
-      }).onConflict((conflict) => conflict.columns(['agency_id', 'event_id']).doNothing()).execute()
+      }).onConflict((conflict) => conflict.columns(['agency_id', 'event_id']).doNothing()).execute())
       try {
         if (update.kind === 'organization_detail') {
-          await retainUnsupported(context, agencyId, update, await client.response(update.submissionId), 'organization_detail')
+          await retainUnsupported(client.write, agencyId, update, await client.response(update.submissionId), 'organization_detail')
           pending.push({ eventId: update.eventId, code: 'documentationPending',
             submissionId: update.submissionId, reason: 'GCS documentation import is not available.' })
           continue
@@ -209,45 +209,45 @@ export const syncPortal = async (context: GcsExtensionRouteContext) => {
         const submission = await client.submission(update.submissionId)
         const item = submission.items.find((candidate) => candidate.itemSubmissionId === update.itemSubmissionId)
         if (item?.kind === 'survey') {
-          const result = await importSurvey(context, agencyId, update, submission, client, sourceSystem)
+          const result = await importSurvey(context, agencyId, update, submission, client, sourceSystem, client.write)
           await client.publishItemReference(update.submissionId, item.itemSubmissionId, result.entityId)
           await client.consume(update.eventId, result.entityId)
-          await asConnectorDb(context.db).updateTable('extensions.gcs_ssc_portal_connector_inbox')
-            .set({ last_error: null }).where('agency_id', '=', agencyId).where('event_id', '=', update.eventId).execute()
+          await client.write(transaction => transaction.updateTable('extensions.gcs_ssc_portal_connector_inbox')
+            .set({ last_error: null }).where('agency_id', '=', agencyId).where('event_id', '=', update.eventId).execute())
           imported.push({ itemSubmissionId: item.itemSubmissionId, ...result })
           continue
         }
         if (item?.kind !== 'claim' && item?.kind !== 'forecast') {
-          await retainUnsupported(context, agencyId, update, submission, item?.kind ?? 'unknown')
+          await retainUnsupported(client.write, agencyId, update, submission, item?.kind ?? 'unknown')
           pending.push({ eventId: update.eventId,
             code: item?.kind === 'forecast' ? 'forecastPending' : 'unsupportedPending',
             submissionId: update.submissionId, organizationId: submission.organizationId,
             reason: item?.kind === 'forecast'
-            ? `Forecast submission ${update.submissionId} from organization ${submission.organizationId} is waiting for GCS forecast import support.`
-            : `Submission ${update.submissionId} from organization ${submission.organizationId} cannot yet be imported into GCS.` })
+              ? `Forecast submission ${update.submissionId} from organization ${submission.organizationId} is waiting for GCS forecast import support.`
+              : `Submission ${update.submissionId} from organization ${submission.organizationId} cannot yet be imported into GCS.` })
           continue
         }
         const entityId = item.kind === 'claim'
-          ? await importClaim(context, agencyId, update, submission)
-          : await importForecast(context, agencyId, update, submission)
+          ? await importClaim(context, agencyId, update, submission, client.write)
+          : await importForecast(context, agencyId, update, submission, client.write)
         await client.publishItemReference(update.submissionId, item.itemSubmissionId, entityId)
         await client.consume(update.eventId, entityId)
-        await asConnectorDb(context.db).updateTable('extensions.gcs_ssc_portal_connector_inbox')
+        await client.write(transaction => transaction.updateTable('extensions.gcs_ssc_portal_connector_inbox')
           .set({ last_error: null }).where('agency_id', '=', agencyId)
-          .where('event_id', '=', update.eventId).execute()
+          .where('event_id', '=', update.eventId).execute())
         imported.push({ itemSubmissionId: item.itemSubmissionId, kind: item.kind, entityId })
       } catch (error) {
         const reason = error instanceof Error ? error.message : 'Import failed.'
-        await asConnectorDb(context.db).updateTable('extensions.gcs_ssc_portal_connector_inbox')
+        await client.write(transaction => transaction.updateTable('extensions.gcs_ssc_portal_connector_inbox')
           .set({ last_error: reason.slice(0, 500) }).where('agency_id', '=', agencyId)
-          .where('event_id', '=', update.eventId).execute()
+          .where('event_id', '=', update.eventId).execute())
         pending.push({ eventId: update.eventId, reason })
       }
     }
     if (!batch.nextCursor) break
     after = batch.nextCursor
   }
-  await authorizedWrite(context, async (transaction) => {
+  await client.write(async (transaction) => {
     await transaction.updateTable('extensions.gcs_ssc_portal_connector_connection')
       .set({ scan_cursor: hasMore ? after ?? null : null })
       .where('agency_id', '=', agencyId).execute()

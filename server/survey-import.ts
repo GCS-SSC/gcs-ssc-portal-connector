@@ -6,7 +6,7 @@ import { surveySchema, answersSchema, validateSurveyAnswers } from '@gcs-ssc/sur
 import type { GcsExtensionRouteContext } from '@gcs-ssc/extensions/server'
 import type { PortalSubmission, PortalUpdate } from '../shared/portal-contract.ts'
 import { PortalImportDiagnostic, intakeResultDiagnostic } from '../shared/import-diagnostics.ts'
-import { authorizedWrite } from './authorization.ts'
+import type { PortalWrite } from './operations.ts'
 import type { createPortalClient } from './portal-client.ts'
 
 const externalId = z.string().regex(/^[1-9]\d{0,18}$/).refine(value => BigInt(value) <= BigInt('9223372036854775807'))
@@ -24,16 +24,27 @@ export const applicationNumericId = (sourceSystem: string, submissionId: string)
 
 const receiptReference = (id: string) => `portal-receipt:${id}`
 
-/** The original export is the idempotency evidence, including every form in an application. */
+/**
+ * The original export is the idempotency evidence, including every form in an application.
+ * @param context - Host services used for atomic Intake materialization.
+ * @param agencyId - Captured host Agency.
+ * @param update - Original feed item.
+ * @param submission - Original immutable submission.
+ * @param client - Client that fetched the submission.
+ * @param sourceSystem - Captured source-instance identity.
+ * @param write - Required local admission bound to that client's namespace.
+ * @returns The retained receipt or created Intake identity.
+ */
 export const importSurvey = async (context: GcsExtensionRouteContext, agencyId: string,
   update: PortalUpdate, submission: PortalSubmission, client: ReturnType<typeof createPortalClient>,
-  sourceSystem: string): Promise<{ kind: 'funding_application' | 'other_form'; entityId: string }> => {
+  sourceSystem: string, write: PortalWrite): Promise<{ kind: 'funding_application' | 'other_form'; entityId: string }> => {
   const parsedItem = surveyItem.safeParse(submission.items.find(candidate => candidate.itemSubmissionId === update.itemSubmissionId))
   if (!parsedItem.success) throw new PortalImportDiagnostic('importMalformedSubmission')
   const item = parsedItem.data
   if (submission.submissionId !== update.submissionId) throw new PortalImportDiagnostic('importMalformedSubmission')
   const application = submission.application === null || submission.application === undefined
-    ? null : applicationMapping.safeParse(submission.application)
+    ? null
+    : applicationMapping.safeParse(submission.application)
   if (application && !application.success) throw new PortalImportDiagnostic('importOpportunityMapping')
   const mapping = application?.success ? application.data : null
   const kind = mapping ? 'funding_application' : 'other_form'
@@ -43,7 +54,7 @@ export const importSurvey = async (context: GcsExtensionRouteContext, agencyId: 
     throw new PortalImportDiagnostic('importInvalidAnswers')
   if (!mapping && submission.sourceSystem !== 'gcs-ssc-form')
     throw new PortalImportDiagnostic('importUnsupportedSource')
-  return authorizedWrite(context, async transaction => {
+  return write(async transaction => {
     const identity = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_identity').select('proponent_id')
       .where('agency_id', '=', agencyId).where('portal_organization_id', '=', submission.organizationId).executeTakeFirst()
     if (!identity) throw new PortalImportDiagnostic('importUnverifiedOrganization')
@@ -84,10 +95,10 @@ export const importSurvey = async (context: GcsExtensionRouteContext, agencyId: 
       gcs_entity_type: mapping ? 'fundingcaseintake' : null, gcs_entity_id: intakeId, updated_at: new Date() }
     const receipt = existing
       ? await transaction.updateTable('extensions.gcs_ssc_portal_connector_receipt').set(values)
-        .where('id', '=', String(existing.id)).returning('id').executeTakeFirstOrThrow()
+          .where('id', '=', String(existing.id)).returning('id').executeTakeFirstOrThrow()
       : await transaction.insertInto('extensions.gcs_ssc_portal_connector_receipt').values({ ...values, agency_id: agencyId,
-        event_id: update.eventId, submission_id: submission.submissionId, item_submission_id: item.itemSubmissionId,
-        source_export: sql`${JSON.stringify(submission)}::jsonb` }).returning('id').executeTakeFirstOrThrow()
+          event_id: update.eventId, submission_id: submission.submissionId, item_submission_id: item.itemSubmissionId,
+          source_export: sql`${JSON.stringify(submission)}::jsonb` }).returning('id').executeTakeFirstOrThrow()
     return { kind, entityId: intakeId ?? receiptReference(String(receipt.id)) }
   })
 }

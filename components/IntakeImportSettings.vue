@@ -3,6 +3,7 @@ import { computed, ref, watch, type Ref } from 'vue'
 import { ExtensionAlert, ExtensionButton, ExtensionFormField, ExtensionSaveButton, ExtensionSelect,
   useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
 import { intakeSettingsMessages } from '../i18n/intake-settings'
+import { usePortalRequest } from './usePortalRequest'
 
 interface IntakeGroup { id: string; nameEn: string; nameFr: string }
 interface Settings { groups: IntakeGroup[]; intakeGroupId: string | null; ready: boolean }
@@ -11,12 +12,15 @@ const { t, locale } = useExtensionI18n(intakeSettingsMessages)
 const api = useExtensionApi('gcs-ssc-portal-connector')
 const groups: Ref<IntakeGroup[]> = ref([])
 const groupId: Ref<string | null> = ref(null)
-const loading = ref(false)
-const saving = ref(false)
-const loaded = ref(false)
-const failure: Ref<'loadFailed' | 'saveFailed' | null> = ref(null)
-const success = ref(false)
-let generation = 0
+const loadRequest = usePortalRequest()
+const saveRequest = usePortalRequest()
+const loading = loadRequest.pending
+const saving = saveRequest.pending
+const accepted: Ref<Settings | null> = ref(null)
+const loaded = computed(() => accepted.value !== null)
+const feedback: Ref<'none' | 'loadFailed' | 'saveFailed' | 'saved'> = ref('none')
+const failure = computed(() => feedback.value === 'loadFailed' || feedback.value === 'saveFailed' ? feedback.value : null)
+const success = computed(() => feedback.value === 'saved')
 const endpoint = computed(() => `/agencies/${props.agencyId}/intake-group-settings`)
 const selectedAvailable = computed(() => groupId.value !== null && groups.value.some(group => group.id === groupId.value))
 const noGroup = '__none__'
@@ -27,49 +31,58 @@ const options = computed(() => [
 ])
 const updateSelection = (value: unknown) => {
   groupId.value = typeof value === 'string' && value !== '' && value !== noGroup ? value : null
-  success.value = false
+  feedback.value = 'none'
 }
 const apply = (result: Settings) => {
   groups.value = result.groups
   groupId.value = result.intakeGroupId
-  loaded.value = true
+  accepted.value = result
 }
 const load = async () => {
-  const current = ++generation
-  loading.value = true
-  failure.value = null
+  const request = loadRequest.begin()
+  if (!request) return
+  saveRequest.invalidate()
+  const path = endpoint.value
+  feedback.value = 'none'
   try {
-    const result = await api.get<Settings>(endpoint.value)
-    if (current === generation) apply(result)
+    const result = await api.get<Settings>(path)
+    if (!loadRequest.isCurrent(request)) return
+    apply(result)
+    loadRequest.succeed(request)
   } catch {
-    if (current === generation) failure.value = 'loadFailed'
-  } finally {
-    if (current === generation) loading.value = false
+    if (!loadRequest.isCurrent(request)) return
+    feedback.value = 'loadFailed'
+    loadRequest.fail(request)
   }
 }
 const save = async () => {
   if (!loaded.value || props.readOnly || props.disabled || saving.value) return
-  const current = generation
-  saving.value = true
-  failure.value = null
-  success.value = false
+  const request = saveRequest.begin()
+  if (!request) return
+  const path = endpoint.value
+  const selectedGroup = groupId.value
+  feedback.value = 'none'
   try {
-    const result = await api.put<Settings>(endpoint.value, { intakeGroupId: groupId.value })
-    if (current === generation) { apply(result); success.value = true }
+    const result = await api.put<Settings>(path, { intakeGroupId: selectedGroup })
+    if (!saveRequest.isCurrent(request)) return
+    apply(result)
+    feedback.value = 'saved'
+    saveRequest.succeed(request)
   } catch {
-    if (current === generation) failure.value = 'saveFailed'
-  } finally {
-    if (current === generation) saving.value = false
+    if (!saveRequest.isCurrent(request)) return
+    feedback.value = 'saveFailed'
+    saveRequest.fail(request)
   }
 }
 watch(() => props.agencyId, () => {
+  loadRequest.invalidate()
+  saveRequest.invalidate()
   groups.value = []
   groupId.value = null
-  loaded.value = false
-  saving.value = false
-  success.value = false
+  accepted.value = null
+  feedback.value = 'none'
   void load()
-}, { immediate: true })
+}, { immediate: true, flush: 'sync' })
 </script>
 <template>
   <section :aria-label="t('title')" class="space-y-4" :aria-busy="loading || saving" data-field-scope="extension.gcs-ssc-portal-connector.intake-import-settings">

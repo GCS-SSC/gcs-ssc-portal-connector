@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { feedback, useLocalizedFeedback } from './localized-feedback'
-import { computed, nextTick, onMounted, ref, useId, watch } from 'vue'
+import { usePortalRequest } from './usePortalRequest'
+import { computed, nextTick, onMounted, ref, shallowRef, useId, watch } from 'vue'
 import { customAlphabet } from 'nanoid'
 import { grantConfigurationReady, emptyBudgetConfig, emptyActivityConfig, designerSurveySchema, upgradeToAdvancedSurvey, type AdvancedGroup, type AdvancedQuestion,
   type AdvancedSurvey, type FieldRule, type SurveyCondition } from '@gcs-ssc/survey'
@@ -21,7 +22,8 @@ import FormTest from './FormTest.vue'
 import { clearFormDraft, readFormDraft, writeFormDraft, writeFormSelection } from './form-draft-session'
 
 const props = defineProps<{ agencyId: string; disabled?: boolean; selectedFormId?: string; intakeId?: string;
-  opportunityId?: string; streamId?: string; standalone?: boolean; flowOnly?: boolean; initialView?: 'edit' | 'test' | 'publish' }>()
+  opportunityId?: string; streamId?: string; standalone?: boolean; flowOnly?: boolean; initialView?: 'edit' | 'test' | 'publish';
+  captureIntakeSettlement?: () => (() => Promise<'refreshed' | 'unavailable' | 'retired'>) | null }>()
 const emit = defineEmits<{ flow: [view: 'edit' | 'flow' | 'test' | 'publish']; close: []; saved: [id: string] }>()
 const { locale, t } = useExtensionI18n(messages)
 const language = computed<'en' | 'fr'>(() => /^fr(?:-|$)/i.test(locale.value) ? 'fr' : 'en')
@@ -49,10 +51,26 @@ const workflowTabs = computed(() => [
   ...(!props.intakeId && !props.opportunityId ? [{ key: 'publish', value: 'publish', label: t('formPublishTab'), icon: 'i-lucide-send' }] : []),
   { key: 'flow', value: 'flow', label: t('formFlowTab'), icon: 'i-lucide-git-branch' }
 ])
-const busy = ref(false), loading = ref(false), error = useLocalizedFeedback(t), message = useLocalizedFeedback(t)
+const catalogRequest = usePortalRequest()
+const formRequest = usePortalRequest()
+const mutationRequest = usePortalRequest()
+const initializationRequest = usePortalRequest()
+const busy = mutationRequest.pending
+const loading = computed(() => catalogRequest.pending.value || formRequest.pending.value)
+const error = useLocalizedFeedback(t), message = useLocalizedFeedback(t)
 const attachmentPending = ref(false)
+const attachmentOperationId = ref('')
+const attachmentFailure = () => feedback(props.opportunityId ? 'opportunityAttachFailed' : 'intakeAttachFailed')
 const syncPending = ref(false)
-const detailsOpen = ref(false)
+type DetailsSession = { kind: 'closed' } | { kind: 'editing' }
+const detailsSession = shallowRef<DetailsSession>({ kind: 'closed' })
+const detailsOpen = computed({
+  get: () => detailsSession.value.kind === 'editing',
+  set: (open: boolean) => {
+    if (open) detailsSession.value = { kind: 'editing' }
+    else if (!busy.value) detailsSession.value = { kind: 'closed' }
+  }
+})
 const detailsError = useLocalizedFeedback(t)
 const detailsDraft = ref({ titleEn: '', titleFr: '', introductionEn: '', introductionFr: '' })
 const introductionRequired = computed(() => Boolean(detailsDraft.value.introductionEn.trim() || detailsDraft.value.introductionFr.trim()))
@@ -104,6 +122,7 @@ const forSaving = (survey: AdvancedSurvey) => {
   return copy
 }
 const definition = ref<AdvancedSurvey>(newDefinition())
+const editorReady = computed(() => !props.selectedFormId || formId.value === props.selectedFormId)
 const createsLocalDraft = computed(() => Boolean(!formId.value && props.standalone && !props.intakeId && !props.opportunityId))
 const editingDetails = computed(() => Boolean(formId.value || (!createsLocalDraft.value
   && definition.value.title.en.trim() && definition.value.title.fr.trim())))
@@ -111,6 +130,7 @@ const editingDetails = computed(() => Boolean(formId.value || (!createsLocalDraf
  *
  */
 const openDetails = () => {
+  if (!editorReady.value) return
   detailsError.value = ''
   detailsDraft.value = {
     titleEn: definition.value.title.en, titleFr: definition.value.title.fr,
@@ -126,12 +146,15 @@ const applyDetails = async () => {
   const title = { en: detailsDraft.value.titleEn.trim(), fr: detailsDraft.value.titleFr.trim() }
   const introduction = { en: detailsDraft.value.introductionEn.trim(), fr: detailsDraft.value.introductionFr.trim() }
   if (createsLocalDraft.value) {
-    busy.value = true
+    const request = mutationRequest.begin()
+    if (!request) return
+    const session = detailsSession.value
     detailsError.value = ''
     try {
       const result = await api.post<{ survey: { id: string; revision: number } }>(`/agencies/${props.agencyId}/forms`, {
         action: 'createDraft', title, introduction
       })
+      if (!mutationRequest.isCurrent(request) || detailsSession.value !== session) return
       definition.value.title = title
       definition.value.description = introduction
       formId.value = result.survey.id
@@ -140,10 +163,13 @@ const applyDetails = async () => {
       saved.value = JSON.stringify(definition.value)
       clearFormDraft(draftOwner.value)
       message.value = feedback('formDetailsCreated')
-      detailsOpen.value = false
+      detailsSession.value = { kind: 'closed' }
       emit('saved', formId.value)
+      if (!mutationRequest.isCurrent(request)) return
       await load()
-    } catch { detailsError.value = feedback('formDetailsCreateFailed') } finally { busy.value = false }
+    } catch {
+      if (mutationRequest.isCurrent(request)) { detailsError.value = feedback('formDetailsCreateFailed'); mutationRequest.fail(request) }
+    } finally { mutationRequest.succeed(request) }
     return
   }
   definition.value.title = title
@@ -151,10 +177,11 @@ const applyDetails = async () => {
   detailsOpen.value = false
 }
 const cancelDetails = () => {
+  if (busy.value) return
   detailsOpen.value = false
   if (!formId.value && !definition.value.title.en.trim() && !definition.value.title.fr.trim()) emit('close')
 }
-const heroActions = computed(() => props.disabled
+const heroActions = computed(() => props.disabled || !editorReady.value
   ? []
   : [
       { label: t('formDetailsEdit'), icon: 'i-lucide-edit-3', color: 'neutral' as const,
@@ -169,7 +196,7 @@ const heroBadges = computed(() => [...(formId.value
   : []), ...(dirty.value ? [{ variant: 'code', label: t('formUnsavedChanges') }] : [])])
 const saved = ref(JSON.stringify(definition.value))
 const dirty = computed(() => JSON.stringify(definition.value) !== saved.value)
-const disabled = computed(() => props.disabled || busy.value)
+const disabled = computed(() => props.disabled || busy.value || !editorReady.value)
 const invalidLimit = (value: number, max: number) => !Number.isInteger(value) || value < 1 || value > max
 const endpoint = computed(() => props.opportunityId
   ? `/agencies/${props.agencyId}/opportunities/${props.opportunityId}/forms`
@@ -425,16 +452,22 @@ const pageDestinations = (page: AdvancedSurvey['pages'][number], includeNext = f
  *
  */
 const load = async () => {
-  loading.value = true; error.value = ''; formsLoaded.value = false
+  const request = catalogRequest.begin()
+  if (!request) return
+  const requestEndpoint = endpoint.value
+  error.value = attachmentPending.value ? attachmentFailure() : ''; formsLoaded.value = false
   try {
     const result = await api.get<{ surveys: Summary[]; programs: Program[]; streams: Stream[];
-      agreements: Agreement[]; organizations: Organization[] }>(endpoint.value)
+      agreements: Agreement[]; organizations: Organization[] }>(requestEndpoint)
+    if (!catalogRequest.isCurrent(request)) return
     surveys.value = result.surveys ?? []; programs.value = result.programs ?? []; streams.value = result.streams ?? []
     agreements.value = result.agreements ?? []; organizations.value = result.organizations ?? []
     const current = surveys.value.find(item => item.id === formId.value)
     if (current) syncPending.value = current.revision > 0 && current.synced === false
     formsLoaded.value = true
-  } catch { error.value = feedback('formLibraryLoadFailed') } finally { loading.value = false }
+  } catch {
+    if (catalogRequest.isCurrent(request)) { error.value = feedback('formLibraryLoadFailed'); catalogRequest.fail(request) }
+  } finally { catalogRequest.succeed(request) }
 }
 /**
  *
@@ -443,6 +476,8 @@ const resetForm = () => {
   formId.value = ''; revision.value = 0; definition.value = newDefinition()
   collapsedNodeIds.value = new Set<string>()
   syncPending.value = false
+  attachmentPending.value = false
+  attachmentOperationId.value = ''
   selectedContainerId.value = 'page_1'; selectedQuestionId.value = ''; tab.value = 'edit'
   saved.value = JSON.stringify(definition.value)
 }
@@ -452,21 +487,29 @@ const resetForm = () => {
  */
 const selectForm = async (id: string) => {
   if (dirty.value && !confirm(t('interfaceDiscardUnsavedFormChanges'))) return
+  formRequest.invalidate()
+  mutationRequest.invalidate()
+  detailsSession.value = { kind: 'closed' }
   error.value = ''; message.value = ''
   if (!id) {
     resetForm()
     return
   }
-  loading.value = true
+  const request = formRequest.begin()
+  if (!request) return
+  const requestEndpoint = `${endpoint.value}/${id}`
   try {
-    const result = await api.get<{ survey: { id: string; revision: number; definition: AdvancedSurvey; synced?: boolean } }>(`${endpoint.value}/${id}`)
+    const result = await api.get<{ survey: { id: string; revision: number; definition: AdvancedSurvey; synced?: boolean } }>(requestEndpoint)
+    if (!formRequest.isCurrent(request)) return
     formId.value = result.survey.id; revision.value = result.survey.revision
     syncPending.value = result.survey.revision > 0 && result.survey.synced === false
     definition.value = ensureEditableText(upgradeToAdvancedSurvey(result.survey.definition))
     collapsedNodeIds.value = new Set<string>()
     selectedContainerId.value = definition.value.pages[0]!.id; selectedQuestionId.value = ''; tab.value = 'edit'
     saved.value = JSON.stringify(definition.value)
-  } catch { error.value = feedback('interfaceTheFormCouldNotBeOpened') } finally { loading.value = false }
+  } catch {
+    if (formRequest.isCurrent(request)) { error.value = feedback('interfaceTheFormCouldNotBeOpened'); formRequest.fail(request) }
+  } finally { formRequest.succeed(request) }
 }
 /**
  *
@@ -476,6 +519,7 @@ const closeDesigner = () => {
   if (dirty.value && attachmentPending.value) definition.value = JSON.parse(saved.value) as AdvancedSurvey
   if (attachmentPending.value) persistDraft()
   else clearFormDraft(draftOwner.value)
+  initializationRequest.invalidate(); catalogRequest.invalidate(); formRequest.invalidate(); mutationRequest.invalidate()
   emit('close')
 }
 /**
@@ -483,6 +527,11 @@ const closeDesigner = () => {
  */
 const save = async () => {
   if (disabled.value) return
+  if (attachmentPending.value) {
+    await retryAttachment()
+    return
+  }
+  const submittedDraft = JSON.stringify(definition.value)
   const parsed = designerSurveySchema.safeParse(forSaving(definition.value))
   if (!parsed.success) {
     const fields = [...new Set(parsed.error.issues.map((issue) => {
@@ -504,45 +553,75 @@ const save = async () => {
     else tab.value = 'edit'
     return
   }
-  busy.value = true; error.value = ''; message.value = ''
+  const settleIntake = props.intakeId ? props.captureIntakeSettlement?.() : undefined
+  if (props.intakeId && props.captureIntakeSettlement && !settleIntake) return
+  const request = mutationRequest.begin()
+  if (!request) return
+  error.value = ''; message.value = ''
   try {
-    const result = await api.post<{ survey: { id: string; revision: number }; attached?: boolean; queued?: boolean }>(writeEndpoint.value, {
+    const result = await api.post<{ survey: { id: string; revision: number }; attached?: boolean; queued?: boolean; attachmentOperationId?: string }>(writeEndpoint.value, {
       action: props.opportunityId ? 'saveForm' : 'save',
       ...(formId.value ? { surveyId: formId.value, expectedRevision: revision.value } : {}),
       ...(props.intakeId ? { intakeId: props.intakeId } : {}),
       definition: parsed.data
     })
+    const settlement = settleIntake?.()
+    if (!mutationRequest.isCurrent(request)) {
+      await settlement
+      return
+    }
     formId.value = result.survey.id; revision.value = result.survey.revision
     syncPending.value = Boolean(result.queued)
-    definition.value = ensureEditableText(parsed.data); saved.value = JSON.stringify(definition.value)
-    attachmentPending.value = Boolean(props.intakeId && result.attached === false)
+    const committed = ensureEditableText(parsed.data)
+    saved.value = JSON.stringify(committed)
+    if (JSON.stringify(definition.value) === submittedDraft) definition.value = committed
+    attachmentPending.value = Boolean((props.intakeId || props.opportunityId) && result.attached === false)
+    attachmentOperationId.value = result.attachmentOperationId ?? ''
     if (!props.intakeId && !props.opportunityId) writeFormSelection(props.agencyId, formId.value)
-    if (attachmentPending.value) persistDraft()
-    else clearFormDraft(draftOwner.value)
+    persistDraft()
     message.value = attachmentPending.value
       ? ''
       : result.queued
         ? feedback('formQueuedSave')
         : feedback('interfaceFormRevisionSaved')
     emit('saved', formId.value)
+    await settlement
+    if (!mutationRequest.isCurrent(request)) return
     await load()
-    if (attachmentPending.value) error.value = feedback('intakeAttachFailed')
-  } catch { error.value = feedback('interfaceSaveFailedReloadIfAnotherEditorSavedANewerRevision') } finally { busy.value = false }
+    if (mutationRequest.isCurrent(request) && attachmentPending.value) error.value = attachmentFailure()
+  } catch {
+    if (mutationRequest.isCurrent(request)) { error.value = feedback('interfaceSaveFailedReloadIfAnotherEditorSavedANewerRevision'); mutationRequest.fail(request) }
+  } finally { mutationRequest.succeed(request) }
 }
 /**
  *
  */
 const retryAttachment = async () => {
-  if (!props.intakeId || !formId.value || !revision.value || disabled.value || busy.value) return
-  busy.value = true; error.value = ''; message.value = ''
+  if ((!props.intakeId && !props.opportunityId) || !formId.value || !revision.value || disabled.value || busy.value) return
+  if (props.opportunityId && !attachmentOperationId.value) return
+  const settleIntake = props.intakeId ? props.captureIntakeSettlement?.() : undefined
+  if (props.intakeId && props.captureIntakeSettlement && !settleIntake) return
+  const request = mutationRequest.begin()
+  if (!request) return
+  error.value = ''; message.value = ''
   try {
-    await api.post(endpoint.value, { action: 'attachIntakeForm', intakeId: props.intakeId,
-      surveyId: formId.value, revision: revision.value })
+    await api.post(writeEndpoint.value, props.opportunityId
+      ? { action: 'attachOpportunityForm', operationId: attachmentOperationId.value }
+      : { action: 'attachIntakeForm', intakeId: props.intakeId, surveyId: formId.value, revision: revision.value })
+    const settlement = settleIntake?.()
+    if (!mutationRequest.isCurrent(request)) {
+      await settlement
+      return
+    }
     attachmentPending.value = false
-    clearFormDraft(draftOwner.value)
-    message.value = feedback('intakeAttachSuccess')
+    attachmentOperationId.value = ''
+    persistDraft()
+    message.value = feedback(props.opportunityId ? 'opportunityAttachSuccess' : 'intakeAttachSuccess')
     emit('saved', formId.value)
-  } catch { error.value = feedback('intakeAttachFailed') } finally { busy.value = false }
+    await settlement
+  } catch {
+    if (mutationRequest.isCurrent(request)) { error.value = attachmentFailure(); mutationRequest.fail(request) }
+  } finally { mutationRequest.succeed(request) }
 }
 /**
  *
@@ -550,7 +629,9 @@ const retryAttachment = async () => {
  */
 const publish = async (action: 'publishAgreement' | 'publishScope' | 'publishOrganization') => {
   if (disabled.value || !readyToPublish.value) return
-  busy.value = true; error.value = ''; message.value = ''
+  const request = mutationRequest.begin()
+  if (!request) return
+  error.value = ''; message.value = ''
   try {
     const common = { surveyId: formId.value, revision: revision.value }
     const body = action === 'publishAgreement'
@@ -560,9 +641,12 @@ const publish = async (action: 'publishAgreement' | 'publishScope' | 'publishOrg
         ? { action, ...common, organizationId: organizationId.value }
         : { action, ...common, scope: publicationScope.value, scopeId: publicationScope.value === 'program' ? programId.value : batchStreamId.value }
     await api.post(endpoint.value, body)
+    if (!mutationRequest.isCurrent(request)) return
     message.value = feedback('formPublished')
     await load()
-  } catch { error.value = feedback('interfacePublicationFailedCheckTheSelectedTargetDatesAndSavedRevision') } finally { busy.value = false }
+  } catch {
+    if (mutationRequest.isCurrent(request)) { error.value = feedback('interfacePublicationFailedCheckTheSelectedTargetDatesAndSavedRevision'); mutationRequest.fail(request) }
+  } finally { mutationRequest.succeed(request) }
 }
 /**
  *
@@ -1066,14 +1150,16 @@ const destinationValue = (destination: AdvancedSurvey['pages'][number]['next']) 
 const restoreDraft = () => {
   const draft = readFormDraft(draftOwner.value)
   if (!draft || (draft.formId !== (props.selectedFormId ?? '')
-    && !(props.intakeId && draft.attachmentPending && !props.selectedFormId))) return false
-  if (draft.formId && formsLoaded.value && surveys.value.find((item) => item.id === draft.formId)?.revision !== draft.revision) {
+    && !((props.intakeId || props.opportunityId) && draft.attachmentPending && !props.selectedFormId))) return false
+  if (draft.formId && !draft.attachmentPending && formsLoaded.value && surveys.value.find((item) => item.id === draft.formId)?.revision !== draft.revision) {
     clearFormDraft(draftOwner.value)
     return false
   }
   formId.value = draft.formId; revision.value = draft.revision
   syncPending.value = draft.revision > 0 && surveys.value.find(item => item.id === draft.formId)?.synced === false
   attachmentPending.value = Boolean(draft.attachmentPending)
+  attachmentOperationId.value = draft.attachmentOperationId ?? ''
+  if (attachmentPending.value) error.value = attachmentFailure()
   definition.value = ensureEditableText(draft.definition); saved.value = draft.saved
   selectedContainerId.value = draft.selectedContainerId || definition.value.pages[0]?.id || 'page_1'
   selectedQuestionId.value = draft.selectedQuestionId || ''
@@ -1087,6 +1173,7 @@ const restoreDraft = () => {
  *
  */
 const persistDraft = () => {
+  if (initializationRequest.pending.value) return
   if (!dirty.value && !attachmentPending.value) { clearFormDraft(draftOwner.value); return }
   writeFormDraft(draftOwner.value, {
     formId: formId.value, revision: revision.value, definition: definition.value,
@@ -1094,24 +1181,33 @@ const persistDraft = () => {
     selectedQuestionId: selectedQuestionId.value, tab: tab.value, publicationScope: publicationScope.value,
     agreementId: agreementId.value, organizationId: organizationId.value,
     programId: programId.value, batchStreamId: batchStreamId.value,
-    attachmentPending: attachmentPending.value
+    attachmentPending: attachmentPending.value, attachmentOperationId: attachmentOperationId.value
   })
 }
-onMounted(async () => {
-  if (!props.selectedFormId) {
+const initialize = async () => {
+  const request = initializationRequest.begin()
+  if (!request) return
+  const selectedFormId = props.selectedFormId
+  if (!selectedFormId) {
     restoreDraft()
     if (!formId.value) openDetails()
     void load()
+    initializationRequest.succeed(request)
     return
   }
   await load()
-  if (!restoreDraft()) await selectForm(props.selectedFormId)
+  if (!initializationRequest.isCurrent(request)) return
+  if (!restoreDraft()) await selectForm(selectedFormId)
+  if (!initializationRequest.isCurrent(request)) return
   tab.value = props.flowOnly ? 'flow' : props.initialView ?? (tab.value === 'flow' ? 'edit' : tab.value)
   await nextTick()
+  if (!initializationRequest.isCurrent(request)) return
   routeReady.value = true
-})
+  initializationRequest.succeed(request)
+}
+onMounted(initialize)
 watch([definition, formId, revision, saved, selectedContainerId, selectedQuestionId, tab,
-  publicationScope, agreementId, organizationId, programId, batchStreamId, attachmentPending],
+  publicationScope, agreementId, organizationId, programId, batchStreamId, attachmentPending, attachmentOperationId],
 persistDraft, { deep: true })
 watch(tab, value => {
   if (routeReady.value && props.standalone && Boolean(props.flowOnly) !== (value === 'flow')) {
@@ -1120,10 +1216,16 @@ watch(tab, value => {
   }
 })
 watch(language, (value) => { previewLocale.value = value })
-watch(() => props.agencyId, () => {
+watch(() => props.disabled, () => mutationRequest.invalidate(), { flush: 'sync' })
+watch(() => [props.agencyId, props.intakeId, props.opportunityId, props.selectedFormId], () => {
+  initializationRequest.invalidate(); catalogRequest.invalidate(); formRequest.invalidate(); mutationRequest.invalidate()
+  detailsSession.value = { kind: 'closed' }
+  routeReady.value = false
+  attachmentPending.value = false
+  error.value = ''; message.value = ''; detailsError.value = ''
   resetForm(); surveys.value = []; programs.value = []; streams.value = []
-  agreements.value = []; organizations.value = []; void load()
-})
+  agreements.value = []; organizations.value = []; void initialize()
+}, { flush: 'sync' })
 </script>
 
 <template>
@@ -1137,7 +1239,10 @@ watch(() => props.agencyId, () => {
     <p v-if="loading" role="status">
       {{ t('interfaceLoadingForms') }}
     </p>
-    <ExtensionEntityEditorWorkspace content-test-id="form-detail-content">
+    <ExtensionButton v-if="!editorReady && !loading && error" color="neutral" variant="outline" @click="initialize">
+      {{ t('formLibraryRetry') }}
+    </ExtensionButton>
+    <ExtensionEntityEditorWorkspace v-if="editorReady" content-test-id="form-detail-content">
       <template #sidebar>
         <ExtensionTranslatedTabs ordering="localized" data-field-container="Page navigation state, not a business input field."
           v-model="tab" :items="workflowTabs" :external-panel-id="editorPanelId" :priority-values="['edit', 'test', 'publish', 'flow']" orientation="vertical"
@@ -1705,6 +1810,9 @@ watch(() => props.agencyId, () => {
         {{ t('intakeAttachRetry') }}
       </ExtensionButton>
     </ExtensionEntityEditorWorkspace>
+    <p v-if="!editorReady && error" role="alert" class="text-sm text-error">
+      {{ error }}
+    </p>
     <ExtensionModal :open="Boolean(pendingDeleteQuestion)" :title="t('formDeleteQuestionTitle')" @update:open="!$event && (pendingDeleteId = null)">
       <template #body>
         <p>{{ t('formDeleteQuestionConfirm', { question: pendingDeleteQuestion?.label[language] ?? '' }) }}</p>

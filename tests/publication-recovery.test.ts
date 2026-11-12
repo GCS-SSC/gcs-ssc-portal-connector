@@ -1,12 +1,12 @@
 import { expect, it, vi } from 'vitest'
 
+import { publishAgreementCore } from '../server/publish-agreement.ts'
+
 const projectAgreement = vi.hoisted(() => vi.fn())
 const queuePortalClient = vi.hoisted(() => vi.fn())
 vi.mock('../server/agreement-projection.ts', () => ({ projectAgreement }))
 vi.mock('../server/operations.ts', () => ({ queuePortalClient }))
 vi.mock('../server/connection.ts', () => ({ readPortalCredentialFromDb: async () => 'credential' }))
-
-import { publishAgreementCore } from '../server/publish-agreement.ts'
 
 it.each(['source', 'status selection', 'remote revision'])('publishes new revision sets after partial delivery and changed %s', async change => {
   queuePortalClient.mockClear()
@@ -22,12 +22,13 @@ it.each(['source', 'status selection', 'remote revision'])('publishes new revisi
   projectAgreement.mockImplementation(async () => structuredClone(source))
   const connection = { portal_url: 'https://portal.example/', portal_agency_id: 'G-ABCDE', portal_status_ids: [] as string[] }
   const db = {
+
     selectFrom: (table: string) => {
       const query = { select: () => query, selectAll: () => query, where: () => query,
         executeTakeFirst: async () => table.endsWith('verification') ? { portal_organization_id: 'N-ABCDE' } : connection }
       return query
     },
-    transaction: () => ({ execute: async (run: (transaction: unknown) => Promise<void>) => run({
+    transaction: () => ({ execute: async <T>(run: (transaction: unknown) => Promise<T>) => run({
       insertInto: () => ({ values: () => ({ onConflict: () => ({ execute: async () => {} }) }) })
     }) })
   }
@@ -35,7 +36,7 @@ it.each(['source', 'status selection', 'remote revision'])('publishes new revisi
   const sets: Array<Record<string, any>> = []
   const replay = new Map<string, unknown>()
   let failForecast = true
-  queuePortalClient.mockImplementation((_db, _agency, _connection, scope: string) => {
+  queuePortalClient.mockImplementation((_db, _agency, _connection, _admission, scope: string) => {
     const once = async (step: string, body: unknown, run: () => unknown) => {
       const key = `${scope}:${step}:${JSON.stringify(body)}`
       if (replay.has(key)) return replay.get(key)
@@ -44,6 +45,7 @@ it.each(['source', 'status selection', 'remote revision'])('publishes new revisi
       return result
     }
     return {
+      write: (operation: (transaction: unknown) => Promise<unknown>) => db.transaction().execute(operation),
       structure: async () => ({ programs: [{ id: 'P-ABCDE', sourceSystem: 'gcs-ssc', foreignSystemId: '11' }],
         streams: [{ id: 'S-ABCDE', sourceSystem: 'gcs-ssc', foreignSystemId: '21' }] }),
       agreements: async () => ({ agreements: agreement ? [structuredClone(agreement)] : [] }),
@@ -57,6 +59,7 @@ it.each(['source', 'status selection', 'remote revision'])('publishes new revisi
       }),
       linkOrganization: async () => {},
       sets: async () => ({ sets: structuredClone(sets) }),
+
       createSet: (input: Record<string, any>) => once('create-set', input, () => {
         if (input.items[0].kind === 'forecast' && failForecast) {
           failForecast = false
@@ -66,12 +69,14 @@ it.each(['source', 'status selection', 'remote revision'])('publishes new revisi
         sets.push(set)
         return { id: set.id, revision: set.revision }
       }),
+
       withdrawSet: (id: string, revision: number) => once(`withdraw:${id}`, revision, () => {
         const set = sets.find(row => row.id === id)!
         set.published = false
         set.revision++
         return {}
       }),
+
       publishSet: (id: string, revision: number) => once(`publish:${id}`, revision, () => {
         const set = sets.find(row => row.id === id)!
         set.published = true
@@ -82,17 +87,17 @@ it.each(['source', 'status selection', 'remote revision'])('publishes new revisi
     }
   })
   const input = { agreementId: '31', proponentId: '61', portalOrganizationId: 'N-ABCDE' }
-  await expect(publishAgreementCore(db as never, '1', input, 'agreement-delivery:71')).rejects.toThrow('Portal unavailable')
+  await expect(publishAgreementCore(db as never, '1', input, { kind: 'worker' }, 'agreement-delivery:71')).rejects.toThrow('Portal unavailable')
   expect(sets.filter(row => row.published)).toHaveLength(1)
   if (change === 'source') source.agreement.title_en = 'Updated Agreement'
   else if (change === 'status selection') connection.portal_status_ids.push('91')
   else agreement!.revision++
-  const result = await publishAgreementCore(db as never, '1', input, 'agreement-delivery:71')
+  const result = await publishAgreementCore(db as never, '1', input, { kind: 'worker' }, 'agreement-delivery:71')
   expect(result.revision).toBe(2)
   const published = sets.filter(row => row.published)
   expect(published).toHaveLength(2)
   expect(published.every(row => row.snapshot.agreement.revision === 2)).toBe(true)
   expect(result.setIds).toEqual(published.map(row => row.id))
-  const setScopes = queuePortalClient.mock.calls.map(call => call[3]).filter(scope => scope.includes(':sets:'))
+  const setScopes = queuePortalClient.mock.calls.map(call => call[4]).filter(scope => scope.includes(':sets:'))
   expect(setScopes).toEqual(['agreement-delivery:71:sets:A-ABCDE:1', 'agreement-delivery:71:sets:A-ABCDE:2'])
 })

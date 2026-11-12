@@ -6,7 +6,7 @@ import { enabledPortalAgency } from './enablement.ts'
 import { publishAgreementCore } from './publish-agreement.ts'
 import { drainOutcomeOutbox } from './outcomes.ts'
 import { retryDelaySeconds } from './retry.ts'
-import { drainOperations } from './operations.ts'
+import { capturePortalWrite, drainOperations, type PortalWrite } from './operations.ts'
 
 interface OutboxRow {
   id: string
@@ -47,23 +47,36 @@ export const drainOutbox = async (db: ConnectorDb, limit: number, agencyId?: str
         portal_organization_id, proponent_id::text, attempts
     `.execute(db)).rows[0]
     if (!row) break
+    let write: PortalWrite | null = null
     try {
+      const connection = await db.selectFrom('extensions.gcs_ssc_portal_connector_connection')
+        .select(['portal_url', 'portal_agency_id']).where('agency_id', '=', row.agency_id).executeTakeFirst()
+      if (!connection) throw new Error('Connect an organization portal before publishing.')
+      write = capturePortalWrite(db, row.agency_id, {
+        portalUrl: connection.portal_url, portalAgencyId: connection.portal_agency_id
+      }, { kind: 'worker' })
       const publication = await publishAgreementCore(db, row.agency_id, {
         agreementId: row.agreement_id, proponentId: row.proponent_id,
         portalOrganizationId: row.portal_organization_id
-      }, `agreement-delivery:${row.id}`)
-      await sql`UPDATE extensions.gcs_ssc_portal_connector_outbox SET state='delivered', delivered_at=now(),
+      }, { kind: 'worker' }, `agreement-delivery:${row.id}`)
+      await write(transaction => sql`UPDATE extensions.gcs_ssc_portal_connector_outbox SET state='delivered', delivered_at=now(),
         updated_at=now(), last_error=NULL,
         delivery_payload=${JSON.stringify(publication.deliveryPayload)}::jsonb WHERE id=${row.id}::bigint
-        AND state='leased' AND attempts=${row.attempts}`.execute(db)
+        AND state='leased' AND attempts=${row.attempts}`.execute(transaction))
       results.push({ id: row.id, delivered: true })
     } catch (error) {
       const message = error instanceof Error ? error.message.slice(0, 500) : 'Unknown delivery error'
       const seconds = retryDelaySeconds(row.attempts)
-      await sql`UPDATE extensions.gcs_ssc_portal_connector_outbox SET state='pending', last_error=${message},
+      /**
+       * @param transaction - Current namespace transaction, or local pre-transport failure database.
+       * @returns The lease-guarded retry update.
+       */
+      const settleFailure = async (transaction: ConnectorDb) => sql`UPDATE extensions.gcs_ssc_portal_connector_outbox SET state='pending', last_error=${message},
         next_attempt_at=now() + (${seconds} || ' seconds')::interval,
         updated_at=now() WHERE id=${row.id}::bigint
-        AND state='leased' AND attempts=${row.attempts}`.execute(db)
+        AND state='leased' AND attempts=${row.attempts}`.execute(transaction)
+      if (write) await write(settleFailure).catch(() => undefined)
+      else await settleFailure(db)
       results.push({ id: row.id, delivered: false, error: message })
     }
   }
@@ -100,12 +113,12 @@ export const listOutbox = async (context: GcsExtensionRouteContext) => {
     target: row.kind === 'form' ? row.form_id ?? '' : `${row.method} ${row.path}`,
     state: row.state, attempts: row.attempts, nextAttemptAt: new Date(row.next_attempt_at).toISOString(),
     lastError: row.last_error })),
-    outcomes: outcomes.map((row) => ({ id: String(row.id), submissionId: row.submission_id,
+  outcomes: outcomes.map((row) => ({ id: String(row.id), submissionId: row.submission_id,
     kind: row.kind, state: row.state, attempts: row.attempts,
     nextAttemptAt: new Date(row.next_attempt_at).toISOString(), lastError: row.last_error })),
-    inbound: inbound.map((row) => ({ eventId: row.event_id, kind: row.kind,
+  inbound: inbound.map((row) => ({ eventId: row.event_id, kind: row.kind,
     submissionId: row.submission_id, state: row.state ?? 'pending', lastError: row.last_error })),
-    backlog: rows.map((row) => ({
+  backlog: rows.map((row) => ({
     id: String(row.id), agreementId: String(row.agreement_id),
     organizationId: row.portal_organization_id, state: row.state,
     attempts: row.attempts, nextAttemptAt: new Date(row.next_attempt_at).toISOString(),
@@ -142,13 +155,15 @@ export const pushOutbox = async (context: GcsExtensionRouteContext) => {
   const all = 'all' in input
   const limit = all ? 100 : input.limit
   const pendingCount = await authorizedWrite(context, async transaction => {
-    const count = all ? (await sql<{ count: string }>`
+    const count = all
+      ? (await sql<{ count: string }>`
       SELECT (
         (SELECT count(*) FROM extensions.gcs_ssc_portal_connector_outbox WHERE agency_id=${agencyId}::bigint AND state='pending')
         + (SELECT count(*) FROM extensions.gcs_ssc_portal_connector_outcome_outbox WHERE agency_id=${agencyId}::bigint AND state='pending')
         + (SELECT count(*) FROM extensions.gcs_ssc_portal_connector_operation WHERE agency_id=${agencyId}::bigint AND state='pending')
       )::text AS count
-    `.execute(transaction)).rows[0]?.count : undefined
+    `.execute(transaction)).rows[0]?.count
+      : undefined
     await sql`
       UPDATE extensions.gcs_ssc_portal_connector_operation SET next_attempt_at=now()
       WHERE id IN (SELECT id FROM extensions.gcs_ssc_portal_connector_operation

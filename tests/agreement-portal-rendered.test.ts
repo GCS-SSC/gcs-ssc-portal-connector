@@ -154,6 +154,7 @@ describe('agreement portal rendered publication flow', () => {
     hostApi.get.mockRejectedValueOnce(new Error('recipients unavailable'))
     const wrapper = await render()
     expect(wrapper.get('[role=alert]').text()).toBe('Agreement recipients could not be loaded.')
+    expect(api.get).toHaveBeenCalledWith('/agencies/1/agreements/2/publications')
     current.locale = 'fr'
     await flushPromises()
     expect(wrapper.get('[role=alert]').text()).toBe('Impossible de charger les bénéficiaires de l’entente.')
@@ -176,4 +177,78 @@ describe('agreement portal rendered publication flow', () => {
     expect(wrapper.find('[role=status]').exists()).toBe(false)
     expect(wrapper.find('select').exists()).toBe(true)
   })
+  it('rejects delayed recipient evidence after the Agreement identity changes', async () => {
+    let finish: (value: { items: typeof recipient[] }) => void = () => {}
+    hostApi.get.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const wrapper = await render()
+    hostApi.get.mockResolvedValue({ items: [{ ...recipient, egcs_fc_applicantrecipient: '8', applicant_recipient_name_en: 'Current recipient' }] })
+    await wrapper.setProps({ agreementId: '3' })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Current recipient')
+    finish({ items: [recipient] })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Health association')
+    expect(wrapper.text()).toContain('Current recipient')
+    expect(api.get).not.toHaveBeenCalledWith('/agencies/1/agreements/2/publications')
+  })
+
+  it('clears old publications synchronously and ignores their delayed response', async () => {
+    let finish: (value: { publications: typeof publication[] }) => void = () => {}
+    api.get.mockImplementation(async (path: string) => {
+      if (path.endsWith('/connection')) return { connection }
+      if (path.includes('/agreements/2/')) return new Promise(resolve => { finish = resolve })
+      return { publications: [{ ...publication, organizationId: 'N-CURRENT' }] }
+    })
+    const wrapper = await render()
+    await wrapper.setProps({ agreementId: '3' })
+    await flushPromises()
+    expect(wrapper.text()).toContain('N-CURRENT')
+    finish({ publications: [publication] })
+    await flushPromises()
+    expect(wrapper.text()).toContain('N-CURRENT')
+    expect(wrapper.text()).not.toContain('N-ABCDE')
+    await wrapper.setProps({ agreementId: '' })
+    expect(wrapper.text()).not.toContain('N-CURRENT')
+    expect(wrapper.find('button').exists()).toBe(false)
+  })
+
+  it('does not let a previous Agreement publication refresh or change the new subject', async () => {
+    const wrapper = await render()
+    await wrapper.get('input').setValue('N-ABCDE')
+    let finish: (value: { agreementId: string; setIds: string[] }) => void = () => {}
+    api.post.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    await wrapper.get('button').trigger('click')
+    await wrapper.setProps({ agencyId: '10', agreementId: '20' })
+    await flushPromises()
+    const publicationReads = api.get.mock.calls.filter(([path]) => path.endsWith('/publications')).length
+    finish({ agreementId: 'old-result', setIds: [] })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('old-result')
+    expect(wrapper.get('button').attributes('aria-busy')).toBe('false')
+    expect(api.get.mock.calls.filter(([path]) => path.endsWith('/publications'))).toHaveLength(publicationReads)
+  })
+
+  it('does not continue loading publications after scope disposal', async () => {
+    let finish: (value: { items: typeof recipient[] }) => void = () => {}
+    hostApi.get.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const wrapper = await render()
+    wrapper.unmount()
+    finish({ items: [recipient] })
+    await flushPromises()
+    expect(api.get).not.toHaveBeenCalledWith('/agencies/1/agreements/2/publications')
+  })
+
+  it('does not refresh publications after an in-flight publication outlives its scope', async () => {
+    const wrapper = await render()
+    await wrapper.get('input').setValue('N-ABCDE')
+    let finish: (value: { agreementId: string; setIds: string[] }) => void = () => {}
+    api.post.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    await wrapper.get('button').trigger('click')
+    const publicationReads = api.get.mock.calls.filter(([path]) => path.endsWith('/publications')).length
+    wrapper.unmount()
+    finish({ agreementId: 'old-result', setIds: [] })
+    await flushPromises()
+    expect(api.get.mock.calls.filter(([path]) => path.endsWith('/publications'))).toHaveLength(publicationReads)
+  })
+
 })

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { feedback, useLocalizedFeedback } from './localized-feedback'
 import { computed, ref, watch } from 'vue'
+import { usePortalRequest } from './usePortalRequest'
 import type { ExtensionEntityTabContext } from '@gcs-ssc/extensions'
 import { ExtensionBadge, ExtensionButton, ExtensionResourceLayout, useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
 import { messages } from '../i18n/messages'
@@ -43,39 +44,55 @@ watch(() => filteredForms.value.length, total => {
 const published = ref(false)
 const canWrite = ref(false)
 const editing = ref<string | null>(null)
-const loading = ref(false)
-const busy = ref(false)
+const loadRequest = usePortalRequest()
+const writeRequest = usePortalRequest()
+const loading = loadRequest.pending
+const busy = writeRequest.pending
 const error = useLocalizedFeedback(t)
 const message = useLocalizedFeedback(t)
-let sequence = 0
 const load = async () => {
-  const current = ++sequence
-  loading.value = true; error.value = ''
+  const request = loadRequest.begin()
+  if (!request) return
+  const endpoint = readEndpoint.value
+  error.value = ''
   try {
-    const result = await api.get<{ forms: Form[]; published: boolean; canWrite: boolean }>(readEndpoint.value)
-    if (current !== sequence) return
+    const result = await api.get<{ forms: Form[]; published: boolean; canWrite: boolean }>(endpoint)
+    if (!loadRequest.isCurrent(request)) return
     forms.value = result.forms
     published.value = result.published
     canWrite.value = result.canWrite
+    loadRequest.succeed(request)
   } catch {
-    if (current === sequence) error.value = feedback('opportunityFormsLoadFailed')
-  } finally { if (current === sequence) loading.value = false }
+    if (!loadRequest.isCurrent(request)) return
+    error.value = feedback('opportunityFormsLoadFailed')
+    loadRequest.fail(request)
+  }
 }
 watch(() => [agencyId.value, opportunityId.value], () => {
+  loadRequest.invalidate()
+  writeRequest.invalidate()
   editing.value = null; forms.value = []; published.value = false; canWrite.value = false
   search.value = ''; pagination.value.pageIndex = 0; message.value = ''; void load()
-}, { immediate: true })
+}, { immediate: true, flush: 'sync' })
 const changeForms = async (next: Form[]) => {
   if (!editable.value) return
-  busy.value = true; error.value = ''; message.value = ''
+  const request = writeRequest.begin()
+  if (!request) return
+  const endpoint = writeEndpoint.value
+  error.value = ''; message.value = ''
   try {
-    await api.post(writeEndpoint.value, { action: 'saveForms', forms: next.map(form => ({
+    await api.post(endpoint, { action: 'saveForms', forms: next.map(form => ({
       surveyId: form.surveyId, revision: form.revision
     })) })
+    if (!writeRequest.isCurrent(request)) return
     message.value = feedback('opportunityFormsOrderSaved')
     await load()
-  } catch { error.value = feedback('opportunityFormsSaveFailed') }
-  finally { busy.value = false }
+    writeRequest.succeed(request)
+  } catch {
+    if (!writeRequest.isCurrent(request)) return
+    error.value = feedback('opportunityFormsSaveFailed')
+    writeRequest.fail(request)
+  }
 }
 const move = (index: number, direction: -1 | 1) => {
   const next = [...forms.value]
@@ -86,18 +103,25 @@ const move = (index: number, direction: -1 | 1) => {
 }
 const act = async (action: 'publish' | 'withdraw') => {
   if (busy.value || loading.value || !writable.value) return
-  busy.value = true; error.value = ''; message.value = ''
+  const request = writeRequest.begin()
+  if (!request) return
+  const endpoint = writeEndpoint.value
+  error.value = ''; message.value = ''
   try {
-    await api.post(writeEndpoint.value, { action })
+    await api.post(endpoint, { action })
+    if (!writeRequest.isCurrent(request)) return
     message.value = action === 'publish'
       ? feedback('opportunityFormsPublished')
       : feedback('opportunityFormsWithdrawn')
     await load()
+    writeRequest.succeed(request)
   } catch {
+    if (!writeRequest.isCurrent(request)) return
     error.value = action === 'publish'
       ? feedback('opportunityFormsPublishFailed')
       : feedback('opportunityFormsWithdrawFailed')
-  } finally { busy.value = false }
+    writeRequest.fail(request)
+  }
 }
 </script>
 

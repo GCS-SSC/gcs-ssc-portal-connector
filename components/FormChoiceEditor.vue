@@ -5,12 +5,15 @@ import { ExtensionButton, ExtensionFormField, ExtensionInput, ExtensionModal, Ex
 import { messages } from '../i18n/messages'
 
 type Choice = { value: string; label: { en: string; fr: string } }
+type ChoiceSession = { kind: 'closed' } | { kind: 'create'; draft: Choice } | { kind: 'edit'; draft: Choice }
 const props = defineProps<{ options: Choice[]; disabled: boolean; questionId: string }>()
 const emit = defineEmits<{ 'update:options': [options: Choice[]] }>()
 const { locale, t } = useExtensionI18n(messages)
-const draft: Ref<Choice | null> = ref(null)
+const session: Ref<ChoiceSession> = ref({ kind: 'closed' })
+const draft = computed(() => session.value.kind === 'closed' ? null : session.value.draft)
 const removing: Ref<Choice | null> = ref(null)
-const isNew: Ref<boolean> = ref(false)
+const isNew = computed(() => session.value.kind === 'create')
+const close = () => { session.value = { kind: 'closed' } }
 const columns = computed(() => [{ id: 'english', accessorKey: 'english', header: t('formChoiceEnglish') }, { id: 'french', accessorKey: 'french', header: t('formChoiceFrench') }, { id: 'actions', header: t('formChoiceActions') }])
 const rows = computed(() => props.options.map(option => ({ ...option, english: option.label.en, french: option.label.fr })))
 /**
@@ -18,25 +21,28 @@ const rows = computed(() => props.options.map(option => ({ ...option, english: o
  * @param choice - Existing option to edit, or omit to add.
  */
 const edit = (choice?: Choice) => {
-  isNew.value = !choice
-  draft.value = choice ? { value: choice.value, label: { ...choice.label } } : { value: `option_${nanoid(12)}`, label: { en: '', fr: '' } }
+  session.value = choice
+    ? { kind: 'edit', draft: { value: choice.value, label: { ...choice.label } } }
+    : { kind: 'create', draft: { value: `option_${nanoid(12)}`, label: { en: '', fr: '' } } }
 }
 /** Retain stable IDs when renaming a choice. */
 const save = () => {
-  if (props.disabled || !draft.value?.label.en.trim() || !draft.value.label.fr.trim()) return
-  const option = { value: draft.value.value, label: { en: draft.value.label.en.trim(), fr: draft.value.label.fr.trim() } }
-  emit('update:options', isNew.value ? [...props.options, option] : props.options.map(item => item.value === option.value ? option : item))
-  draft.value = null
+  const current = session.value
+  if (props.disabled || current.kind === 'closed' || !current.draft.label.en.trim() || !current.draft.label.fr.trim()) return
+  const option = { value: current.draft.value, label: { en: current.draft.label.en.trim(), fr: current.draft.label.fr.trim() } }
+  emit('update:options', current.kind === 'create' ? [...props.options, option] : props.options.map(item => item.value === option.value ? option : item))
+  close()
 }
 /** Remove a confirmed option while keeping a usable choice catalog. */
 const remove = () => {
-  if (!props.disabled && removing.value && props.options.length > 1) emit('update:options', props.options.filter(item => item.value !== removing.value!.value))
+  const selected = removing.value
+  if (!props.disabled && selected && props.options.length > 1) emit('update:options', props.options.filter(item => item.value !== selected.value))
   removing.value = null
 }
 watch(() => props.questionId, () => {
-  draft.value = null
+  close()
   removing.value = null
-})
+}, { flush: 'sync' })
 </script>
 
 <template>
@@ -54,7 +60,7 @@ watch(() => props.questionId, () => {
         </div>
       </template>
     </ExtensionTable>
-    <ExtensionModal :open="Boolean(draft)" :title="t(isNew ? 'formChoiceAdd' : 'formChoiceEdit')" @update:open="!$event && (draft = null)">
+    <ExtensionModal :open="Boolean(draft)" :title="t(isNew ? 'formChoiceAdd' : 'formChoiceEdit')" @update:open="!$event && close()">
       <template #body>
         <form v-if="draft" class="space-y-4" @submit.prevent="save">
           <ExtensionFormField :label="t('formChoiceEnglish')" name="choiceEn" required>
@@ -64,7 +70,7 @@ watch(() => props.questionId, () => {
             <ExtensionInput v-model="draft.label.fr" name="choiceFr" required maxlength="200" :disabled="disabled" />
           </ExtensionFormField>
           <div class="flex justify-end gap-2">
-            <ExtensionButton type="button" color="neutral" variant="outline" @click="draft = null">
+            <ExtensionButton type="button" color="neutral" variant="outline" @click="close">
               {{ t('formDetailsCancel') }}
             </ExtensionButton><ExtensionButton type="submit" :disabled="disabled || !draft.label.en.trim() || !draft.label.fr.trim()">
               {{ t('formChoiceSave') }}

@@ -3,7 +3,7 @@ import { readPortalCredentialFromDb } from './connection.ts'
 import { asConnectorDb, type ConnectorDb } from './db.ts'
 import { enabledPortalAgency } from './enablement.ts'
 import { retryDelaySeconds } from './retry.ts'
-import { queuePortalClient } from './operations.ts'
+import { queuePortalClient, type PortalWrite } from './operations.ts'
 
 interface LeasedOutcome { id: string; agency_id: string; receipt_id: string; attempts: number }
 interface OutcomeSource {
@@ -34,6 +34,7 @@ export const drainOutcomeOutbox = async (db: ConnectorDb, limit: number, agencyI
       RETURNING id::text,agency_id::text,receipt_id::text,attempts
     `.execute(db)).rows[0]
     if (!row) break
+    let write: PortalWrite | null = null
     try {
       const source = (await sql<OutcomeSource>`
         SELECT receipt.submission_id,receipt.item_submission_id,
@@ -55,27 +56,36 @@ export const drainOutcomeOutbox = async (db: ConnectorDb, limit: number, agencyI
       `.execute(db)).rows[0]
       if (!source?.gcs_entity_id) throw new Error('The imported GCS item is unavailable.')
       const selectedIds = source.gcs_entity_type === 'fundingcaseagreementclaim'
-        ? source.entity_status_ids.claim : source.gcs_entity_type === 'fundingcaseintake'
-          ? source.entity_status_ids.funding_application : source.entity_status_ids.forecast
+        ? source.entity_status_ids.claim
+        : source.gcs_entity_type === 'fundingcaseintake'
+          ? source.entity_status_ids.funding_application
+          : source.entity_status_ids.forecast
       const visible = source.status_id && selectedIds.includes(source.status_id)
         && source.status_en && source.status_fr && source.status_colour
         && /^#[0-9a-fA-F]{6}$/.test(source.status_colour)
       const status = visible ? { en: source.status_en!, fr: source.status_fr!, colour: source.status_colour! } : null
       const client = queuePortalClient(db, row.agency_id, { portalUrl: source.portal_url,
         portalAgencyId: source.portal_agency_id,
-        key: await readPortalCredentialFromDb(asConnectorDb(db), row.agency_id) }, `outcome-delivery:${row.id}`)
+        key: await readPortalCredentialFromDb(asConnectorDb(db), row.agency_id) }, { kind: 'worker' }, `outcome-delivery:${row.id}`)
+      write = client.write
       await client.publishItemStatus(source.submission_id, source.item_submission_id,
         source.gcs_entity_id, status)
-      await sql`UPDATE extensions.gcs_ssc_portal_connector_outcome_outbox SET state='delivered', delivered_at=now(),
+      await write(transaction => sql`UPDATE extensions.gcs_ssc_portal_connector_outcome_outbox SET state='delivered', delivered_at=now(),
         updated_at=now(),last_error=NULL WHERE id=${row.id}::bigint
-        AND state='leased' AND attempts=${row.attempts}`.execute(db)
+        AND state='leased' AND attempts=${row.attempts}`.execute(transaction))
       results.push({ id: row.id, delivered: true })
     } catch (error) {
       const message = error instanceof Error ? error.message.slice(0, 500) : 'Outcome delivery failed'
       const seconds = retryDelaySeconds(row.attempts)
-      await sql`UPDATE extensions.gcs_ssc_portal_connector_outcome_outbox SET state='pending',last_error=${message},
+      /**
+       * @param transaction - Current namespace transaction, or local pre-transport failure database.
+       * @returns The lease-guarded retry update.
+       */
+      const settleFailure = async (transaction: ConnectorDb) => sql`UPDATE extensions.gcs_ssc_portal_connector_outcome_outbox SET state='pending',last_error=${message},
         next_attempt_at=now()+(${seconds} || ' seconds')::interval,updated_at=now()
-        WHERE id=${row.id}::bigint AND state='leased' AND attempts=${row.attempts}`.execute(db)
+        WHERE id=${row.id}::bigint AND state='leased' AND attempts=${row.attempts}`.execute(transaction)
+      if (write) await write(settleFailure).catch(() => undefined)
+      else await settleFailure(db)
       results.push({ id: row.id, delivered: false, error: message })
     }
   }

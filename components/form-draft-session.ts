@@ -87,6 +87,7 @@ export type FormDraftSession = {
   programId: string
   batchStreamId: string
   attachmentPending?: boolean
+  attachmentOperationId?: string
 }
 
 const key = (agencyId: string, kind: 'selection' | 'draft') => `gcs-ssc-portal-connector:forms:${agencyId}:${kind}`
@@ -120,6 +121,7 @@ export const readFormDraft = (agencyId: string): FormDraftSession | null => {
     if (typeof record.formId !== 'string' || typeof record.saved !== 'string'
       || typeof record.revision !== 'number' || !record.definition
       || (record.attachmentPending !== undefined && typeof record.attachmentPending !== 'boolean')
+      || (record.attachmentOperationId !== undefined && !z.string().regex(/^(?:[1-9]\d{0,18})?$/).safeParse(record.attachmentOperationId).success)
       || !draftTab.safeParse(record.tab).success || !draftScope.safeParse(record.publicationScope).success) return null
     // Complete saved forms use the authoritative schema. Partially edited drafts use a
     // structural subset that preserves empty fields while rejecting malformed nested data.

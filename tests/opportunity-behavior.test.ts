@@ -2,6 +2,7 @@ import { Kysely, sql } from 'kysely'
 import { KyselyPGlite } from 'kysely-pglite'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setEncryptedExtensionSecret, type GcsExtensionRouteContext } from '@gcs-ssc/extensions/server'
+import { drainOperations } from '../server/operations.ts'
 import { asConnectorDb } from '../server/db.ts'
 import migration from '../server/migrations/0010_portal_operations.ts'
 import { getOpportunityForm, listOpportunityForms, manageOpportunity } from '../server/opportunities.ts'
@@ -28,7 +29,8 @@ let summaries: boolean
 let allow: boolean
 let projectAvailable: boolean
 let denial: boolean
-const requests: Array<{ path: string; method: string; body: unknown }> = []
+let attachmentFails: boolean
+const requests: Array<{ path: string; method: string; body: unknown; key: string | null; bytes: string | null }> = []
 const transport = vi.fn<typeof fetch>()
 const context = (body: unknown = { action: 'publish' }, ownerId = '44', agencyId = '1') => ({
   db, params: { agencyId, opportunityId: '44', formId: 'V-ABCDE' },
@@ -44,7 +46,7 @@ const structure = () => ({ programs: hasProgram ? [{ id: 'P-ABCDE', sourceSystem
 beforeAll(async () => {
   for (const command of `CREATE SCHEMA extensions;
     CREATE TABLE "Agency_Profile" (id bigint PRIMARY KEY,_deleted boolean DEFAULT false);
-    INSERT INTO "Agency_Profile" VALUES (1,false);
+    INSERT INTO "Agency_Profile" VALUES (1,false),(2,false);
     CREATE TABLE extensions.agency_enablement (agency_id bigint,extension_key text,enabled boolean,_deleted boolean);
     INSERT INTO extensions.agency_enablement VALUES (1,'gcs-ssc-portal-connector',true,false);
     CREATE TABLE extensions.gcs_ssc_portal_connector_connection (agency_id bigint PRIMARY KEY,portal_url text,portal_agency_id text);
@@ -61,13 +63,17 @@ beforeAll(async () => {
 beforeEach(async () => {
   projection = structuredClone(originalProjection); call = structuredClone(originalCall)
   hasProgram = true; hasStream = true; readBack = true; revision = 1; translated = true; summaries = true
-  allow = true; projectAvailable = true; denial = false; requests.length = 0
+  allow = true; projectAvailable = true; denial = false; attachmentFails = false; requests.length = 0
   await sql`TRUNCATE extensions.gcs_ssc_portal_connector_operation`.execute(db)
   transport.mockReset().mockImplementation(async (url, options) => {
     const path = new URL(String(url)).pathname.replace('/api/government/', '')
     const method = options?.method ?? 'GET'
     const body: unknown = options?.body ? JSON.parse(String(options.body)) : null
-    requests.push({ path, method, body })
+    requests.push({ path, method, body, key: new Headers(options?.headers).get('Idempotency-Key'), bytes: options?.body ? String(options.body) : null })
+    if (method === 'PUT' && path.endsWith('/forms')) {
+      if (attachmentFails) return new Response('Unavailable', { status: 503 })
+      if (call) call.forms = (body as { forms: typeof call.forms }).forms
+    }
     if (method === 'GET') {
       if (path === 'agencies/G-ABCDE') return Response.json(structure())
       if (path === 'agencies/G-ABCDE/surveys') return Response.json({ surveys: summaries ? [
@@ -79,7 +85,7 @@ beforeEach(async () => {
     if (path === 'programs') return Response.json({ program: { id: 'P-ABCDE' } })
     if (path === 'streams') return Response.json({ stream: { id: 'S-ABCDE' } })
     if (path === 'calls' && readBack) call = structuredClone(originalCall)
-    if (path === 'surveys' || path.startsWith('surveys/')) return Response.json({ survey: { id: path === 'surveys' ? 'V-BCDEF' : 'V-ABCDE', revision: 2 } })
+    if (path === 'surveys' || path.startsWith('surveys/')) return Response.json({ survey: { id: path === 'surveys' ? 'V-BCDEF' : path.split('/')[1], revision: 2 } })
     return Response.json({ id: 'D-ABCDE' })
   })
   vi.stubGlobal('fetch', transport); vi.stubEnv('GCS_EXTENSION_SECRETS_KEY', rootKey)
@@ -167,4 +173,56 @@ describe('opportunity lifecycle through the real connector queue', () => {
     else await expect(manageOpportunity(context())).rejects.toThrow(mode === 'no-forms' ? 'at least one form' : mode === 'stale' ? 'latest form revision' : 'English and French')
     expect(requests.filter(item => item.method === 'PATCH')).toHaveLength(mode === 'ready' ? 1 : 0)
   })
+  it.each(['worker', 'interactive'])('retains partial create identity and retries the exact attachment through %s recovery', async recovery => {
+    attachmentFails = true
+    const partial = await manageOpportunity(context({ action: 'saveForm', definition }))
+    expect(partial).toMatchObject({ survey: { id: 'V-BCDEF', revision: 2 }, attached: false,
+      attachmentOperationId: expect.stringMatching(/^[1-9]\d*$/) })
+    if (!('attachmentOperationId' in partial) || !partial.attachmentOperationId) throw new Error('Expected partial attachment receipt')
+    const retry = { action: 'attachOpportunityForm', operationId: partial.attachmentOperationId }
+    const original = await asConnectorDb(db).selectFrom('extensions.gcs_ssc_portal_connector_operation')
+      .selectAll().where('id', '=', partial.attachmentOperationId).executeTakeFirstOrThrow()
+    expect(original.state).toBe('pending')
+    await expect(manageOpportunity(context(retry))).rejects.toThrow('queued behind')
+    expect(requests.filter(item => item.path.endsWith('/forms'))).toHaveLength(1)
+    attachmentFails = false
+    await sql`UPDATE extensions.gcs_ssc_portal_connector_operation SET next_attempt_at=now()`.execute(db)
+    if (recovery === 'worker') expect((await drainOperations(asConnectorDb(db), 10)).results)
+      .toEqual([{ id: partial.attachmentOperationId, delivered: true, response: { id: 'D-ABCDE' } }])
+    expect(await manageOpportunity(context(retry))).toEqual({ attached: true })
+    expect(await manageOpportunity(context(retry))).toEqual({ attached: true })
+    const attachments = requests.filter(item => item.path.endsWith('/forms'))
+    expect(attachments).toHaveLength(2)
+    expect(attachments[1]).toEqual(attachments[0])
+    expect(attachments[0]?.key).toBe(original.idempotency_key)
+    expect(call?.forms).toEqual([form, { surveyId: 'V-BCDEF', revision: 2 }])
+    expect(requests.filter(item => item.method === 'POST' && item.path === 'surveys')).toHaveLength(1)
+    expect(await asConnectorDb(db).selectFrom('extensions.gcs_ssc_portal_connector_operation')
+      .selectAll().where('id', '=', partial.attachmentOperationId).executeTakeFirstOrThrow()).toMatchObject({
+      state: 'delivered', attempts: 2, body: original.body, idempotency_key: original.idempotency_key
+    })
+    await manageOpportunity(context({ action: 'saveForm', surveyId: 'V-BCDEF', expectedRevision: 2,
+      definition: { ...definition, title: { en: 'Later edits', fr: 'Modifications' } } }))
+    expect(requests.filter(item => item.method === 'POST' && item.path === 'surveys')).toHaveLength(1)
+    expect(requests.filter(item => item.path === 'surveys/V-BCDEF').at(-1)?.body).toMatchObject({ expectedRevision: 2 })
+  })
+
+  it.each(['agency', 'call', 'kind', 'method', 'missing', 'locked'])('rejects %s attachment receipt substitution before delivery', async mismatch => {
+    attachmentFails = true
+    const partial = await manageOpportunity(context({ action: 'saveForm', definition }))
+    if (!('attachmentOperationId' in partial) || !partial.attachmentOperationId) throw new Error('Expected partial attachment receipt')
+    if (mismatch === 'agency') await sql`UPDATE extensions.gcs_ssc_portal_connector_operation SET agency_id=2`.execute(db)
+    if (mismatch === 'call') await sql`UPDATE extensions.gcs_ssc_portal_connector_operation SET path='calls/D-BCDEF/forms'`.execute(db)
+    if (mismatch === 'kind') {
+      await sql`INSERT INTO extensions.gcs_ssc_portal_connector_form (id,agency_id,definition) VALUES ('local',1,${JSON.stringify(definition)}::jsonb) ON CONFLICT DO NOTHING`.execute(db)
+      await sql`UPDATE extensions.gcs_ssc_portal_connector_operation SET kind='form',method=NULL,path=NULL,form_id='local'`.execute(db)
+    }
+    if (mismatch === 'method') await sql`UPDATE extensions.gcs_ssc_portal_connector_operation SET method='POST'`.execute(db)
+    if (mismatch === 'locked' && projection) projection.editable = false
+    const before = requests.length
+    await expect(manageOpportunity(context({ action: 'attachOpportunityForm',
+      operationId: mismatch === 'missing' ? '99999' : partial.attachmentOperationId }))).rejects.toThrow()
+    expect(requests.slice(before).filter(item => item.method !== 'GET')).toEqual([])
+  })
+
 })

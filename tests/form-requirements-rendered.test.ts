@@ -110,8 +110,8 @@ vi.mock('@gcs-ssc/extensions/ui', async () => {
     setup(props) { return () => h('header', { 'data-form-hero': '' }, [
       h('h1', String(props.title)), h('p', String(props.description ?? '')),
       ...(props.badges as Array<{label?: string}> ?? []).map(badge => h('span', badge.label)),
-      ...(props.actions as Array<{ label: string; onClick: () => void }> ?? [])
-        .map(action => h('button', { onClick: action.onClick }, action.label))
+      ...(props.actions as Array<{ label: string; disabled?: boolean; onClick: () => void }> ?? [])
+        .map(action => h('button', { disabled: action.disabled, onClick: action.onClick }, action.label))
     ]) }
   })
   const routeTabs = defineComponent({
@@ -163,6 +163,7 @@ vi.mock('@gcs-ssc/extensions/ui', async () => {
 })
 
 import FormChoiceEditor from '../components/FormChoiceEditor.vue'
+import { ExtensionInput } from '@gcs-ssc/extensions/ui'
 import FormCreator from '../components/FormCreator.vue'
 import FormFieldRules from '../components/FormFieldRules.vue'
 import FormLibrary from '../components/FormLibrary.vue'
@@ -173,7 +174,7 @@ import FormTestControl from '../components/FormTestControl.vue'
 import type { SurveyField } from '@gcs-ssc/survey/vue'
 import { ExtensionSelect, ExtensionModal, ExtensionResourceLayout } from '@gcs-ssc/extensions/ui'
 import type { FlowDiagramDefinition } from '@gcs-ssc/extensions/ui'
-import { readFormDraft } from '../components/form-draft-session'
+import { readFormDraft, writeFormDraft } from '../components/form-draft-session'
 import PortalConnection from '../components/PortalConnection.vue'
 import ProponentVerification from '../components/ProponentVerification.vue'
 
@@ -228,8 +229,10 @@ describe('connector form requirements', () => {
     await button(wrapper, 'Application').trigger('click')
     await button(wrapper, 'Create application form').trigger('click')
     expect(wrapper.findComponent(FormCreator).exists()).toBe(true)
+    const settleIntake = wrapper.findComponent(FormCreator).props('captureIntakeSettlement')?.()
+    expect(settleIntake).toBeTypeOf('function')
     item.published = true
-    wrapper.findComponent(FormCreator).vm.$emit('saved', 'V-ABCDE')
+    await settleIntake?.()
     await flushPromises()
     expect(wrapper.findComponent(FormCreator).exists()).toBe(false)
     expect(button(wrapper, '← All intake opportunities').exists()).toBe(true)
@@ -2544,6 +2547,341 @@ describe('answer rule references during form editing', () => {
     await wrapper.get('[role=dialog]').findAll('button').find(item => item.text() === 'Delete question')!.trigger('click')
     expect(wrapper.findAll('[data-question-id]')).toHaveLength(2)
     expect(wrapper.text()).toContain('is used by an answer rule in')
+    wrapper.unmount()
+  })
+})
+
+describe('authoring request ownership', () => {
+  const definitionFor = (title: string): AdvancedSurvey => ({ schemaVersion: 3,
+    title: { en: title, fr: `${title} français` },
+    questions: [{ id: 'question', type: 'text', label: { en: 'Name', fr: 'Nom' }, required: false, maxLength: 100 }],
+    pages: [{ id: 'page', title: { en: 'Page', fr: 'Page' }, questionIds: ['question'], groups: [], branches: [] }] })
+
+  const deferred = <T,>() => {
+    let resolve!: (value: T) => void
+    let reject!: (reason: Error) => void
+    const promise = new Promise<T>((resolvePromise, rejectPromise) => { resolve = resolvePromise; reject = rejectPromise })
+    return { promise, resolve, reject }
+  }
+  const catalog = { surveys: [], programs: [], streams: [], agreements: [], organizations: [] }
+
+  const opportunityDraft = () => {
+    const definition = definitionFor('Opportunity draft')
+    writeFormDraft('1:opportunity:44', { formId: '', revision: 0, definition, saved: '',
+      selectedContainerId: 'page', selectedQuestionId: '', tab: 'edit', publicationScope: 'agreement',
+      agreementId: '', organizationId: '', programId: '', batchStreamId: '' })
+  }
+
+  it.each(['en', 'fr'] as const)('adopts a partial Opportunity save and retries its receipt after reopen in %s', async locale => {
+    state.locale = locale
+    opportunityDraft()
+    const pending = deferred<unknown>()
+    post.mockReturnValueOnce(pending.promise)
+    const wrapper = mount(FormCreator, { props: { agencyId: '1', opportunityId: '44' } })
+    await flushPromises()
+    const saveLabel = locale === 'en' ? 'Save revision' : 'Enregistrer la version'
+    const retryLabel = locale === 'en' ? 'Retry attaching form' : 'Réessayer d’associer le formulaire'
+    await button(wrapper, saveLabel).trigger('click')
+    await button(wrapper, saveLabel).trigger('click')
+    expect(post).toHaveBeenCalledTimes(1)
+    expect(post.mock.calls[0]).toEqual(['/agencies/1/opportunities/44', expect.objectContaining({ action: 'saveForm' })])
+    // A later controlled update must not be replaced by the submitted snapshot.
+    wrapper.findAllComponents(ExtensionInput).find(input => input.attributes('name') === 'groupTitleEn')!.vm.$emit('update:modelValue', 'Later page edit')
+    await flushPromises()
+    pending.resolve({ survey: { id: 'V-ABCDE', revision: 2 }, attached: false, attachmentOperationId: '123' })
+    await flushPromises()
+    expect(wrapper.find('[role="alert"]').text()).toContain(locale === 'en' ? 'could not be attached to this opportunity' : 'associée à cette occasion')
+    expect(readFormDraft('1:opportunity:44')).toMatchObject({ formId: 'V-ABCDE', revision: 2, attachmentPending: true,
+      attachmentOperationId: '123', definition: { pages: [expect.objectContaining({ title: { en: 'Later page edit', fr: 'Page' } })] } })
+    expect(readFormDraft('1:opportunity:44')?.saved).not.toContain('Later page edit')
+    wrapper.unmount()
+    const reopened = mount(FormCreator, { props: { agencyId: '1', opportunityId: '44' } })
+    await flushPromises()
+    expect(reopened.get('input[name="groupTitleEn"]').element).toHaveProperty('value', 'Later page edit')
+    expect(button(reopened, retryLabel)).toBeDefined()
+    post.mockRejectedValueOnce(new Error('not due yet'))
+    await button(reopened, saveLabel).trigger('click')
+    await flushPromises()
+    expect(post.mock.calls[1]).toEqual(['/agencies/1/opportunities/44', { action: 'attachOpportunityForm', operationId: '123' }])
+    expect(reopened.find('[role="alert"]').exists()).toBe(true)
+    post.mockResolvedValueOnce({ attached: true })
+    await button(reopened, retryLabel).trigger('click')
+    await flushPromises()
+    expect(post.mock.calls[2]).toEqual(post.mock.calls[1])
+    expect(button(reopened, retryLabel)).toBeUndefined()
+    expect(readFormDraft('1:opportunity:44')).toMatchObject({ formId: 'V-ABCDE', revision: 2, attachmentPending: false })
+    post.mockResolvedValueOnce({ survey: { id: 'V-ABCDE', revision: 3 }, attached: true })
+    await button(reopened, saveLabel).trigger('click')
+    await flushPromises()
+    expect(post.mock.calls[3]).toEqual(['/agencies/1/opportunities/44', expect.objectContaining({ action: 'saveForm',
+      surveyId: 'V-ABCDE', expectedRevision: 2, definition: expect.objectContaining({
+        pages: [expect.objectContaining({ title: { en: 'Later page edit', fr: 'Page' } })]
+      }) })])
+    expect(readFormDraft('1:opportunity:44')).toBeNull()
+    reopened.unmount()
+  })
+
+  it.each(['opportunity', 'selection', 'unmount'] as const)('suppresses partial-save settlement after %s replacement', async replacement => {
+    opportunityDraft()
+    const pending = deferred<unknown>()
+    post.mockReturnValue(pending.promise)
+    const wrapper = mount(FormCreator, { props: { agencyId: '1', opportunityId: '44' } })
+    await flushPromises()
+    await button(wrapper, 'Save revision').trigger('click')
+    if (replacement === 'opportunity') await wrapper.setProps({ opportunityId: '45' })
+    if (replacement === 'selection') await wrapper.setProps({ selectedFormId: 'V-BCDEF' })
+    if (replacement === 'unmount') wrapper.unmount()
+    await flushPromises()
+    const reads = get.mock.calls.length
+    pending.resolve({ survey: { id: 'V-ABCDE', revision: 2 }, attached: false, attachmentOperationId: '123' })
+    await flushPromises()
+    expect(wrapper.emitted('saved')).toBeUndefined()
+    expect(get).toHaveBeenCalledTimes(reads)
+    expect(readFormDraft('1:opportunity:45')?.formId ?? '').not.toBe('V-ABCDE')
+    if (replacement !== 'unmount') {
+      expect(wrapper.text()).not.toContain('could not be attached')
+      expect(button(wrapper, 'Retry attaching form')).toBeUndefined()
+      wrapper.unmount()
+    }
+  })
+
+  it('retains attachment feedback on current retry failure and suppresses a replaced retry result', async () => {
+    opportunityDraft()
+    post.mockResolvedValueOnce({ survey: { id: 'V-ABCDE', revision: 2 }, attached: false, attachmentOperationId: '123' })
+    const wrapper = mount(FormCreator, { props: { agencyId: '1', opportunityId: '44' } })
+    await flushPromises()
+    await button(wrapper, 'Save revision').trigger('click')
+    await flushPromises()
+    const retry = deferred<unknown>()
+    post.mockReturnValueOnce(retry.promise)
+    await button(wrapper, 'Retry attaching form').trigger('click')
+    expect(post.mock.calls.at(-1)).toEqual(['/agencies/1/opportunities/44', { action: 'attachOpportunityForm', operationId: '123' }])
+    await wrapper.setProps({ opportunityId: '45' })
+    await flushPromises()
+    retry.resolve({ attached: true })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('attached to this opportunity')
+    expect(button(wrapper, 'Retry attaching form')).toBeUndefined()
+    expect(wrapper.emitted('saved')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it.each(['en', 'fr'] as const)('admits existing-form edits only after the initial catalog and form reads in %s', async locale => {
+    state.locale = locale
+    const catalogRead = deferred<typeof catalog>()
+    const formRead = deferred<unknown>()
+    get.mockImplementation((path: string) => path.endsWith('/forms') ? catalogRead.promise : formRead.promise)
+    const wrapper = mount(FormCreator, { props: { agencyId: '1', selectedFormId: 'old' } })
+    const addPage = locale === 'en' ? 'Add page' : 'Ajouter une page'
+    const saveRevision = locale === 'en' ? 'Save revision' : 'Enregistrer la version'
+    await flushPromises()
+    expect(wrapper.find('[role="status"]').exists()).toBe(true)
+    expect(wrapper.find('[data-form-workspace]').exists()).toBe(false)
+    expect(button(wrapper, addPage)).toBeUndefined()
+    expect(button(wrapper, saveRevision)).toBeUndefined()
+    expect(wrapper.find('.designer-back').exists()).toBe(true)
+    catalogRead.resolve(catalog)
+    await flushPromises()
+    expect(get).toHaveBeenCalledWith('/agencies/1/forms/old')
+    expect(wrapper.find('[data-form-workspace]').exists()).toBe(false)
+    expect(button(wrapper, addPage)).toBeUndefined()
+    formRead.resolve({ survey: { id: 'old', revision: 4, definition: definitionFor('Saved form') } })
+    await flushPromises()
+    expect(wrapper.find('[role="status"]').exists()).toBe(false)
+    expect(button(wrapper, addPage).attributes('disabled')).toBeUndefined()
+    await button(wrapper, addPage).trigger('click')
+    expect(wrapper.findAll('.designer-sidebar-item')).toHaveLength(2)
+    expect(readFormDraft('1')).toMatchObject({ formId: 'old', revision: 4, definition: { pages: expect.any(Array) } })
+    expect(readFormDraft('1')?.definition.pages).toHaveLength(2)
+    await button(wrapper, saveRevision).trigger('click')
+    await flushPromises()
+    expect(post).toHaveBeenCalledWith('/agencies/1/forms', expect.objectContaining({ action: 'save', surveyId: 'old', expectedRevision: 4,
+      definition: expect.objectContaining({ pages: expect.arrayContaining([expect.objectContaining({ id: 'page' })]) }) }))
+    wrapper.unmount()
+  })
+
+  it.each(['en', 'fr'] as const)('keeps failed existing-form admission closed and retries the read in %s', async locale => {
+    state.locale = locale
+    const failedRead = deferred<unknown>()
+    const retryRead = deferred<unknown>()
+    get.mockImplementation((path: string) => path.endsWith('/forms') ? Promise.resolve(catalog) : failedRead.promise)
+    const wrapper = mount(FormCreator, { props: { agencyId: '1', selectedFormId: 'old' } })
+    await flushPromises()
+    failedRead.reject(new Error('offline'))
+    await flushPromises()
+    expect(wrapper.find('[role="alert"]').exists()).toBe(true)
+    expect(wrapper.find('[data-form-workspace]').exists()).toBe(false)
+    expect(post).not.toHaveBeenCalled()
+    get.mockImplementation((path: string) => path.endsWith('/forms') ? Promise.resolve(catalog) : retryRead.promise)
+    await button(wrapper, locale === 'en' ? 'Try again' : 'Réessayer').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.find('[role="status"]').exists()).toBe(true)
+    expect(wrapper.find('[data-form-workspace]').exists()).toBe(false)
+    retryRead.resolve({ survey: { id: 'old', revision: 2, definition: definitionFor('Recovered') } })
+    await flushPromises()
+    expect(wrapper.get('h1').text()).toBe(locale === 'en' ? 'Recovered' : 'Recovered français')
+    expect(wrapper.find('[data-form-workspace]').exists()).toBe(true)
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('preserves new-form metadata and page edits while its catalog is pending', async () => {
+    const catalogRead = deferred<typeof catalog>()
+    get.mockReturnValue(catalogRead.promise)
+    const wrapper = mount(FormCreator, { props: { agencyId: '1', intakeId: 'intake' } })
+    await flushPromises()
+    expect(wrapper.find('[role="status"]').exists()).toBe(true)
+    expect(wrapper.get('input[name="formTitleEn"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('input[name="formTitleEn"]').setValue('New application')
+    await wrapper.get('input[name="formTitleFr"]').setValue('Nouvelle demande')
+    await button(wrapper, 'Continue to designer').trigger('click')
+    await button(wrapper, 'Add page').trigger('click')
+    catalogRead.resolve(catalog)
+    await flushPromises()
+    expect(wrapper.get('h1').text()).toBe('New application')
+    expect(wrapper.findAll('.designer-sidebar-item')).toHaveLength(2)
+    expect(readFormDraft('1:intake:intake')?.definition.pages).toHaveLength(2)
+    expect(post).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('admits a restored dirty draft without replacing it with the server definition', async () => {
+    const accepted = definitionFor('Accepted')
+    const edited = definitionFor('Unsaved title')
+    writeFormDraft('1', { formId: 'old', revision: 3, definition: edited, saved: JSON.stringify(accepted),
+      selectedContainerId: 'page', selectedQuestionId: '', tab: 'edit', publicationScope: 'agreement',
+      agreementId: '', organizationId: '', programId: '', batchStreamId: '', attachmentPending: false })
+    get.mockResolvedValue({ ...catalog, surveys: [{ id: 'old', revision: 3, synced: true }] })
+    const wrapper = mount(FormCreator, { props: { agencyId: '1', selectedFormId: 'old' } })
+    await flushPromises()
+    expect(wrapper.get('h1').text()).toBe('Unsaved title')
+    expect(wrapper.get('[data-form-hero]').text()).toContain('Unsaved changes')
+    expect(get).toHaveBeenCalledTimes(1)
+    await button(wrapper, 'Add page').trigger('click')
+    expect(wrapper.findAll('.designer-sidebar-item')).toHaveLength(2)
+    post.mockRejectedValue(new Error('revision conflict'))
+    await button(wrapper, 'Save revision').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.designer-sidebar-item')).toHaveLength(2)
+    expect(wrapper.get('h1').text()).toBe('Unsaved title')
+    expect(wrapper.get('[role="alert"]').text()).toContain('Save failed')
+    expect(post).toHaveBeenCalledWith('/agencies/1/forms', expect.objectContaining({ surveyId: 'old', expectedRevision: 3 }))
+    wrapper.unmount()
+  })
+
+  it('keeps replacement admission closed when the previous form read settles', async () => {
+    const oldRead = deferred<unknown>()
+    const newRead = deferred<unknown>()
+    get.mockImplementation((path: string) => path.endsWith('/forms') ? Promise.resolve(catalog)
+      : path.endsWith('/old') ? oldRead.promise : newRead.promise)
+    const wrapper = mount(FormCreator, { props: { agencyId: '1', selectedFormId: 'old' } })
+    await flushPromises()
+    await wrapper.setProps({ agencyId: '2', selectedFormId: 'new' })
+    await flushPromises()
+    oldRead.resolve({ survey: { id: 'old', revision: 1, definition: definitionFor('Obsolete') } })
+    await flushPromises()
+    expect(wrapper.find('[data-form-workspace]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Obsolete')
+    newRead.resolve({ survey: { id: 'new', revision: 2, definition: definitionFor('Replacement') } })
+    await flushPromises()
+    expect(wrapper.get('h1').text()).toBe('Replacement')
+    await button(wrapper, 'Add page').trigger('click')
+    expect(readFormDraft('2')).toMatchObject({ formId: 'new', revision: 2 })
+    wrapper.unmount()
+  })
+
+  it('does not admit or persist a form after the pending editor is disposed', async () => {
+    const formRead = deferred<unknown>()
+    get.mockImplementation((path: string) => path.endsWith('/forms') ? Promise.resolve(catalog) : formRead.promise)
+    const wrapper = mount(FormCreator, { props: { agencyId: '1', selectedFormId: 'old' } })
+    await flushPromises()
+    wrapper.unmount()
+    formRead.resolve({ survey: { id: 'old', revision: 1, definition: definitionFor('Departed') } })
+    await flushPromises()
+    expect(readFormDraft('1')).toBeNull()
+    expect(wrapper.emitted('saved')).toBeUndefined()
+    expect(post).not.toHaveBeenCalled()
+    expect(get).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps the replacement form when a previous subject finishes loading later', async () => {
+    let finishOld!: (value: unknown) => void
+    get.mockImplementation((path: string) => path.endsWith('/forms/old')
+      ? new Promise(resolve => { finishOld = resolve })
+      : path.endsWith('/forms/new')
+        ? Promise.resolve({ survey: { id: 'new', revision: 1, definition: definitionFor('Replacement') } })
+        : Promise.resolve({ surveys: [], programs: [], streams: [], agreements: [], organizations: [] }))
+    const wrapper = mount(FormCreator, { props: { agencyId: '1', selectedFormId: 'old' } })
+    await flushPromises()
+    await wrapper.setProps({ agencyId: '2', selectedFormId: 'new' })
+    await flushPromises()
+    expect(wrapper.get('h1').text()).toBe('Replacement')
+    finishOld({ survey: { id: 'old', revision: 1, definition: definitionFor('Obsolete') } })
+    await flushPromises()
+    expect(wrapper.get('h1').text()).toBe('Replacement')
+    expect(wrapper.find('[role="status"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('does not apply an old save or emit saved into a replacement editing session', async () => {
+    let finishSave!: (value: unknown) => void
+    get.mockImplementation(async (path: string) => path.endsWith('/forms/old')
+      ? { survey: { id: 'old', revision: 1, definition: definitionFor('Original') } }
+      : path.endsWith('/forms/new')
+        ? { survey: { id: 'new', revision: 1, definition: definitionFor('Replacement') } }
+        : { surveys: [], programs: [], streams: [], agreements: [], organizations: [] })
+    post.mockImplementation(() => new Promise(resolve => { finishSave = resolve }))
+    const wrapper = mount(FormCreator, { props: { agencyId: '1', selectedFormId: 'old' } })
+    await flushPromises()
+    await button(wrapper, 'Save revision').trigger('click')
+    expect(post).toHaveBeenCalledWith('/agencies/1/forms', expect.objectContaining({ surveyId: 'old' }))
+    await wrapper.setProps({ selectedFormId: 'new' })
+    await flushPromises()
+    finishSave({ survey: { id: 'old', revision: 2 } })
+    await flushPromises()
+    expect(wrapper.get('h1').text()).toBe('Replacement')
+    expect(wrapper.emitted('saved')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('does not publish a saved notification after the designer has unmounted', async () => {
+    let finishSave!: (value: unknown) => void
+    get.mockImplementation(async (path: string) => path.endsWith('/forms/old')
+      ? { survey: { id: 'old', revision: 1, definition: definitionFor('Original') } }
+      : { surveys: [], programs: [], streams: [], agreements: [], organizations: [] })
+    post.mockImplementation(() => new Promise(resolve => { finishSave = resolve }))
+    const wrapper = mount(FormCreator, { props: { agencyId: '1', selectedFormId: 'old' } })
+    await flushPromises()
+    await button(wrapper, 'Save revision').trigger('click')
+    wrapper.unmount()
+    const requestsBefore = get.mock.calls.length
+    finishSave({ survey: { id: 'old', revision: 2 } })
+    await flushPromises()
+    expect(wrapper.emitted('saved')).toBeUndefined()
+    expect(get).toHaveBeenCalledTimes(requestsBefore)
+  })
+
+  it('does not let an earlier stream snapshot settle a replacement question request', async () => {
+    let finishOld!: (value: unknown) => void
+    let finishNew!: (value: unknown) => void
+    get.mockImplementation((path: string) => path.endsWith('/form-options') ? Promise.resolve({ streams: [] })
+      : path.startsWith('/agencies/1/') ? new Promise(resolve => { finishOld = resolve })
+        : new Promise(resolve => { finishNew = resolve }))
+    const question = grantForm().questions.find(question => question.type === 'budget')!
+    const wrapper = mount(FormGrantDesigner, { props: { agencyId: '1', question, disabled: false, streamId: '10' } })
+    await flushPromises()
+    await button(wrapper, 'Copy current stream settings').trigger('click')
+    await wrapper.setProps({ agencyId: '2' })
+    await button(wrapper, 'Copy current stream settings').trigger('click')
+    finishOld({ budget: budgetConfig(), activities: activityConfig() })
+    await flushPromises()
+    expect(wrapper.emitted('configure')).toBeUndefined()
+    expect(button(wrapper, 'Copy current stream settings').attributes('disabled')).toBeDefined()
+    finishNew({ budget: budgetConfig(), activities: activityConfig() })
+    await flushPromises()
+    expect(wrapper.emitted('configure')).toHaveLength(1)
+    expect(button(wrapper, 'Copy current stream settings').attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
 })

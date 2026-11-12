@@ -7,6 +7,10 @@ import { migrateQueueFixture, resetQueueFixture } from './fixtures/queue-databas
 import { drainOutbox, enqueueAgreement, getOutboxItem, listOutbox, pushOutbox } from '../server/outbox.ts'
 import { drainOutcomeOutbox } from '../server/outcomes.ts'
 import { pullDueAgencies, releasePullLease } from '../server/pull.ts'
+import { getConnection, readPortalCredential, saveConnection } from '../server/connection.ts'
+import { manageForm } from '../server/forms.ts'
+import { manageIntake } from '../server/intakes.ts'
+import { drainOperations, queuePortalClient } from '../server/operations.ts'
 
 let db: Kysely<ConnectorDatabase>
 const context = (agencyId: string, itemId?: string) => ({ db, params: { agencyId, itemId } }) as unknown as GcsExtensionRouteContext
@@ -20,6 +24,11 @@ beforeEach(async () => {
 })
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs() })
 afterAll(async () => { await db.destroy() })
+const deferred = () => {
+  let resolve = () => {}
+  const promise = new Promise<void>(complete => { resolve = complete })
+  return { promise, resolve }
+}
 const receipt = async (agencyId: string, type: string, state: 'received' | 'imported' = 'imported') => {
   const row = await db.insertInto('extensions.gcs_ssc_portal_connector_receipt').values({
     agency_id: agencyId, event_id: '71', submission_id: 'submission', item_submission_id: 'item',
@@ -32,6 +41,185 @@ const receipt = async (agencyId: string, type: string, state: 'received' | 'impo
     agency_id: agencyId, receipt_id: String(row.id), status_id: '401', last_error: null, delivered_at: null
   }).execute()
 }
+
+describe('remote-read Portal namespace admission', () => {
+  beforeEach(async () => { await sql`TRUNCATE extensions.gcs_ssc_portal_connector_form CASCADE`.execute(db) })
+  const connection = { portalUrl: 'https://portal.example/', portalAgencyId: 'G-ABCDE', portalKey: `gcs_${'a'.repeat(43)}` }
+  const rotatedKey = `gcs_${'b'.repeat(43)}`
+  const structure = { programs: [], streams: [{ id: 'S-ABCDE', sourceSystem: 'gcs-ssc',
+    foreignSystemId: '501', nameEn: 'Stream', nameFr: 'Volet' }], calls: [] }
+  const create = { action: 'create', requestKey: '99734eac-0cd1-4136-9134-d07af2bfb256',
+    streamId: 'S-ABCDE', nameEn: 'Apply', nameFr: 'Demande', startDate: '2027-01-01', endDate: '2027-12-31' }
+  const definition = { schemaVersion: 3, title: { en: 'Report', fr: 'Rapport' },
+    questions: [{ id: 'name', type: 'text', label: { en: 'Name', fr: 'Nom' }, required: false, maxLength: 200 }],
+    pages: [{ id: 'page', title: { en: 'Page', fr: 'Page' }, questionIds: ['name'], groups: [], branches: [] }] }
+  const writeContext = (body: unknown, authorize = async () => {}) => ({ ...context('11'), readBody: async () => body,
+    writeAuthorization: { lockAuthState: async () => {}, authorizeCurrentScope: authorize }
+  }) as unknown as GcsExtensionRouteContext
+
+  it.each([
+    { portalUrl: 'https://replacement.example/' },
+    { portalAgencyId: 'G-FGHJK' }
+  ])('rejects old structure evidence before insertion after namespace replacement: %j', async replacement => {
+    const entered = deferred()
+    const release = deferred()
+    let hold = false
+    const transport = vi.fn(async (url: unknown, request?: RequestInit) => {
+      if (request?.method === 'GET') {
+        if (hold) { hold = false; entered.resolve(); await release.promise }
+        return Response.json(structure)
+      }
+      return Response.json(new URL(String(url)).pathname.endsWith('/calls')
+        ? { id: 'D-ABCDE' } : { survey: { id: 'V-ABCDE', revision: 1 } })
+    })
+    vi.stubGlobal('fetch', transport)
+    await saveConnection(writeContext(connection))
+    hold = true
+    const old = manageIntake(writeContext(create))
+    const settled = old.then(result => ({ result }), error => ({ error }))
+    try {
+      await entered.promise
+      expect(await db.selectFrom('extensions.gcs_ssc_portal_connector_operation').select('id').execute()).toEqual([])
+      await saveConnection(writeContext({ ...connection, ...replacement, portalKey: rotatedKey }))
+      release.resolve()
+      expect(await settled).toMatchObject({ error: { message: 'The Portal connection changed. Reload before retrying this change.' } })
+      expect(transport.mock.calls.filter(([, request]) => request?.method !== 'GET')).toEqual([])
+      expect(await db.selectFrom('extensions.gcs_ssc_portal_connector_operation').select('id').execute()).toEqual([])
+      // No phantom operation blocks returning to the previous namespace.
+      await saveConnection(writeContext(connection))
+      await saveConnection(writeContext({ ...connection, ...replacement, portalKey: rotatedKey }))
+      await manageForm(writeContext({ action: 'save', definition }))
+      expect((await drainOperations(db, 1, '11')).results[0]?.delivered).toBe(true)
+      expect(await db.selectFrom('extensions.gcs_ssc_portal_connector_operation').select(['state', 'attempts']).execute())
+        .toEqual([{ state: 'delivered', attempts: 1 }])
+      const mutation = transport.mock.calls.find(([, request]) => request?.method === 'POST')
+      expect(new URL(String(mutation?.[0])).origin).toBe(new URL(replacement.portalUrl ?? connection.portalUrl).origin)
+      expect(JSON.parse(String(mutation?.[1]?.body)).agencyId).toBe(replacement.portalAgencyId ?? connection.portalAgencyId)
+    } finally { release.resolve(); await settled }
+  })
+
+  it('allows normalized same-namespace rotation and delivers held work with current credentials', async () => {
+    const entered = deferred()
+    const release = deferred()
+    let hold = false
+    const transport = vi.fn(async (_url: unknown, request?: RequestInit) => {
+      if (request?.method === 'GET') {
+        if (hold) { hold = false; entered.resolve(); await release.promise }
+        return Response.json(structure)
+      }
+      return Response.json({ id: 'D-ABCDE' })
+    })
+    vi.stubGlobal('fetch', transport)
+    await saveConnection(writeContext(connection))
+    hold = true
+    const pending = manageIntake(writeContext(create))
+    try {
+      await entered.promise
+      await saveConnection(writeContext({ ...connection, portalUrl: 'https://PORTAL.example:443/', portalKey: rotatedKey }))
+      release.resolve()
+      expect(await pending).toEqual({ intakeId: 'D-ABCDE' })
+      const mutation = transport.mock.calls.find(([, request]) => request?.method === 'POST')
+      expect(new Headers(mutation?.[1]?.headers).get('Authorization')).toBe(`Bearer ${rotatedKey}`)
+      expect(await db.selectFrom('extensions.gcs_ssc_portal_connector_operation').select(['state', 'attempts']).execute())
+        .toEqual([{ state: 'delivered', attempts: 1 }])
+    } finally { release.resolve(); await pending }
+  })
+
+  it('rechecks current route authorization at insertion after a successful remote read', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json(structure)))
+    await saveConnection(writeContext(connection))
+    const authorize = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('Permission revoked'))
+    await expect(manageIntake(writeContext(create, authorize))).rejects.toThrow('Permission revoked')
+    expect(authorize).toHaveBeenCalledTimes(2)
+    expect(await db.selectFrom('extensions.gcs_ssc_portal_connector_operation').select('id').execute()).toEqual([])
+  })
+
+  const holdRemoteSurvey = () => {
+    const entered = deferred()
+    const release = deferred()
+    const transport = vi.fn(async (url: unknown, request?: RequestInit) => {
+      if (request?.method === 'GET' && new URL(String(url)).pathname.endsWith('/surveys/V-ABCDE')) {
+        entered.resolve()
+        await release.promise
+        return Response.json({ survey: { id: 'V-ABCDE', revision: 4, definition } })
+      }
+      return request?.method === 'GET'
+        ? Response.json(structure)
+        : Response.json({ survey: { id: 'V-ABCDE', revision: 5 } })
+    })
+    vi.stubGlobal('fetch', transport)
+    return { entered, release, transport }
+  }
+
+  it.each([
+    { portalUrl: 'https://replacement.example/' },
+    { portalAgencyId: 'G-FGHJK' }
+  ])('rejects unknown remote survey adoption after namespace replacement: %j', async replacement => {
+    const { entered, release, transport } = holdRemoteSurvey()
+    await saveConnection(writeContext(connection))
+    const pending = manageForm(writeContext({ action: 'save', surveyId: 'V-ABCDE', expectedRevision: 4, definition }))
+    const settled = pending.then(result => ({ result }), error => ({ error }))
+    try {
+      await entered.promise
+      await saveConnection(writeContext({ ...connection, ...replacement, portalKey: rotatedKey }))
+      release.resolve()
+      expect(await settled).toMatchObject({ error: { message: 'The Portal connection changed. Reload before retrying this change.' } })
+      expect(await db.selectFrom('extensions.gcs_ssc_portal_connector_form').select('id').execute()).toEqual([])
+      expect(await db.selectFrom('extensions.gcs_ssc_portal_connector_operation').select('id').execute()).toEqual([])
+      expect(transport.mock.calls.filter(([, request]) => request?.method !== 'GET')).toEqual([])
+    } finally { release.resolve(); await settled }
+  })
+
+  it.each([
+    {},
+    { portalUrl: 'https://PORTAL.example:443/', portalKey: rotatedKey }
+  ])('adopts an unknown survey in the same namespace and delivers with current credentials: %j', async replacement => {
+    const { entered, release, transport } = holdRemoteSurvey()
+    await saveConnection(writeContext(connection))
+    const pending = manageForm(writeContext({ action: 'save', surveyId: 'V-ABCDE', expectedRevision: 4, definition }))
+    try {
+      await entered.promise
+      await saveConnection(writeContext({ ...connection, ...replacement }))
+      release.resolve()
+      expect(await pending).toEqual({ survey: { id: 'V-ABCDE', revision: 5 }, queued: true })
+      expect((await drainOperations(db, 1, '11')).results[0]?.delivered).toBe(true)
+      const mutation = transport.mock.calls.find(([, request]) => request?.method === 'PUT')
+      expect(new URL(String(mutation?.[0])).origin).toBe(new URL(connection.portalUrl).origin)
+      expect(new Headers(mutation?.[1]?.headers).get('Authorization')).toBe(`Bearer ${replacement.portalKey ?? connection.portalKey}`)
+      expect(JSON.parse(String(mutation?.[1]?.body)).expectedRevision).toBe(4)
+      expect(await db.selectFrom('extensions.gcs_ssc_portal_connector_form').select(['id', 'revision', 'portal_id', 'portal_revision']).execute())
+        .toEqual([{ id: 'V-ABCDE', revision: 5, portal_id: 'V-ABCDE', portal_revision: 5 }])
+    } finally { release.resolve(); await pending }
+  })
+
+  it('rechecks fresh role authority before unknown remote survey adoption', async () => {
+    const { entered, release } = holdRemoteSurvey()
+    await saveConnection(writeContext(connection))
+    let permitted = true
+    const pending = manageForm(writeContext({ action: 'save', surveyId: 'V-ABCDE', expectedRevision: 4, definition }, async () => {
+      if (!permitted) throw new Error('Permission revoked')
+    }))
+    const settled = pending.then(result => ({ result }), error => ({ error }))
+    try {
+      await entered.promise
+      permitted = false
+      release.resolve()
+      expect(await settled).toMatchObject({ error: { message: 'Permission revoked' } })
+      expect(await db.selectFrom('extensions.gcs_ssc_portal_connector_form').select('id').execute()).toEqual([])
+      expect(await db.selectFrom('extensions.gcs_ssc_portal_connector_operation').select('id').execute()).toEqual([])
+    } finally { release.resolve(); await settled }
+  })
+
+  it('requires the route Agency and a currently enabled worker boundary', async () => {
+    const clientConnection = { portalUrl: connection.portalUrl, portalAgencyId: 'G-11', key: connection.portalKey }
+    await expect(queuePortalClient(db, '22', clientConnection, { kind: 'route', context: writeContext({}) })
+      .createCall({})).rejects.toThrow('authorized Portal Agency changed')
+    await sql`UPDATE extensions.agency_enablement SET enabled=false WHERE agency_id=11`.execute(db)
+    await expect(queuePortalClient(db, '11', clientConnection, { kind: 'worker' }).createCall({}))
+      .rejects.toThrow('not enabled')
+    expect(await db.selectFrom('extensions.gcs_ssc_portal_connector_operation').select('id').execute()).toEqual([])
+  })
+})
 
 describe('outcome queue with renamed real tables', () => {
   it.each([
@@ -195,5 +383,94 @@ describe('manual push bounded and all operations', () => {
       .where('agency_id', '=', '22').execute()).toEqual([{ state: 'pending', attempts: 0 }])
     await expect(pushOutbox(writeContext({ limit: 0 }))).rejects.toThrow()
     await expect(pushOutbox(writeContext({ all: true, limit: 1 }))).rejects.toThrow()
+  })
+})
+
+describe('Portal namespace ownership of synchronized forms', () => {
+  const definition = {
+    schemaVersion: 3, title: { en: 'Report', fr: 'Rapport' },
+    questions: [{ id: 'name', type: 'text', label: { en: 'Name', fr: 'Nom' }, required: false, maxLength: 200 }],
+    pages: [{ id: 'page', title: { en: 'Page', fr: 'Page' }, questionIds: ['name'], groups: [], branches: [] }]
+  }
+  const connection = {
+    portalUrl: 'https://portal.example/', portalAgencyId: 'G-ABCDE', portalKey: `gcs_${'a'.repeat(43)}`
+  }
+  const rotatedKey = `gcs_${'b'.repeat(43)}`
+  const writeContext = (body: unknown) => ({
+    ...context('11'), readBody: async () => body,
+    writeAuthorization: { lockAuthState: async () => undefined, authorizeCurrentScope: async () => undefined }
+  }) as unknown as GcsExtensionRouteContext
+  const setupPeer = () => {
+    const transport = vi.fn(async (_url: RequestInfo | URL, request?: RequestInit) => request?.method === 'GET'
+      ? Response.json({ programs: [], streams: [], calls: [] })
+      : Response.json({ survey: { id: 'V-ABCDE', revision: request?.method === 'POST' ? 1 : 2 } }))
+    vi.stubGlobal('fetch', transport)
+    return transport
+  }
+  const synchronizeForm = async () => {
+    await sql`TRUNCATE extensions.gcs_ssc_portal_connector_form CASCADE`.execute(db)
+    await saveConnection(writeContext(connection))
+    await manageForm(writeContext({ action: 'save', definition }))
+    expect((await drainOperations(db, 1, '11')).results[0]?.delivered).toBe(true)
+    const form = await db.selectFrom('extensions.gcs_ssc_portal_connector_form').selectAll().executeTakeFirstOrThrow()
+    expect(form).toMatchObject({ portal_id: 'V-ABCDE', portal_revision: 1, revision: 1 })
+    return form
+  }
+  const saveNextRevision = async (formId: string) => {
+    await manageForm(writeContext({ action: 'save', surveyId: formId, expectedRevision: 1,
+      definition: { ...definition, title: { en: 'Updated', fr: 'Mis à jour' } } }))
+    expect((await drainOperations(db, 1, '11')).results[0]?.delivered).toBe(true)
+  }
+
+  it.each([
+    { portalUrl: 'https://replacement.example/' },
+    { portalAgencyId: 'G-FGHJK' }
+  ])('rejects namespace replacement after real synchronization: %j', async replacement => {
+    const peer = setupPeer()
+    const form = await synchronizeForm()
+    await expect(saveConnection(writeContext({ ...connection, ...replacement, portalKey: rotatedKey })))
+      .rejects.toMatchObject({ code: 'GCS_PORTAL_CONNECTION_FORMS_BOUND', statusCode: 409 })
+    expect((await getConnection(context('11'))).connection).toMatchObject({
+      portalUrl: connection.portalUrl, portalAgencyId: connection.portalAgencyId, revision: 2
+    })
+    expect(await readPortalCredential(context('11'), '11')).toBe(connection.portalKey)
+    expect(await db.selectFrom('extensions.gcs_ssc_portal_connector_operation').select(['state', 'attempts']).execute())
+      .toEqual([{ state: 'delivered', attempts: 1 }])
+    await saveNextRevision(form.id)
+    const mutations = peer.mock.calls.filter(([, request]) => request?.method !== 'GET')
+    expect(mutations.map(([url, request]) => [new URL(String(url)).origin, new URL(String(url)).pathname, request?.method]))
+      .toEqual([
+        ['https://portal.example', '/api/government/surveys', 'POST'],
+        ['https://portal.example', '/api/government/surveys/V-ABCDE', 'PUT']
+      ])
+    expect(await db.selectFrom('extensions.gcs_ssc_portal_connector_operation').select('state').orderBy('id').execute())
+      .toEqual([{ state: 'delivered' }, { state: 'delivered' }])
+  })
+
+  it('rotates credentials for an equivalent normalized origin and delivers the next revision', async () => {
+    const peer = setupPeer()
+    const form = await synchronizeForm()
+    await saveConnection(writeContext({ ...connection, portalUrl: 'https://PORTAL.example:443/', portalKey: rotatedKey }))
+    expect(await readPortalCredential(context('11'), '11')).toBe(rotatedKey)
+    await saveNextRevision(form.id)
+    const last = peer.mock.calls.at(-1)
+    expect(last?.[1]?.method).toBe('PUT')
+    expect(new URL(String(last?.[0])).origin).toBe('https://portal.example')
+    expect(await db.selectFrom('extensions.gcs_ssc_portal_connector_form').select(['portal_id', 'portal_revision'])
+      .where('id', '=', form.id).executeTakeFirstOrThrow()).toEqual({ portal_id: 'V-ABCDE', portal_revision: 2 })
+  })
+
+  it('permits replacing a connection with only an unsynchronized local draft', async () => {
+    setupPeer()
+    await sql`TRUNCATE extensions.gcs_ssc_portal_connector_form CASCADE`.execute(db)
+    await saveConnection(writeContext(connection))
+    await manageForm(writeContext({ action: 'createDraft', title: definition.title }))
+    expect(await db.selectFrom('extensions.gcs_ssc_portal_connector_form').select(['portal_id', 'portal_revision'])
+      .executeTakeFirstOrThrow()).toEqual({ portal_id: null, portal_revision: null })
+    expect((await saveConnection(writeContext({ ...connection, portalUrl: 'https://replacement.example/',
+      portalAgencyId: 'G-FGHJK' }))).connection).toMatchObject({
+      portalUrl: 'https://replacement.example/', portalAgencyId: 'G-FGHJK'
+    })
+    expect(await db.selectFrom('extensions.gcs_ssc_portal_connector_operation').select('id').execute()).toEqual([])
   })
 })

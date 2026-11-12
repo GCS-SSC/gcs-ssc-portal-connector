@@ -7,7 +7,7 @@ import { projectAgreement } from './agreement-projection.ts'
 import { agencyIdFromContext, authorizedWrite } from './authorization.ts'
 import { readPortalCredentialFromDb } from './connection.ts'
 import { asConnectorDb, type ConnectorDb } from './db.ts'
-import { queuePortalClient } from './operations.ts'
+import { queuePortalClient, type PortalQueueAdmission } from './operations.ts'
 
 const publicationInput = z.object({
   agreementId: z.string().regex(/^[1-9]\d{0,18}$/),
@@ -41,11 +41,11 @@ export const publishAgreement = async (context: GcsExtensionRouteContext) => {
       agreementId: input.agreementId, streamId: agreement.agreement.stream_id, action: 'update'
     }))) throw new Error('Agreement publication requires current assigned Contributor access.')
   })
-  return publishAgreementCore(asConnectorDb(context.db), agencyId, input)
+  return publishAgreementCore(asConnectorDb(context.db), agencyId, input, { kind: 'route', context })
 }
 
 export const publishAgreementCore = async (
-  db: ConnectorDb, agencyId: string, input: z.infer<typeof publicationInput>, deliveryScope?: string
+  db: ConnectorDb, agencyId: string, input: z.infer<typeof publicationInput>, admission: PortalQueueAdmission, deliveryScope?: string
 ) => {
   const activeLink = await db.selectFrom('extensions.gcs_ssc_portal_connector_verification')
     .select('portal_organization_id').where('portal_organization_id', '=', input.portalOrganizationId)
@@ -60,7 +60,7 @@ export const publishAgreementCore = async (
     portalUrl: connection.portal_url, portalAgencyId: connection.portal_agency_id,
     key: await readPortalCredentialFromDb(asConnectorDb(db), agencyId)
   }
-  const client = queuePortalClient(db, agencyId, portalConnection, deliveryScope ? `${deliveryScope}:${digest}` : undefined)
+  const client = queuePortalClient(db, agencyId, portalConnection, admission, deliveryScope ? `${deliveryScope}:${digest}` : undefined)
   const { agreement, fiscalYears, lines } = source
   const structure = await client.structure()
   const programId = structure.programs.find((program) => program.sourceSystem === 'gcs-ssc'
@@ -148,7 +148,7 @@ export const publishAgreementCore = async (
     organizationId: input.portalOrganizationId,
     foreignApplicantRecipientId: input.proponentId
   })
-  const setClient = queuePortalClient(db, agencyId, portalConnection,
+  const setClient = queuePortalClient(db, agencyId, portalConnection, admission,
     deliveryScope ? `${deliveryScope}:sets:${portalAgreementId}:${revision}` : undefined)
   const existingSets = (await client.sets()).sets.filter((item) =>
     item.organizationId === input.portalOrganizationId && item.agreementId === portalAgreementId
@@ -176,7 +176,7 @@ export const publishAgreementCore = async (
     await setClient.publishSet(set.id, set.revision)
     publishedSetIds.push(set.id)
   }
-  await db.transaction().execute(async (transaction) => {
+  await client.write(async (transaction) => {
     await transaction.insertInto('extensions.gcs_ssc_portal_connector_publication').values({
       agency_id: agencyId,
       gcs_agreement_id: input.agreementId,

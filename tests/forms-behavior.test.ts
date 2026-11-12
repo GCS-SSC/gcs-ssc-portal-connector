@@ -1,6 +1,7 @@
 import { Kysely, sql } from 'kysely'
 import { KyselyPGlite } from 'kysely-pglite'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { GcsExtensionRouteContext } from '@gcs-ssc/extensions/server'
 import type { ConnectorDatabase } from '../server/db.ts'
 import migration from '../server/migrations/0010_portal_operations.ts'
 import { foreignId, getForm, listForms, manageForm } from '../server/forms.ts'
@@ -8,8 +9,25 @@ import { foreignId, getForm, listForms, manageForm } from '../server/forms.ts'
 const remote = vi.hoisted(() => ({ transport: vi.fn() }))
 vi.mock('../server/portal-context.ts', async () => {
   const { createPortalClient } = await import('../server/portal-client.ts')
-  return { clientForAgency: async () => ({ agencyId: '1', connection: { portal_agency_id: 'G-ABCDE' },
-    client: createPortalClient({ portalUrl: 'https://portal.example/', portalAgencyId: 'G-ABCDE', key: 'test' }, remote.transport) }) }
+  const { capturePortalWrite } = await import('../server/operations.ts')
+  const { asConnectorDb } = await import('../server/db.ts')
+  return {
+    /**
+     * @param context - Actual route authorization and fixture transaction owner.
+     * @returns The remote transport with its real namespace-bound local writer.
+     */
+    clientForAgency: async (context: GcsExtensionRouteContext) => {
+      const connection = { portalUrl: 'https://portal.example/', portalAgencyId: 'G-ABCDE', key: 'test' }
+      return {
+        agencyId: '1',
+        connection: { portal_url: connection.portalUrl, portal_agency_id: connection.portalAgencyId },
+        client: {
+          ...createPortalClient(connection, remote.transport),
+          write: capturePortalWrite(asConnectorDb(context.db), '1', connection, { kind: 'route', context })
+        }
+      }
+    }
+  }
 })
 const definition = { schemaVersion: 3, title: { en: 'Application', fr: 'Demande' },
   questions: [{ id: 'name', type: 'text', label: { en: 'Name', fr: 'Nom' }, required: false, maxLength: 500 }],
@@ -52,7 +70,9 @@ beforeAll(async () => {
   await executeStatements(`CREATE TABLE extensions.gcs_ssc_portal_connector_identity (agency_id bigint, portal_organization_id text, proponent_id text);
     CREATE TABLE extensions.gcs_ssc_portal_connector_verification (portal_organization_id text, portal_active boolean);
     CREATE TABLE extensions.gcs_ssc_portal_connector_organization (agency_id bigint, portal_organization_id text, name text, active boolean);
-    CREATE TABLE extensions.gcs_ssc_portal_connector_publication (agency_id bigint, gcs_agreement_id text, portal_agreement_id text, portal_organization_id text)`)
+    CREATE TABLE extensions.gcs_ssc_portal_connector_publication (agency_id bigint, gcs_agreement_id text, portal_agreement_id text, portal_organization_id text);
+    CREATE TABLE extensions.gcs_ssc_portal_connector_connection (agency_id bigint PRIMARY KEY, portal_url text, portal_agency_id text);
+    INSERT INTO extensions.gcs_ssc_portal_connector_connection VALUES (1,'https://portal.example/','G-ABCDE')`)
 })
 afterAll(async () => { await db.destroy() })
 beforeEach(async () => {

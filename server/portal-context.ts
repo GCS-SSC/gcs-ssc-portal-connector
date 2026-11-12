@@ -13,5 +13,5 @@ export const clientForAgency = async (context: GcsExtensionRouteContext) => {
   return { agencyId, connection, client: queuePortalClient(db, agencyId, {
     portalUrl: connection.portal_url, portalAgencyId: connection.portal_agency_id,
     key: await readPortalCredentialFromDb(db, agencyId)
-  }) }
+  }, { kind: 'route', context }) }
 }

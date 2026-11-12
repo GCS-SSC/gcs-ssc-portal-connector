@@ -8,6 +8,7 @@ import {
   ExtensionModal, ExtensionResourceLayout, ExtensionSelect, ExtensionTextarea,
   useExtensionApi, useExtensionI18n, useExtensionToast, useHostApi
 } from '@gcs-ssc/extensions/ui'
+import { usePortalRequest } from './usePortalRequest'
 import { readImportDiagnostic } from '../shared/import-diagnostics'
 import { messages } from '../i18n/messages'
 import FormCreator from './FormCreator.vue'
@@ -61,7 +62,12 @@ const section = computed(() => props.section ?? 'connection')
 const formsVisited = ref(section.value === 'forms')
 watch(section, (value) => {
   if (value === 'forms') formsVisited.value = true
-  if (value === 'queue') void loadManagement().catch(() => { error.value = feedback('loadFailed') })
+  if (value === 'queue') {
+    const agencyId = props.agencyId
+    void loadManagement().catch(() => {
+      if (agencyId === props.agencyId && managementRequest.state.value.kind === 'error') error.value = feedback('loadFailed')
+    })
+  }
 })
 watch(() => props.agencyId, () => {
   formsVisited.value = section.value === 'forms'
@@ -81,18 +87,35 @@ const showError = (description: string | Feedback) => toast.add({
 })
 const api = useExtensionApi('gcs-ssc-portal-connector')
 const hostApi = useHostApi()
+const loadRequest = usePortalRequest()
+const managementRequest = usePortalRequest()
+const actionRequest = usePortalRequest()
+const proponentRequest = usePortalRequest()
+const receiptRequest = usePortalRequest()
+const backlogRequest = usePortalRequest()
 const connection: Ref<Connection | null> = ref(null)
 const receipts: Ref<Receipt[]> = ref([])
-const selectedReceipt: Ref<Receipt | null> = ref(null)
-const receiptEvidenceOpen = ref(false)
-const receiptSource: Ref<unknown> = ref(null)
+type ReceiptDialog = { kind: 'closed' } | { kind: 'open'; receipt: Receipt; source: unknown }
+const receiptDialog = ref<ReceiptDialog>({ kind: 'closed' })
+const selectedReceipt = computed(() => receiptDialog.value.kind === 'open' ? receiptDialog.value.receipt : null)
+const receiptSource = computed(() => receiptDialog.value.kind === 'open' ? receiptDialog.value.source : null)
+const receiptEvidenceOpen = computed({
+  get: () => receiptDialog.value.kind === 'open',
+  set: (value: boolean) => { if (!value) { receiptRequest.invalidate(); receiptDialog.value = { kind: 'closed' } } }
+})
 const openReceipt = async (receipt: Receipt) => {
+  const request = receiptRequest.begin()
+  if (!request) return
+  const path = `${endpoint.value}/receipts/${receipt.id}`
   try {
-    const result = await api.get<{ receipt: { source_export: unknown } }>(`${endpoint.value}/receipts/${receipt.id}`)
-    selectedReceipt.value = receipt
-    receiptSource.value = result.receipt.source_export
-    receiptEvidenceOpen.value = true
-  } catch { showError(feedback('loadFailed')) }
+    const result = await api.get<{ receipt: { source_export: unknown } }>(path)
+    if (!receiptRequest.isCurrent(request)) return
+    receiptDialog.value = { kind: 'open', receipt, source: result.receipt.source_export }
+    receiptRequest.succeed(request)
+  } catch {
+    if (!receiptRequest.fail(request)) return
+    showError(feedback('loadFailed'))
+  }
 }
 const receiptSearch = ref('')
 const receiptPagination = ref({ pageIndex: 0, pageSize: 10 })
@@ -157,10 +180,18 @@ const backlogColumns = computed(() => [
   { id: 'state', accessorKey: 'state', header: t('organizationState') },
   { id: 'actions', header: t('actions') }
 ])
-const selectedBacklog: Ref<BacklogItem | null> = ref(null)
+type BacklogDialog = { kind: 'closed' } | { kind: 'open'; item: BacklogItem }
+const backlogDialog = ref<BacklogDialog>({ kind: 'closed' })
+const selectedBacklog = computed({
+  get: () => backlogDialog.value.kind === 'open' ? backlogDialog.value.item : null,
+  set: (item: BacklogItem | null) => {
+    backlogRequest.invalidate()
+    backlogDialog.value = item ? { kind: 'open', item } : { kind: 'closed' }
+  }
+})
 const backlogDetail: Ref<BacklogDetail | null> = ref(null)
-const backlogDetailBusy = ref(false)
-const backlogDetailError = ref(false)
+const backlogDetailBusy = backlogRequest.pending
+const backlogDetailError = computed(() => backlogRequest.state.value.kind === 'error')
 const detailAgreement = computed(() => backlogDetail.value?.payload?.agreement ?? null)
 const detailConfig = computed(() => detailAgreement.value?.config as Record<string, unknown> | undefined)
 const detailBudgetLines = computed(() => Array.isArray(detailConfig.value?.budgetLines)
@@ -178,15 +209,16 @@ const budgetAmountLabel = (line: Record<string, unknown>): string => {
 
 const openBacklogDetail = async (item: BacklogItem) => {
   selectedBacklog.value = item
+  const request = backlogRequest.begin()
+  if (!request) return
   backlogDetail.value = null
-  backlogDetailError.value = false
-  backlogDetailBusy.value = true
+  const path = `${endpoint.value}/backlog/${item.id}`
   try {
-    const detail = await api.get<BacklogDetail>(`${endpoint.value}/backlog/${item.id}`)
-    if (selectedBacklog.value?.id === item.id) backlogDetail.value = detail
-  } catch {
-    if (selectedBacklog.value?.id === item.id) backlogDetailError.value = true
-  } finally { if (selectedBacklog.value?.id === item.id) backlogDetailBusy.value = false }
+    const detail = await api.get<BacklogDetail>(path)
+    if (!backlogRequest.isCurrent(request)) return
+    backlogDetail.value = detail
+    backlogRequest.succeed(request)
+  } catch { backlogRequest.fail(request) }
 }
 const filteredBacklog = computed(() => {
   const search = backlogSearch.value.trim().toLocaleLowerCase(locale.value)
@@ -252,35 +284,63 @@ watch(() => filteredOutcomeBacklog.value.length, length => {
 const lastPullAt = ref<string | null>(null)
 const lastPullError = ref<string | null>(null)
 const statuses: Ref<PortalStatus[]> = ref([])
-const selectedStatusIds = ref<string[]>([])
 type StatusEntity = 'agreement' | 'claim' | 'forecast' | 'funding_application' | 'other_form'
-const statusEntity = ref<StatusEntity>('claim')
-const entityStatusIds = ref<{ claim: string[]; forecast: string[]; funding_application: string[]; other_form: string[] }>({
-  claim: [], forecast: [], funding_application: [], other_form: []
+type EntityStatusIds = Record<Exclude<StatusEntity, 'agreement'>, string[]>
+interface SettingsDraft {
+  portalStatusIds: string[]
+  entityStatusIds: EntityStatusIds
+  pullInterval: string
+}
+type SettingsEditor = { kind: 'unknown' } | { kind: 'accepted'; draft: SettingsDraft } | { kind: 'edited'; draft: SettingsDraft }
+  | { kind: 'saving'; draft: SettingsDraft }
+const emptySettingsDraft = (): SettingsDraft => ({
+  portalStatusIds: [], entityStatusIds: { claim: [], forecast: [], funding_application: [], other_form: [] }, pullInterval: 'manual'
 })
+const settingsEditor: Ref<SettingsEditor> = ref({ kind: 'unknown' })
+const settingsReady = computed(() => settingsEditor.value.kind !== 'unknown')
+const selectedStatusIds = computed(() => settingsEditor.value.kind === 'unknown' ? [] : settingsEditor.value.draft.portalStatusIds)
+const entityStatusIds = computed(() => settingsEditor.value.kind === 'unknown' ? emptySettingsDraft().entityStatusIds : settingsEditor.value.draft.entityStatusIds)
+const statusEntity = ref<StatusEntity>('claim')
 const visibleStatusIds = computed(() => statusEntity.value === 'agreement'
   ? selectedStatusIds.value : entityStatusIds.value[statusEntity.value])
-const pullInterval = ref('manual')
+const pullInterval = computed({
+  get: () => settingsEditor.value.kind === 'unknown' ? '' : settingsEditor.value.draft.pullInterval,
+  set: (value: string) => {
+    if (settingsEditor.value.kind === 'unknown') return
+    settingsEditor.value = { kind: 'edited', draft: { ...settingsEditor.value.draft, pullInterval: value } }
+  }
+})
 const proponentVerificationAccess = ref('off')
 watch(() => props.config, value => {
   const access = value?.portalProponentVerificationAccess
   proponentVerificationAccess.value = access === 'manager' || access === 'contributor' ? access : 'off'
 }, { immediate: true })
-const selectedOrganizationId = ref('')
-const verificationNote = ref('')
-const verificationConfirmOpen = ref(false)
+type VerificationDialog = { kind: 'closed' } | { kind: 'open'; organizationId: string; proponentId: string; note: string }
+const verificationDialog = ref<VerificationDialog>({ kind: 'closed' })
+const selectedOrganizationId = computed(() => verificationDialog.value.kind === 'open' ? verificationDialog.value.organizationId : '')
+const verificationNote = computed({
+  get: () => verificationDialog.value.kind === 'open' ? verificationDialog.value.note : '',
+  set: (value: string) => { if (verificationDialog.value.kind === 'open') verificationDialog.value.note = value }
+})
+const verificationConfirmOpen = computed({
+  get: () => verificationDialog.value.kind === 'open',
+  set: (value: boolean) => { if (!value) verificationDialog.value = { kind: 'closed' } }
+})
 const selectedOrganization = computed(() => organizations.value.find(item => item.id === selectedOrganizationId.value) ?? null)
 const validOrganizationId = computed(() => selectedOrganization.value?.active === true && !selectedOrganization.value.verified)
 const proponentSearch = ref('')
 const proponents = ref<Array<{ id: string; egcs_ar_legalname_en: string; egcs_ar_legalname_fr: string }>>([])
-const selectedProponentId = ref('')
+const selectedProponentId = computed({
+  get: () => verificationDialog.value.kind === 'open' ? verificationDialog.value.proponentId : '',
+  set: (value: string) => { if (verificationDialog.value.kind === 'open') verificationDialog.value.proponentId = value }
+})
 const pushCount = ref('10')
 const validPushCount = computed(() => Number.isInteger(Number(pushCount.value)) && pushCount.value.trim() !== ''
   && Number(pushCount.value) >= 1 && Number(pushCount.value) <= 100)
 const form = ref({ portalUrl: '', portalAgencyId: '', portalKey: '' })
 const portalKeyFormatValid = computed(() => /^gcs_[A-Za-z0-9_-]{43}$/.test(form.value.portalKey))
-const busy = ref(false)
-const loading = ref(true)
+const busy = actionRequest.pending
+const loading = computed(() => loadRequest.state.value.kind === 'idle' || loadRequest.pending.value)
 const error = useLocalizedFeedback(t)
 const pending = ref<Array<{ eventId: string; reason: string; code?: 'forecastPending' | 'documentationPending' | 'unsupportedPending'; submissionId?: string; organizationId?: string }>>([])
 const receiptKind = (kind: string) => kind === 'claim' ? t('claimKind')
@@ -330,139 +390,202 @@ const proponentOptions = computed(() => proponents.value.map(item => ({
   value: item.id,
   label: `${/^fr(?:-|$)/i.test(locale.value) ? item.egcs_ar_legalname_fr : item.egcs_ar_legalname_en} (#${item.id})`
 })))
-const loadManagement = async () => {
-  const agencyId = props.agencyId
-  const path = `/agencies/${agencyId}`
-  const queue = await api.get<{ backlog: BacklogItem[]; operations: PortalOperation[]; outcomes: OutcomeBacklogItem[]; inbound: InboundItem[] }>(`${path}/backlog`)
-  if (agencyId !== props.agencyId) return
-  backlog.value = queue.backlog
-  operations.value = queue.operations ?? []
-  inbound.value = queue.inbound
-  outcomeBacklog.value = queue.outcomes
-  if (!connection.value) return
-  const [orgs, settings] = await Promise.all([
-    api.get<{ organizations: PortalOrganization[] }>(`${path}/organizations`),
-    api.get<{ statuses: PortalStatus[]; settings: { portalStatusIds: string[]; entityStatusIds: typeof entityStatusIds.value; pullIntervalMinutes: number | null; lastPullAt: string | null; lastPullError: string | null } | null }>(`${path}/settings`)
-  ])
-  if (agencyId !== props.agencyId) return
-  organizations.value = orgs.organizations
-  statuses.value = settings.statuses
-  selectedStatusIds.value = settings.settings?.portalStatusIds ?? []
-  entityStatusIds.value = settings.settings?.entityStatusIds ?? { claim: [], forecast: [], funding_application: [], other_form: [] }
-  pullInterval.value = settings.settings?.pullIntervalMinutes?.toString() ?? 'manual'
-  lastPullAt.value = settings.settings?.lastPullAt ?? null
-  lastPullError.value = settings.settings?.lastPullError ?? null
+const loadManagement = async (parentIsCurrent: () => boolean = () => true) => {
+  if (!parentIsCurrent()) return
+  const request = managementRequest.begin()
+  if (!request) return
+  const path = endpoint.value
+  const settingsSnapshot = settingsEditor.value
+  try {
+    const queue = await api.get<{ backlog: BacklogItem[]; operations: PortalOperation[]; outcomes: OutcomeBacklogItem[]; inbound: InboundItem[] }>(`${path}/backlog`)
+    if (!managementRequest.isCurrent(request) || !parentIsCurrent()) return
+    backlog.value = queue.backlog
+    operations.value = queue.operations ?? []
+    inbound.value = queue.inbound
+    outcomeBacklog.value = queue.outcomes
+    if (!connection.value) { managementRequest.succeed(request); return }
+    const [orgs, settings] = await Promise.all([
+      api.get<{ organizations: PortalOrganization[] }>(`${path}/organizations`),
+      api.get<{ statuses: PortalStatus[]; settings: { portalStatusIds: string[]; entityStatusIds: typeof entityStatusIds.value; pullIntervalMinutes: number | null; lastPullAt: string | null; lastPullError: string | null } | null }>(`${path}/settings`)
+    ])
+    if (!managementRequest.isCurrent(request) || !parentIsCurrent()) return
+    organizations.value = orgs.organizations
+    statuses.value = settings.statuses
+    if (settingsEditor.value === settingsSnapshot && (settingsSnapshot.kind === 'accepted' || settingsSnapshot.kind === 'unknown')) {
+      settingsEditor.value = { kind: 'accepted', draft: {
+        portalStatusIds: settings.settings?.portalStatusIds ?? [],
+        entityStatusIds: settings.settings?.entityStatusIds ?? emptySettingsDraft().entityStatusIds,
+        pullInterval: settings.settings?.pullIntervalMinutes?.toString() ?? 'manual'
+      } }
+    }
+    lastPullAt.value = settings.settings?.lastPullAt ?? null
+    lastPullError.value = settings.settings?.lastPullError ?? null
+    managementRequest.succeed(request)
+  } catch (cause) {
+    if (managementRequest.fail(request) && parentIsCurrent()) throw cause
+  }
 }
 const searchProponents = async () => {
+  const request = proponentRequest.begin()
+  if (!request) return
   try {
     const params = new URLSearchParams({ limit: '20',
       ...(proponentSearch.value.trim() ? { search: proponentSearch.value.trim() } : {}) })
-    proponents.value = (await hostApi.get<{ items: typeof proponents.value }>(`/api/applicant-recipients?${params}`)).items
-  } catch { error.value = feedback('proponentSearchFailed') }
+    const result = await hostApi.get<{ items: typeof proponents.value }>(`/api/applicant-recipients?${params}`)
+    if (!proponentRequest.isCurrent(request)) return
+    proponents.value = result.items
+    proponentRequest.succeed(request)
+  } catch { if (proponentRequest.fail(request)) error.value = feedback('proponentSearchFailed') }
 }
 const verifyOrganization = async () => {
   if (locked.value || busy.value || !validOrganizationId.value || !selectedProponentId.value || !verificationNote.value.trim()) return
-  busy.value = true; error.value = ''
+  const session = verificationDialog.value
+  const request = actionRequest.begin()
+  if (!request) return
+  const path = endpoint.value
+  const isCurrent = () => actionRequest.isCurrent(request)
+  error.value = ''
   try {
-    const result = await api.post<{ queued: number }>(`${endpoint.value}/organizations`, {
+    const result = await api.post<{ queued: number }>(`${path}/organizations`, {
       organizationId: selectedOrganizationId.value, proponentId: selectedProponentId.value,
       note: verificationNote.value.trim()
     })
-    verificationConfirmOpen.value = false
-    selectedOrganizationId.value = ''
-    selectedProponentId.value = ''
-    verificationNote.value = ''
-    await loadManagement()
+    if (!isCurrent()) return
+    if (verificationDialog.value === session) verificationDialog.value = { kind: 'closed' }
+    await loadManagement(isCurrent)
+    if (!isCurrent()) return
     showSuccess(feedback('verifiedQueued', { count: result.queued }))
-  } catch { error.value = feedback('verifyFailed') }
-  finally { busy.value = false }
+  } catch { if (actionRequest.fail(request)) error.value = feedback('verifyFailed') }
+  finally { actionRequest.succeed(request) }
 }
 const refreshOrganizationChoices = async () => {
   if (locked.value || busy.value || !connection.value) return
-  busy.value = true; error.value = ''
+  const request = actionRequest.begin()
+  if (!request) return
+  const path = endpoint.value
+  const isCurrent = () => actionRequest.isCurrent(request)
+  error.value = ''
   try {
-    await api.post(`${endpoint.value}/organization-sync`)
-    await loadManagement()
+    await api.post(`${path}/organization-sync`)
+    if (!isCurrent()) return
+    await loadManagement(isCurrent)
+    if (!isCurrent()) return
     showSuccess(feedback('organizationsSynced'))
-  } catch { error.value = feedback('organizationSyncFailed') }
-  finally { busy.value = false }
+  } catch { if (actionRequest.fail(request)) error.value = feedback('organizationSyncFailed') }
+  finally { actionRequest.succeed(request) }
 }
 const saveProponentVerificationAccess = async () => {
   if (locked.value || busy.value) return
-  busy.value = true; error.value = ''
+  const request = actionRequest.begin()
+  if (!request) return
+  const agencyId = props.agencyId
+  const isCurrent = () => actionRequest.isCurrent(request)
+  error.value = ''
   try {
-    await hostApi.patch(`/api/extensions/agency/${props.agencyId}`, {
+    await hostApi.patch(`/api/extensions/agency/${agencyId}`, {
       extensionKey: 'gcs-ssc-portal-connector', enabled: true,
       config: { ...props.config, portalProponentVerificationAccess: proponentVerificationAccess.value }
     })
+    if (!isCurrent()) return
     showSuccess(feedback('proponentVerificationSaved'))
-  } catch { error.value = feedback('proponentVerificationSaveFailed') }
-  finally { busy.value = false }
+  } catch { if (actionRequest.fail(request)) error.value = feedback('proponentVerificationSaveFailed') }
+  finally { actionRequest.succeed(request) }
 }
 const openVerification = (item: PortalOrganization) => {
   if (locked.value || !item.active || item.verified) return
-  selectedOrganizationId.value = item.id
-  selectedProponentId.value = ''
-  verificationNote.value = ''
-  verificationConfirmOpen.value = true
+  verificationDialog.value = { kind: 'open', organizationId: item.id, proponentId: '', note: '' }
 }
 const initialSync = async () => {
   if (locked.value || busy.value) return
-  busy.value = true; error.value = ''
+  const request = actionRequest.begin()
+  if (!request) return
+  const path = endpoint.value
+  const isCurrent = () => actionRequest.isCurrent(request)
+  error.value = ''
   try {
-    const result = await api.post<{ queued: number }>(`${endpoint.value}/initial-sync`)
-    await loadManagement()
+    const result = await api.post<{ queued: number }>(`${path}/initial-sync`)
+    if (!isCurrent()) return
+    await loadManagement(isCurrent)
+    if (!isCurrent()) return
     showSuccess(feedback('initialQueued', { count: result.queued }))
-  } catch { error.value = feedback('initialFailed') }
-  finally { busy.value = false }
+  } catch { if (actionRequest.fail(request)) error.value = feedback('initialFailed') }
+  finally { actionRequest.succeed(request) }
 }
 const pushBacklog = async () => {
   const limit = Number(pushCount.value)
   if (locked.value || busy.value || !validPushCount.value) return
-  busy.value = true; error.value = ''
+  const request = actionRequest.begin()
+  if (!request) return
+  const path = endpoint.value
+  const isCurrent = () => actionRequest.isCurrent(request)
+  error.value = ''
   try {
-    const result = await api.post<{ results: Array<{ delivered: boolean }> }>(`${endpoint.value}/backlog`, { limit })
-    await loadManagement()
+    const result = await api.post<{ results: Array<{ delivered: boolean }> }>(`${path}/backlog`, { limit })
+    if (!isCurrent()) return
+    await loadManagement(isCurrent)
+    if (!isCurrent()) return
     showSuccess(feedback('pushed', { count: result.results.filter(item => item.delivered).length,
       failed: result.results.filter(item => !item.delivered).length }))
-  } catch { error.value = feedback('pushFailed') }
-  finally { busy.value = false }
+  } catch { if (actionRequest.fail(request)) error.value = feedback('pushFailed') }
+  finally { actionRequest.succeed(request) }
 }
 const pushAllBacklog = async () => {
   if (locked.value || busy.value) return
-  busy.value = true; error.value = ''
+  const request = actionRequest.begin()
+  if (!request) return
+  const path = endpoint.value
+  const isCurrent = () => actionRequest.isCurrent(request)
+  error.value = ''
   try {
-    const result = await api.post<{ queued: number; results: Array<{ delivered: boolean }> }>(`${endpoint.value}/backlog`, { all: true })
-    await loadManagement()
+    const result = await api.post<{ queued: number; results: Array<{ delivered: boolean }> }>(`${path}/backlog`, { all: true })
+    if (!isCurrent()) return
+    await loadManagement(isCurrent)
+    if (!isCurrent()) return
     showSuccess(feedback('allPushed', { queued: result.queued, delivered: result.results.filter(item => item.delivered).length }))
-  } catch { error.value = feedback('pushFailed') }
-  finally { busy.value = false }
+  } catch { if (actionRequest.fail(request)) error.value = feedback('pushFailed') }
+  finally { actionRequest.succeed(request) }
 }
 const saveSettings = async () => {
-  if (locked.value || busy.value) return
-  busy.value = true; error.value = ''
+  if (locked.value || busy.value || settingsEditor.value.kind === 'unknown') return
+  const request = actionRequest.begin()
+  if (!request) return
+  const path = endpoint.value
+  const isCurrent = () => actionRequest.isCurrent(request)
+  error.value = ''
+  settingsEditor.value = { kind: 'saving', draft: settingsEditor.value.draft }
+  const snapshot = settingsEditor.value
   try {
-    await api.put(`${endpoint.value}/settings`, {
-      portalStatusIds: selectedStatusIds.value,
-      entityStatusIds: entityStatusIds.value,
-      pullIntervalMinutes: pullInterval.value === 'manual' ? null : Number(pullInterval.value)
+    await api.put(`${path}/settings`, {
+      portalStatusIds: snapshot.draft.portalStatusIds,
+      entityStatusIds: snapshot.draft.entityStatusIds,
+      pullIntervalMinutes: snapshot.draft.pullInterval === 'manual' ? null : Number(snapshot.draft.pullInterval)
     })
+    if (!isCurrent()) return
+    if (settingsEditor.value === snapshot) settingsEditor.value = { kind: 'accepted', draft: snapshot.draft }
     showSuccess(feedback('settingsSaved'))
-  } catch { error.value = feedback('settingsFailed') }
-  finally { busy.value = false }
+  } catch {
+    if (actionRequest.fail(request)) {
+      if (settingsEditor.value === snapshot) settingsEditor.value = { kind: 'edited', draft: snapshot.draft }
+      error.value = feedback('settingsFailed')
+    }
+  }
+  finally { actionRequest.succeed(request) }
 }
 const toggleStatus = (id: string, enabled: boolean) => {
+  if (settingsEditor.value.kind === 'unknown') return
   const next = enabled
     ? [...new Set([...visibleStatusIds.value, id])]
     : visibleStatusIds.value.filter(item => item !== id)
-  if (statusEntity.value === 'agreement') selectedStatusIds.value = next
-  else entityStatusIds.value = { ...entityStatusIds.value, [statusEntity.value]: next }
+  const draft = settingsEditor.value.draft
+  settingsEditor.value = { kind: 'edited', draft: statusEntity.value === 'agreement'
+    ? { ...draft, portalStatusIds: next }
+    : { ...draft, entityStatusIds: { ...draft.entityStatusIds, [statusEntity.value]: next } } }
 }
-let loadSequence = 0
 const load = async () => {
-  const sequence = ++loadSequence
-  const path = `/agencies/${props.agencyId}`
-  loading.value = true
+  const request = loadRequest.begin()
+  if (!request) return
+  const isCurrent = () => loadRequest.isCurrent(request)
+  const path = endpoint.value
   error.value = ''
   connection.value = null
   operations.value = []
@@ -475,77 +598,108 @@ const load = async () => {
       api.get<{ connection: Connection | null }>(`${path}/connection`),
       api.get<{ receipts: Receipt[] }>(`${path}/receipts`)
     ])
-    if (sequence !== loadSequence) return
+    if (!isCurrent()) return
     connection.value = summary.connection
     form.value = {
       portalUrl: summary.connection?.portalUrl ?? '',
       portalAgencyId: summary.connection?.portalAgencyId ?? '', portalKey: ''
     }
     receipts.value = history.receipts
-    await loadManagement()
+    await loadManagement(isCurrent)
+    if (isCurrent()) loadRequest.succeed(request)
   } catch {
-    if (sequence !== loadSequence) return
+    if (!loadRequest.fail(request)) return
     if (section.value === 'connection') showError(feedback('loadFailed'))
     else error.value = feedback('loadFailed')
-  } finally { if (sequence === loadSequence) loading.value = false }
+  }
 }
 const save = async () => {
   if (locked.value || busy.value) return
   const validationError = connectionValidationError()
   if (validationError) { showError(validationError); return }
-  busy.value = true; error.value = ''
+  const request = actionRequest.begin()
+  if (!request) return
+  const path = endpoint.value
+  const isCurrent = () => actionRequest.isCurrent(request)
+  error.value = ''
   try {
     const input = { portalUrl: form.value.portalUrl, portalAgencyId: form.value.portalAgencyId,
       ...(form.value.portalKey ? { portalKey: form.value.portalKey } : {}) }
-    const result = await api.put<{ connection: Connection }>(`${endpoint.value}/connection`, input)
+    const result = await api.put<{ connection: Connection }>(`${path}/connection`, input)
+    if (!isCurrent()) return
     connection.value = result.connection
-    form.value.portalKey = ''
+    if (form.value.portalKey === input.portalKey) form.value.portalKey = ''
     showSuccess(feedback('connected'))
     try {
-      await api.post(`${endpoint.value}/organization-sync`)
-      await loadManagement()
-    } catch { showError(feedback('organizationSyncFailed')) }
-  } catch (cause) { showError(connectionFailure(cause, 'saveFailed')) }
-  finally { busy.value = false }
+      await api.post(`${path}/organization-sync`)
+      if (!isCurrent()) return
+      await loadManagement(isCurrent)
+    } catch { if (isCurrent()) showError(feedback('organizationSyncFailed')) }
+  } catch (cause) { if (actionRequest.fail(request)) showError(connectionFailure(cause, 'saveFailed')) }
+  finally { actionRequest.succeed(request) }
 }
 const test = async () => {
   if (locked.value || busy.value) return
   const validationError = connectionValidationError()
   if (validationError) { showError(validationError); return }
-  busy.value = true; error.value = ''
+  const request = actionRequest.begin()
+  if (!request) return
+  const path = endpoint.value
+  const isCurrent = () => actionRequest.isCurrent(request)
+  error.value = ''
   try {
-    await api.post(`${endpoint.value}/connection-test`, {
+    await api.post(`${path}/connection-test`, {
       portalUrl: form.value.portalUrl,
       portalAgencyId: form.value.portalAgencyId,
       ...(form.value.portalKey ? { portalKey: form.value.portalKey } : {})
     })
+    if (!isCurrent()) return
     showSuccess(feedback('connectionTestPassed'))
-  } catch (cause) { showError(connectionFailure(cause, 'connectionTestFailed')) }
-  finally { busy.value = false }
+  } catch (cause) { if (actionRequest.fail(request)) showError(connectionFailure(cause, 'connectionTestFailed')) }
+  finally { actionRequest.succeed(request) }
 }
 const sync = async () => {
   if (locked.value || busy.value || !connection.value) return
-  busy.value = true; error.value = ''
+  const request = actionRequest.begin()
+  if (!request) return
+  const path = endpoint.value
+  const isCurrent = () => actionRequest.isCurrent(request)
+  error.value = ''
   try {
     const result = await api.post<{
       imported: Array<{ entityId: string }>
       pending: Array<{ eventId: string; reason: string }>
-    }>(`${endpoint.value}/sync`)
+    }>(`${path}/sync`)
+    if (!isCurrent()) return
     pending.value = result.pending
     showSuccess(feedback('syncDone', { count: result.imported.length, pending: result.pending.length }))
     try {
       const [history, deliveryBacklog] = await Promise.all([
-        api.get<{ receipts: Receipt[] }>(`${endpoint.value}/receipts`),
-        api.get<{ backlog: BacklogItem[]; outcomes: OutcomeBacklogItem[]; inbound: InboundItem[] }>(`${endpoint.value}/backlog`)
+        api.get<{ receipts: Receipt[] }>(`${path}/receipts`),
+        api.get<{ backlog: BacklogItem[]; outcomes: OutcomeBacklogItem[]; inbound: InboundItem[] }>(`${path}/backlog`)
       ])
+      if (!isCurrent()) return
       receipts.value = history.receipts
       inbound.value = deliveryBacklog.inbound
-    } catch { error.value = feedback('deliveryRefreshFailed') }
-  } catch { error.value = feedback('syncFailed') }
-  finally { busy.value = false }
+    } catch { if (isCurrent()) error.value = feedback('deliveryRefreshFailed') }
+  } catch { if (actionRequest.fail(request)) error.value = feedback('syncFailed') }
+  finally { actionRequest.succeed(request) }
 }
 onMounted(load)
-watch(() => props.agencyId, load)
+watch(() => props.agencyId, () => {
+  for (const owner of [loadRequest, managementRequest, actionRequest, proponentRequest, receiptRequest, backlogRequest]) owner.invalidate()
+  receiptDialog.value = { kind: 'closed' }
+  backlogDialog.value = { kind: 'closed' }
+  verificationDialog.value = { kind: 'closed' }
+  receipts.value = []
+  proponents.value = []
+  pending.value = []
+  statuses.value = []
+  settingsEditor.value = { kind: 'unknown' }
+  lastPullAt.value = null
+  lastPullError.value = null
+  void load()
+}, { flush: 'sync' })
 onMounted(searchProponents)
 watch(() => props.agencyId, searchProponents)
 </script>
@@ -585,9 +739,9 @@ watch(() => props.agencyId, searchProponents)
               { value: '15', label: t('everyFifteenMinutes') },
               { value: '30', label: t('everyThirtyMinutes') },
               { value: '60', label: t('everyHour') }
-            ]" value-key="value" name="pullSchedule" :disabled="locked || busy || !connection" />
+            ]" value-key="value" name="pullSchedule" :disabled="locked || busy || !connection || !settingsReady" />
         </ExtensionFormField>
-        <ExtensionSaveButton :label="t('saveSettings')" :disabled="locked || busy || !connection" :loading="busy" @click="saveSettings" />
+        <ExtensionSaveButton :label="t('saveSettings')" :disabled="locked || busy || !connection || !settingsReady" :loading="busy" @click="saveSettings" />
         <p v-if="lastPullAt" class="text-sm text-muted">{{ t('lastPull') }} {{ new Date(lastPullAt).toLocaleString(locale) }}</p>
         <p v-if="lastPullError" class="text-sm text-error">{{ lastPullError }}</p>
       </template>
@@ -676,9 +830,9 @@ watch(() => props.agencyId, searchProponents)
           ]" value-key="value" name="statusEntity" />
       </ExtensionFormField>
       <div class="grid gap-2 sm:grid-cols-2">
-        <ExtensionCheckbox data-field-label-en="Visible statuses" data-field-label-fr="Statuts visibles" v-for="status in statuses" :key="status.id" :model-value="visibleStatusIds.includes(status.id)" :label="locale === 'fr' ? status.name_fr : status.name_en" :disabled="locked || busy || !connection" data-ui-target="extension.gcs-ssc-portal-connector.portal-connection.visible-status-ids.includes-status.id" @update:model-value="toggleStatus(status.id, Boolean($event))" />
+        <ExtensionCheckbox data-field-label-en="Visible statuses" data-field-label-fr="Statuts visibles" v-for="status in statuses" :key="status.id" :model-value="visibleStatusIds.includes(status.id)" :label="locale === 'fr' ? status.name_fr : status.name_en" :disabled="locked || busy || !connection || !settingsReady" data-ui-target="extension.gcs-ssc-portal-connector.portal-connection.visible-status-ids.includes-status.id" @update:model-value="toggleStatus(status.id, Boolean($event))" />
       </div>
-      <ExtensionSaveButton :label="t('saveSettings')" :disabled="locked || busy || !connection" :loading="busy" @click="saveSettings" />
+      <ExtensionSaveButton :label="t('saveSettings')" :disabled="locked || busy || !connection || !settingsReady" :loading="busy" @click="saveSettings" />
     </section>
     <section v-if="section === 'delivery'" class="space-y-6">
       <IntakeImportSettings :agency-id="agencyId" :read-only="readOnly" :disabled="locked" />
@@ -862,6 +1016,11 @@ watch(() => props.agencyId, searchProponents)
         </ExtensionResourceLayout>
       </div>
     </section>
-    <p v-if="error && section !== 'connection'" role="alert" class="text-sm text-error">{{ error }}</p>
+    <p v-if="error && section !== 'connection'" role="alert" class="text-sm text-error">
+      {{ error }}
+      <ExtensionButton v-if="section === 'statuses'" color="neutral" variant="link" @click="load">
+        {{ t('retry') }}
+      </ExtensionButton>
+    </p>
   </div>
 </template>

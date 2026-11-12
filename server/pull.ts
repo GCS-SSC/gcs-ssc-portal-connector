@@ -3,6 +3,7 @@ import { readPortalCredentialFromDb } from './connection.ts'
 import { asConnectorDb, type ConnectorDb } from './db.ts'
 import { enabledPortalAgency } from './enablement.ts'
 import { createPortalClient } from './portal-client.ts'
+import { capturePortalWrite } from './operations.ts'
 
 interface DueConnection { agency_id: string; portal_agency_id: string; portal_url: string }
 
@@ -23,6 +24,9 @@ export const pullDueAgencies = async (db: ConnectorDb) => {
       ) RETURNING agency_id::text, portal_agency_id, portal_url
     `.execute(db)).rows[0]
     if (!connection) break
+    const write = capturePortalWrite(db, connection.agency_id, {
+      portalUrl: connection.portal_url, portalAgencyId: connection.portal_agency_id
+    }, { kind: 'worker' })
     try {
       const client = createPortalClient({
         portalUrl: connection.portal_url, portalAgencyId: connection.portal_agency_id,
@@ -33,12 +37,12 @@ export const pullDueAgencies = async (db: ConnectorDb) => {
       for (let page = 0; page < 4; page++) {
         const batch = await client.updates(after)
         for (const event of batch.updates) {
-          await db.insertInto('extensions.gcs_ssc_portal_connector_inbox').values({
+          await write(transaction => transaction.insertInto('extensions.gcs_ssc_portal_connector_inbox').values({
             agency_id: connection.agency_id, event_id: event.eventId,
             kind: event.kind, submission_id: event.submissionId,
             item_submission_id: event.itemSubmissionId,
             created_at: new Date(event.createdAt)
-          }).onConflict((conflict) => conflict.columns(['agency_id', 'event_id']).doNothing()).execute()
+          }).onConflict((conflict) => conflict.columns(['agency_id', 'event_id']).doNothing()).execute())
           found++
         }
         if (!batch.nextCursor) break
@@ -47,8 +51,10 @@ export const pullDueAgencies = async (db: ConnectorDb) => {
       results.push({ agencyId: connection.agency_id, found })
     } catch (error) {
       const message = error instanceof Error ? error.message.slice(0, 500) : 'Portal pull failed'
-      await db.updateTable('extensions.gcs_ssc_portal_connector_connection').set({ last_pull_error: message, pull_lease_until: null })
-        .where('agency_id', '=', connection.agency_id).execute()
+      // Replaced namespaces retain neither the old feed nor its error feedback.
+      await write(transaction => transaction.updateTable('extensions.gcs_ssc_portal_connector_connection')
+        .set({ last_pull_error: message, pull_lease_until: null })
+        .where('agency_id', '=', connection.agency_id).execute()).catch(() => undefined)
       results.push({ agencyId: connection.agency_id, found: 0, error: message })
     }
   }

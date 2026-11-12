@@ -34,6 +34,7 @@ beforeAll(async () => {
     'CREATE TABLE extensions.secret_entry (id bigserial PRIMARY KEY, extension_key text, owner_type text, owner_id text, secret_key text, ciphertext text, iv text, auth_tag text, algorithm text, key_version integer, metadata jsonb, updated_at timestamptz, _deleted boolean)',
     'CREATE TABLE extensions.gcs_ssc_portal_connector_identity (agency_id bigint, portal_organization_id text, proponent_id bigint)',
     'CREATE TABLE extensions.gcs_ssc_portal_connector_operation (id bigserial PRIMARY KEY, agency_id bigint, state text, kind text, next_attempt_at timestamptz)',
+    'CREATE TABLE extensions.gcs_ssc_portal_connector_form (id text PRIMARY KEY, agency_id bigint, portal_id text, portal_revision integer)',
     'CREATE TABLE "Common_Status" (id bigint PRIMARY KEY, egcs_cn_agency bigint, egcs_cn_name_en text, egcs_cn_name_fr text, _deleted boolean DEFAULT false)',
     `INSERT INTO "Common_Status" VALUES (11,1,'Active','Actif',false),(12,1,'Hidden','Caché',true),(21,2,'Other','Autre',false)`,
     'CREATE TABLE "Funding_Case_Agreement_Claim" (id bigint, egcs_fc_status bigint)',
@@ -52,7 +53,7 @@ beforeEach(async () => {
   vi.stubGlobal('fetch', network)
   network.mockReset().mockImplementation(async () => Response.json({ programs: [], streams: [], calls: [] }))
   await sql`TRUNCATE extensions.gcs_ssc_portal_connector_connection, extensions.secret_entry,
-    extensions.gcs_ssc_portal_connector_identity, extensions.gcs_ssc_portal_connector_operation,
+    extensions.gcs_ssc_portal_connector_identity, extensions.gcs_ssc_portal_connector_operation, extensions.gcs_ssc_portal_connector_form,
     extensions.gcs_ssc_portal_connector_publication, extensions.gcs_ssc_portal_connector_receipt,
     extensions.gcs_ssc_portal_connector_outcome_outbox, extensions.gcs_ssc_portal_connector_outbox`.execute(db)
 })

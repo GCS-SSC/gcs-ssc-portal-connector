@@ -1,8 +1,10 @@
 import { z } from 'zod'
+import { translateGcsExtensionMessage } from '@gcs-ssc/extensions'
 import { createGcsExtensionUserError, getEncryptedExtensionSecret, setEncryptedExtensionSecret, type GcsExtensionRouteContext } from '@gcs-ssc/extensions/server'
 import { asConnectorDb } from './db.ts'
 import { agencyIdFromContext, authorizedWrite, EXTENSION_KEY } from './authorization.ts'
 import { createPortalClient, PortalRequestError } from './portal-client.ts'
+import { messages } from '../i18n/messages.ts'
 
 const portalUrl = z.url().refine((value) => {
   const url = new URL(value)
@@ -90,13 +92,24 @@ export const saveConnection = async (context: GcsExtensionRouteContext) => {
       ...secretOptions(agencyId), value: { key: input.portalKey }
     })
     if (existing) {
-      if (existing.portal_url !== input.portalUrl || existing.portal_agency_id !== input.portalAgencyId) {
+      if (new URL(existing.portal_url).origin !== new URL(input.portalUrl).origin || existing.portal_agency_id !== input.portalAgencyId) {
         const linked = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_identity').select('agency_id')
           .where('agency_id', '=', agencyId).executeTakeFirst()
         if (linked) throw new Error('A connected agency with verified organizations cannot switch portals. Rotate its key or migrate the links explicitly.')
         const pending = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_operation').select('id')
           .where('agency_id', '=', agencyId).where('state', '!=', 'delivered').executeTakeFirst()
         if (pending) throw new Error('Deliver pending Portal operations before changing the Portal URL or agency code.')
+        const synchronizedForm = await transaction.selectFrom('extensions.gcs_ssc_portal_connector_form').select('id')
+          .where('agency_id', '=', agencyId)
+          .where(eb => eb.or([eb('portal_id', 'is not', null), eb('portal_revision', 'is not', null)]))
+          .executeTakeFirst()
+        if (synchronizedForm) throw createGcsExtensionUserError({
+          code: 'GCS_PORTAL_CONNECTION_FORMS_BOUND', statusCode: 409,
+          message: {
+            en: translateGcsExtensionMessage(messages, 'en', 'connectionFormsBound'),
+            fr: translateGcsExtensionMessage(messages, 'fr', 'connectionFormsBound')
+          }
+        })
       }
       await transaction.updateTable('extensions.gcs_ssc_portal_connector_connection')
         .set({ portal_url: input.portalUrl, portal_agency_id: input.portalAgencyId,

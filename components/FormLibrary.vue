@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { feedback, useLocalizedFeedback } from './localized-feedback'
 import { computed, ref, watch } from 'vue'
+import { usePortalRequest } from './usePortalRequest'
 import { FetchResponseError } from '@gcs-ssc/extensions'
 import { ExtensionBadge, ExtensionButton, ExtensionFormField, ExtensionInput, ExtensionModal, ExtensionResourceLayout, ExtensionTextarea, useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
 import { messages } from '../i18n/messages'
@@ -25,12 +26,28 @@ const language = computed<'en' | 'fr'>(() => /^fr(?:-|$)/i.test(locale.value) ? 
 const api = useExtensionApi('gcs-ssc-portal-connector')
 const forms = ref<FormSummary[]>([])
 const publications = ref<Publication[]>([])
-const loading = ref(true)
+const loadRequest = usePortalRequest()
+const loading = loadRequest.pending
 const error = useLocalizedFeedback(t)
-const createOpen = ref(false)
-const createBusy = ref(false)
+type CreateDraft = { titleEn: string; titleFr: string; introductionEn: string; introductionFr: string }
+type CreateSession = { kind: 'closed' } | { kind: 'editing'; draft: CreateDraft }
+const createSession = ref<CreateSession>({ kind: 'closed' })
+const createRequest = usePortalRequest()
+const createBusy = createRequest.pending
+const createOpen = computed({
+  get: () => createSession.value.kind === 'editing',
+  set: (open: boolean) => {
+    if (open) openCreate()
+    else if (!createBusy.value) {
+      createRequest.invalidate()
+      createSession.value = { kind: 'closed' }
+    }
+  }
+})
 const createError = useLocalizedFeedback(t)
-const createDraft = ref({ titleEn: '', titleFr: '', introductionEn: '', introductionFr: '' })
+const emptyDraft = (): CreateDraft => ({ titleEn: '', titleFr: '', introductionEn: '', introductionFr: '' })
+const closedDraft = emptyDraft()
+const createDraft = computed(() => createSession.value.kind === 'editing' ? createSession.value.draft : closedDraft)
 const introductionRequired = computed(() => Boolean(createDraft.value.introductionEn.trim() || createDraft.value.introductionFr.trim()))
 const createValid = computed(() => Boolean(
   createDraft.value.titleEn.trim() && createDraft.value.titleFr.trim()
@@ -39,28 +56,33 @@ const createValid = computed(() => Boolean(
   && createDraft.value.introductionEn.trim().length <= 2000 && createDraft.value.introductionFr.trim().length <= 2000
 ))
 const openCreate = () => {
-  createDraft.value = { titleEn: '', titleFr: '', introductionEn: '', introductionFr: '' }
+  createRequest.invalidate()
+  createSession.value = { kind: 'editing', draft: emptyDraft() }
   createError.value = ''
-  createOpen.value = true
 }
 const createForm = async () => {
-  if (!createValid.value || createBusy.value || props.disabled) return
-  createBusy.value = true
+  if (!createValid.value || createBusy.value || props.disabled || createSession.value.kind !== 'editing') return
+  const session = createSession.value
+  const request = createRequest.begin()
+  if (!request) return
+  const agencyId = props.agencyId
   createError.value = ''
   try {
-    const result = await api.post<{ survey: { id: string } }>(`/agencies/${props.agencyId}/forms`, {
+    const result = await api.post<{ survey: { id: string } }>(`/agencies/${agencyId}/forms`, {
       action: 'createDraft',
-      title: { en: createDraft.value.titleEn.trim(), fr: createDraft.value.titleFr.trim() },
-      introduction: { en: createDraft.value.introductionEn.trim(), fr: createDraft.value.introductionFr.trim() }
+      title: { en: session.draft.titleEn.trim(), fr: session.draft.titleFr.trim() },
+      introduction: { en: session.draft.introductionEn.trim(), fr: session.draft.introductionFr.trim() }
     })
-    createOpen.value = false
+    if (!createRequest.isCurrent(request) || createSession.value !== session) return
+    createRequest.succeed(request)
+    createSession.value = { kind: 'closed' }
     emit('open', result.survey.id)
   } catch (error) {
+    if (!createRequest.isCurrent(request) || createSession.value !== session) return
     createError.value = error instanceof FetchResponseError
       ? feedback('formDetailsCreateFailedWithApi', { message: error.message, status: error.response.status })
       : feedback('formDetailsCreateFailed')
-  } finally {
-    createBusy.value = false
+    createRequest.fail(request)
   }
 }
 const search = ref('')
@@ -127,31 +149,35 @@ const dateLabel = (value: string) => {
     year: 'numeric', month: 'short', day: 'numeric'
   }).format(date)
 }
-let loadSequence = 0
 const load = async () => {
-  const sequence = ++loadSequence
-  loading.value = true
+  const request = loadRequest.begin()
+  if (!request) return
+  const agencyId = props.agencyId
   error.value = ''
   try {
-    const result = await api.get<{ surveys: FormSummary[]; publications?: Publication[] }>(`/agencies/${props.agencyId}/forms`)
-    if (sequence !== loadSequence) return
+    const result = await api.get<{ surveys: FormSummary[]; publications?: Publication[] }>(`/agencies/${agencyId}/forms`)
+    if (!loadRequest.isCurrent(request)) return
     forms.value = result.surveys ?? []
     publications.value = result.publications ?? []
+    loadRequest.succeed(request)
   } catch {
-    if (sequence !== loadSequence) return
+    if (!loadRequest.isCurrent(request)) return
     error.value = feedback('formLibraryLoadFailed')
-  } finally {
-    if (sequence === loadSequence) loading.value = false
+    loadRequest.fail(request)
   }
 }
 watch(() => props.agencyId, () => {
-  createOpen.value = false
+  loadRequest.invalidate()
+  createRequest.invalidate()
+  createSession.value = { kind: 'closed' }
+  createError.value = ''
   forms.value = []
   publications.value = []
   search.value = ''
   statusFilter.value = 'all'
+  pagination.value.pageIndex = 0
   void load()
-}, { immediate: true })
+}, { immediate: true, flush: 'sync' })
 </script>
 
 <template>

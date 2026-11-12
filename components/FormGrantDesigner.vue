@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { supportedCurrencyCodes } from '@gcs-ssc/extensions/money'
 import { feedback, useLocalizedFeedback } from './localized-feedback'
-import { computed, onBeforeUnmount, ref, watch, type Ref } from 'vue'
+import { usePortalRequest } from './usePortalRequest'
+import { computed, ref, watch, type Ref } from 'vue'
 import { nanoid } from 'nanoid'
 import type { ActivityConfig, AdvancedQuestion, BudgetConfig, GrantOption } from '@gcs-ssc/survey'
 import { ExtensionButton, ExtensionCheckbox, ExtensionFormField, ExtensionInput, ExtensionSelect, ExtensionSelectMenu, useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
@@ -15,7 +16,9 @@ const { t, locale } = useExtensionI18n(messages)
 const api = useExtensionApi('gcs-ssc-portal-connector')
 const streams: Ref<Array<{ id: string; label: { en: string; fr: string } }>> = ref([])
 const stream: Ref<string> = ref(question.value.config.source.streamId ?? props.streamId ?? '')
-const busy: Ref<boolean> = ref(false)
+const streamRequest = usePortalRequest()
+const snapshotRequest = usePortalRequest()
+const busy = snapshotRequest.pending
 const error = useLocalizedFeedback(t)
 const locked = computed(() => props.disabled || busy.value || question.value.config.source.mode === 'stream')
 const currencyOptions = supportedCurrencyCodes.map(code => ({ value: code.toUpperCase(), label: code.toUpperCase() }))
@@ -24,37 +27,38 @@ const activities = computed(() => question.value.type === 'activities' ? questio
 const items = (options: GrantOption[]) => options.map(option => ({ value: option.id, label: option.label[/^fr(?:-|$)/i.test(locale.value) ? 'fr' : 'en'] }))
 const uid = () => `custom_${nanoid(10)}`
 const base = (): GrantOption => ({ id: uid(), label: { en: 'New option', fr: 'Nouveau choix' } })
-let request = 0
-let alive = true
-onBeforeUnmount(() => {
-  alive = false
-  request++
-})
 watch(() => props.agencyId, async agencyId => {
-  const current = ++request
+  const request = streamRequest.begin()
+  if (!request) return
   streams.value = []
   try {
     const result = await api.get<{ streams: typeof streams.value }>(`/agencies/${agencyId}/form-options`)
-    if (current === request) streams.value = result.streams
-  } catch { if (current === request) error.value = feedback('grantLoadFailed') }
-}, { immediate: true })
+    if (streamRequest.isCurrent(request)) streams.value = result.streams
+  } catch {
+    if (streamRequest.isCurrent(request)) { error.value = feedback('grantLoadFailed'); streamRequest.fail(request) }
+  } finally { streamRequest.succeed(request) }
+}, { immediate: true, flush: 'sync' })
+watch(() => [props.agencyId, question.value.id, stream.value], () => {
+  snapshotRequest.invalidate()
+}, { flush: 'sync' })
 /**
  * Copies a stream snapshot into this question after checking the request identity.
  */
 const sync = async () => {
   if (!stream.value || props.disabled || busy.value) return
-  const agencyId = props.agencyId, questionId = question.value.id, streamId = stream.value
-  busy.value = true
+  const agencyId = props.agencyId, streamId = stream.value
+  const request = snapshotRequest.begin()
+  if (!request) return
   error.value = ''
   try {
     const result = await api.get<{ budget: BudgetConfig; activities: ActivityConfig }>(`/agencies/${agencyId}/form-options/${streamId}`)
-    if (!alive || props.agencyId !== agencyId || question.value.id !== questionId || stream.value !== streamId) return
+    if (!snapshotRequest.isCurrent(request)) return
     if (question.value.type === 'budget') emit('configure', { ...result.budget,
       maxRows: question.value.config.maxRows, currencies: question.value.config.currencies })
     else emit('configure', { ...question.value.config, source: result.activities.source, outcomes: result.activities.outcomes })
   } catch {
-    if (alive && props.agencyId === agencyId && question.value.id === questionId) error.value = feedback('grantLoadFailed')
-  } finally { busy.value = false }
+    if (snapshotRequest.isCurrent(request)) { error.value = feedback('grantLoadFailed'); snapshotRequest.fail(request) }
+  } finally { snapshotRequest.succeed(request) }
 }
 type Catalog = 'categories' | 'fiscalYears' | 'costItems' | 'fundingTypes' | 'fundingSubtypes' | 'outcomes' | 'responsibleParties'
 /**

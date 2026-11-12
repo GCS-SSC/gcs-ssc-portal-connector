@@ -163,6 +163,41 @@ describe('organization synchronization and verification', () => {
     expect((await listOrganizations(context({ agencyId: '22', proponentId: '101' }))).organizations[0]?.active).toBe(true)
     expect(await enqueueInitialSync(context())).toEqual({ queued: 1 })
   })
+  it('preserves verified activity belonging only to another Agency catalog', async () => {
+    await cache('N-ABCDE', 11); await cache('N-BCDEF', 22)
+    await link('N-ABCDE', 101); await link('N-BCDEF', 102)
+    transport.mockImplementation(async (_url, options) => options?.method === 'POST' ? Response.json({}) :
+      Response.json({ organizations: [org()], nextAfter: null }))
+    expect(await refreshOrganizations(context())).toEqual({ synced: 1 })
+    expect((await sql`SELECT portal_organization_id,portal_active
+      FROM extensions.gcs_ssc_portal_connector_verification ORDER BY portal_organization_id`.execute(db)).rows)
+      .toEqual([{ portal_organization_id: 'N-ABCDE', portal_active: true }, { portal_organization_id: 'N-BCDEF', portal_active: true }])
+  })
+  it.each([true, false])('derives shared verification activity from remaining active catalog membership: %s', async otherAgencyActive => {
+    await cache('N-ABCDE', 11); await cache('N-ABCDE', 22, otherAgencyActive); await link()
+    transport.mockImplementation(async () => Response.json({ organizations: [], nextAfter: null }))
+    expect(await refreshOrganizations(context())).toEqual({ synced: 0 })
+    expect((await sql`SELECT agency_id::text,active FROM extensions.gcs_ssc_portal_connector_organization ORDER BY agency_id`.execute(db)).rows)
+      .toEqual([{ agency_id: '11', active: false }, { agency_id: '22', active: otherAgencyActive }])
+    expect((await sql`SELECT portal_active FROM extensions.gcs_ssc_portal_connector_verification`.execute(db)).rows)
+      .toEqual([{ portal_active: otherAgencyActive }])
+  })
+  it('restores affected shared activity from an active catalog in another Agency', async () => {
+    await cache('N-ABCDE', 11, false); await cache('N-ABCDE', 22); await link('N-ABCDE', 101, false)
+    transport.mockImplementation(async () => Response.json({ organizations: [], nextAfter: null }))
+    await refreshOrganizations(context())
+    expect((await sql`SELECT portal_active FROM extensions.gcs_ssc_portal_connector_verification`.execute(db)).rows)
+      .toEqual([{ portal_active: true }])
+  })
+  it('restores shared cached activity without replacing an already active Proponent link', async () => {
+    await cache('N-ABCDE', 11, false); await cache('N-ABCDE', 22); await link('N-ABCDE', 101, false)
+    await link('N-BCDEF', 101)
+    transport.mockImplementation(async () => Response.json({ organizations: [], nextAfter: null }))
+    await refreshOrganizations(context())
+    expect((await sql`SELECT portal_organization_id,portal_active
+      FROM extensions.gcs_ssc_portal_connector_verification ORDER BY portal_organization_id`.execute(db)).rows)
+      .toEqual([{ portal_organization_id: 'N-ABCDE', portal_active: false }, { portal_organization_id: 'N-BCDEF', portal_active: true }])
+  })
   it('handles empty catalogs while retaining cache and verification evidence', async () => {
     await cache(); await link()
     transport.mockImplementation(async () => Response.json({ organizations: [], nextAfter: null }))

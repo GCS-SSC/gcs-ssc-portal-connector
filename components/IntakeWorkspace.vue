@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { feedback, useLocalizedFeedback } from './localized-feedback'
-import { computed, ref, watch, type Ref } from 'vue'
+import { computed, onScopeDispose, ref, watch, type Ref } from 'vue'
 import { ExtensionButton, ExtensionFormField, ExtensionInput, ExtensionSaveButton, ExtensionSelect,
   useExtensionApi, useExtensionI18n } from '@gcs-ssc/extensions/ui'
 import { FetchResponseError } from '@gcs-ssc/extensions'
 import { messages } from '../i18n/messages'
 import { intakeDraftSchema, type IntakeDraft } from '../shared/intake'
 import FormCreator from './FormCreator.vue'
+import { usePortalRequest } from './usePortalRequest'
 
 type Intake = IntakeDraft & {
   id: string; revision: number; published: boolean; surveyId: string | null; surveyRevision: number | null
@@ -18,15 +19,40 @@ const api = useExtensionApi('gcs-ssc-portal-connector')
 const endpoint = computed(() => `/agencies/${props.agencyId}/intakes`)
 const intakes: Ref<Intake[]> = ref([])
 const streams: Ref<Stream[]> = ref([])
-const selectedId = ref<string | null>(null)
+type EditorState =
+  | { kind: 'list' }
+  | { kind: 'view'; intakeId: string; section: 'summary' | 'form' }
+  | { kind: 'create'; draft: IntakeDraft; requestKey: string }
+  | { kind: 'update'; intakeId: string; draft: IntakeDraft; revision: { kind: 'current' | 'conflict'; expected: number } }
+const editor: Ref<EditorState> = ref({ kind: 'list' })
+const loadRequest = usePortalRequest()
+const mutationRequest = usePortalRequest()
+const busy = mutationRequest.pending
+const loading = loadRequest.pending
+const selectedId = computed({
+  get: () => editor.value.kind === 'view' || editor.value.kind === 'update' ? editor.value.intakeId : null,
+  set: (value: string | null) => {
+    mutationRequest.invalidate()
+    editor.value = value ? { kind: 'view', intakeId: value, section: 'summary' } : { kind: 'list' }
+  }
+})
 const selected = computed(() => intakes.value.find((item) => item.id === selectedId.value) ?? null)
-const draft: Ref<IntakeDraft | null> = ref(null)
-const editingRevision: Ref<number | null> = ref(null)
-const revisionConflict = ref(false)
-const requestKey = ref('')
-const editingForm = ref(false)
-const busy = ref(false)
-const loading = ref(false)
+const draft = computed({
+  get: () => editor.value.kind === 'create' || editor.value.kind === 'update' ? editor.value.draft : null,
+  set: (value: IntakeDraft | null) => {
+    if (value !== null) return
+    mutationRequest.invalidate()
+    editor.value = editor.value.kind === 'update'
+      ? { kind: 'view', intakeId: editor.value.intakeId, section: 'summary' } : { kind: 'list' }
+  }
+})
+const revisionConflict = computed(() => editor.value.kind === 'update' && editor.value.revision.kind === 'conflict')
+const editingForm = computed({
+  get: () => editor.value.kind === 'view' && editor.value.section === 'form',
+  set: (value: boolean) => {
+    if (editor.value.kind === 'view') editor.value = { ...editor.value, section: value ? 'form' : 'summary' }
+  }
+})
 const error = useLocalizedFeedback(t)
 const message = useLocalizedFeedback(t)
 const search = ref('')
@@ -39,36 +65,66 @@ const filtered = computed(() => {
 })
 const localized = (item: { nameEn: string; nameFr: string }) =>
   /^fr(?:-|$)/i.test(locale.value) ? item.nameFr || item.nameEn : item.nameEn || item.nameFr
-let loadSequence = 0
-const load = async () => {
-  const sequence = ++loadSequence
-  loading.value = true
+let collectionGeneration: object | null = {}
+watch(() => [props.agencyId, props.disabled], () => {
+  collectionGeneration = {}
+  loadRequest.invalidate()
+  mutationRequest.invalidate()
+}, { flush: 'sync' })
+onScopeDispose(() => {
+  collectionGeneration = null
+})
+/**
+ * Refreshes the Agency collection without changing a replacement opening.
+ * @param preserveOpening Whether selection and navigation belong to another opening.
+ * @returns Refreshed, unavailable or retired readback evidence.
+ */
+const load = async (preserveOpening = false): Promise<'refreshed' | 'unavailable' | 'retired'> => {
+  const request = loadRequest.begin()
+  if (!request) return 'retired'
+  const generation = collectionGeneration
+  const opening = editor.value
+  const path = endpoint.value
   error.value = ''
   try {
-    const result = await api.get<{ intakes: Intake[]; streams: Stream[] }>(endpoint.value)
-    if (sequence !== loadSequence) return
+    const result = await api.get<{ intakes: Intake[]; streams: Stream[] }>(path)
+    if (!loadRequest.isCurrent(request) || collectionGeneration !== generation) return 'retired'
     intakes.value = result.intakes
     streams.value = result.streams
-    if (selected.value?.published) editingForm.value = false
-    if (selectedId.value && !result.intakes.some((item) => item.id === selectedId.value)) selectedId.value = null
+    if (!preserveOpening && editor.value === opening) {
+      if (selected.value?.published) editingForm.value = false
+      if (selectedId.value && !result.intakes.some((item) => item.id === selectedId.value)) selectedId.value = null
+    }
+    loadRequest.succeed(request)
+    return 'refreshed'
   } catch {
-    if (sequence === loadSequence) error.value = feedback('intakeLoadFailed')
-  } finally {
-    if (sequence === loadSequence) loading.value = false
+    if (!loadRequest.isCurrent(request) || collectionGeneration !== generation) return 'retired'
+    error.value = feedback('intakeLoadFailed')
+    loadRequest.fail(request)
+    return 'unavailable'
   }
 }
+/**
+ * Captures the live Agency collection independently of the child editor.
+ * @returns A readback callback, or null when new writes are unavailable.
+ */
+const captureIntakeSettlement = () => {
+  if (props.disabled || !collectionGeneration) return null
+  const generation = collectionGeneration
+  const opening = editor.value
+  return async () => collectionGeneration === generation ? await load(editor.value !== opening) : 'retired' as const
+}
 watch(() => props.agencyId, () => {
-  ++loadSequence
+  loadRequest.invalidate()
+  mutationRequest.invalidate()
   intakes.value = []
   streams.value = []
-  selectedId.value = null
-  draft.value = null
-  editingRevision.value = null
-  revisionConflict.value = false
-  editingForm.value = false
+  editor.value = { kind: 'list' }
   search.value = ''
+  fieldErrors.value = {}
+  message.value = ''
   void load()
-}, { immediate: true })
+}, { immediate: true, flush: 'sync' })
 const createRequestKey = () => {
   const bytes = crypto.getRandomValues(new Uint8Array(16))
   bytes[6] = (bytes[6]! & 0x0f) | 0x40
@@ -77,100 +133,108 @@ const createRequestKey = () => {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 const openCreate = () => {
-  selectedId.value = null
-  editingForm.value = false
-  requestKey.value = createRequestKey()
+  mutationRequest.invalidate()
+  editor.value = { kind: 'create', requestKey: createRequestKey(),
+    draft: { streamId: '', nameEn: '', nameFr: '', startDate: '', endDate: '' } }
   fieldErrors.value = {}
   message.value = ''
-  editingRevision.value = null
-  revisionConflict.value = false
-  draft.value = { streamId: '', nameEn: '', nameFr: '', startDate: '', endDate: '' }
 }
 const openDetails = () => {
-  if (!selected.value || selected.value.published) return
-  draft.value = { streamId: selected.value.streamId, nameEn: selected.value.nameEn,
-    nameFr: selected.value.nameFr, startDate: selected.value.startDate, endDate: selected.value.endDate }
+  const item = selected.value
+  if (!item || item.published) return
+  mutationRequest.invalidate()
+  editor.value = { kind: 'update', intakeId: item.id, revision: { kind: 'current', expected: item.revision },
+    draft: { streamId: item.streamId, nameEn: item.nameEn,
+      nameFr: item.nameFr, startDate: item.startDate, endDate: item.endDate } }
   fieldErrors.value = {}
   message.value = ''
-  editingRevision.value = selected.value.revision
-  revisionConflict.value = false
 }
 const acceptLatestRevision = () => {
-  if (!selected.value || !draft.value || !revisionConflict.value) return
-  editingRevision.value = selected.value.revision
-  revisionConflict.value = false
+  if (!selected.value || editor.value.kind !== 'update' || !revisionConflict.value) return
+  editor.value.revision = { kind: 'current', expected: selected.value.revision }
   error.value = ''
 }
 const save = async () => {
-  if (!draft.value || props.disabled || busy.value) return
-  if (revisionConflict.value) return
-  const parsed = intakeDraftSchema.safeParse(draft.value)
+  const session = editor.value
+  if (session.kind !== 'create' && session.kind !== 'update') return
+  if (props.disabled || busy.value || revisionConflict.value) return
+  const parsed = intakeDraftSchema.safeParse(session.draft)
   if (!parsed.success) {
     const errors: Partial<Record<keyof IntakeDraft, 'intakeDateOrder' | 'intakeRequired' | 'intakeInvalidField'>> = {}
     for (const issue of parsed.error.issues) {
       const path = issue.path[0] as keyof IntakeDraft
       if (path && !errors[path]) {
-        const value = draft.value[path]
-        errors[path] = path === 'endDate' && draft.value.endDate && draft.value.startDate
-          && draft.value.endDate < draft.value.startDate
+        const value = session.draft[path]
+        errors[path] = path === 'endDate' && session.draft.endDate && session.draft.startDate
+          && session.draft.endDate < session.draft.startDate
           ? 'intakeDateOrder' : !value.trim() ? 'intakeRequired' : 'intakeInvalidField'
       }
     }
     fieldErrors.value = errors
     return
   }
-  busy.value = true
+  const settleCollection = captureIntakeSettlement()
+  if (!settleCollection) return
+  const request = mutationRequest.begin()
+  if (!request) return
+  const path = endpoint.value
+  const body = session.kind === 'update'
+    ? { action: 'update', intakeId: session.intakeId, expectedRevision: session.revision.expected, ...parsed.data }
+    : { action: 'create', requestKey: session.requestKey, ...parsed.data }
   error.value = ''
   fieldErrors.value = {}
   try {
-    const result = await api.post<{ intakeId: string }>(endpoint.value, selected.value
-      ? { action: 'update', intakeId: selected.value.id, expectedRevision: editingRevision.value, ...parsed.data }
-      : { action: 'create', requestKey: requestKey.value, ...parsed.data })
-    selectedId.value = result.intakeId
-    draft.value = null
-    editingRevision.value = null
-    message.value = feedback('intakeSaved')
-    await load()
+    const result = await api.post<{ intakeId: string }>(path, body)
+    const current = mutationRequest.isCurrent(request) && editor.value === session
+    if (current) {
+      editor.value = { kind: 'view', intakeId: result.intakeId, section: 'summary' }
+      message.value = feedback('intakeSaved')
+    }
+    await settleCollection()
+    mutationRequest.succeed(request)
   } catch (failure) {
+    if (!mutationRequest.isCurrent(request) || editor.value !== session) return
     const payload = failure instanceof FetchResponseError ? failure.data : null
-    const code = payload && typeof payload === 'object' && 'data' in payload
-      ? (payload.data as { code?: unknown } | null)?.code : null
-    if (selected.value && failure instanceof FetchResponseError && failure.response.status === 409
+    const details = payload && typeof payload === 'object' && 'data' in payload ? payload.data : null
+    const code = details && typeof details === 'object' && 'code' in details ? details.code : null
+    if (session.kind === 'update' && failure instanceof FetchResponseError && failure.response.status === 409
       && code === 'GCS_PORTAL_INTAKE_REVISION_CONFLICT') {
-      const editedId = selected.value.id
       await load()
-      if (selected.value?.id === editedId) {
-        revisionConflict.value = true
-        error.value = feedback('intakeRevisionConflict')
-      }
+      if (!mutationRequest.isCurrent(request) || editor.value !== session) return
+      session.revision = { kind: 'conflict', expected: session.revision.expected }
+      error.value = feedback('intakeRevisionConflict')
     } else error.value = feedback('intakeSaveFailed')
+    mutationRequest.fail(request)
   }
-  finally { busy.value = false }
 }
 const act = async (action: 'publish' | 'withdraw' | 'delete') => {
   const item = selected.value
   if (!item || props.disabled || busy.value) return
   if (action === 'withdraw' && !confirm(t('intakeWithdrawConfirm'))) return
   if (action === 'delete' && !confirm(t('intakeDeleteConfirm'))) return
-  busy.value = true
+  const request = mutationRequest.begin()
+  if (!request) return
+  const session = editor.value
+  const path = endpoint.value
   error.value = ''
   message.value = ''
   try {
-    await api.post(endpoint.value, { action, intakeId: item.id })
-    editingForm.value = false
-    if (action === 'delete') selectedId.value = null
+    await api.post(path, { action, intakeId: item.id })
+    if (!mutationRequest.isCurrent(request) || editor.value !== session) return
+    editor.value = action === 'delete' ? { kind: 'list' } : { kind: 'view', intakeId: item.id, section: 'summary' }
     message.value = action === 'publish' ? feedback('intakePublishedNotice')
       : action === 'withdraw' ? feedback('intakeWithdrawnNotice') : feedback('intakeDeletedNotice')
     await load()
-  } catch { error.value = feedback('intakeActionFailed') }
-  finally { busy.value = false }
+    mutationRequest.succeed(request)
+  } catch {
+    if (!mutationRequest.isCurrent(request) || editor.value !== session) return
+    error.value = feedback('intakeActionFailed')
+    mutationRequest.fail(request)
+  }
 }
 const returnToList = () => {
-  selectedId.value = null
-  draft.value = null
-  editingRevision.value = null
-  revisionConflict.value = false
-  editingForm.value = false
+  mutationRequest.invalidate()
+  editor.value = { kind: 'list' }
   fieldErrors.value = {}
   message.value = ''
 }
@@ -179,7 +243,7 @@ const returnToList = () => {
 <template>
   <section class="space-y-5" :aria-label="t('intakes')" data-field-scope="extension.gcs-ssc-portal-connector.intake-workspace">
     <p v-if="error" role="alert" class="text-sm text-error">{{ error }}
-      <button v-if="!draft" type="button" class="ml-2 underline" @click="load">{{ t('intakeRetry') }}</button>
+      <button v-if="!draft" type="button" class="ml-2 underline" @click="load()">{{ t('intakeRetry') }}</button>
     </p>
     <p v-if="message" role="status" class="text-sm text-success">{{ message }}</p>
     <p v-if="loading" role="status" class="text-sm text-muted">{{ t('intakes') }}…</p>
@@ -251,7 +315,7 @@ const returnToList = () => {
       <FormCreator
         v-if="editingForm && !selected.published" :key="`${agencyId}:${selected.id}`" :agency-id="agencyId"
         :intake-id="selected.id" :selected-form-id="selected.surveyId ?? undefined"
-        :disabled="disabled || selected.published" @close="editingForm = false" @saved="load" />
+        :disabled="disabled || selected.published" :capture-intake-settlement="captureIntakeSettlement" @close="editingForm = false" />
       <div v-if="!editingForm" class="flex flex-wrap gap-3 border-t border-default pt-4">
         <ExtensionButton
           v-if="!selected.published" :disabled="disabled || busy || !selected.surveyId"
