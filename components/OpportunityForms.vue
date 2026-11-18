@@ -145,7 +145,7 @@ const act = async (action: 'publish' | 'withdraw') => {
       <p v-if="error" role="alert" class="text-sm text-error">{{ error }}
         <button type="button" class="ml-2 underline" @click="load">{{ t('formLibraryRetry') }}</button>
       </p>
-      <ExtensionResourceLayout v-if="!loading && !error" v-model:search="search" v-model:pagination="pagination"
+      <ExtensionResourceLayout table-id="extensions.gcs-ssc-portal-connector.opportunity-forms" v-if="!loading && !error" v-model:search="search" v-model:pagination="pagination"
         :data="visibleForms" :columns="columns" :total-records="filteredForms.length" :show-button="false"
         :search-placeholder="t('formLibrarySearch')">
         <template #order-cell="{ row }"><span class="text-muted">{{ row.original.order }}</span></template>

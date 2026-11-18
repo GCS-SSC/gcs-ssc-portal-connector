@@ -174,7 +174,6 @@ watch(() => props.agencyId, () => {
   forms.value = []
   publications.value = []
   search.value = ''
-  statusFilter.value = 'all'
   pagination.value.pageIndex = 0
   void load()
 }, { immediate: true, flush: 'sync' })
@@ -196,7 +195,9 @@ watch(() => props.agencyId, () => {
     <p v-if="loading" role="status" class="text-sm text-muted">{{ t('formLibraryLoading') }}</p>
 
     <ExtensionResourceLayout
+      table-id="extensions.gcs-ssc-portal-connector.form-library"
       v-else-if="!error" v-model:search="search" v-model:pagination="pagination"
+      v-model:status-filter="statusFilter" :preference-status-options="['all', 'published', 'changes', 'draft']"
       :data="visibleForms" :columns="columns" :total-records="filteredForms.length"
       :show-button="false"
       :search-placeholder="t('formLibrarySearch')">
