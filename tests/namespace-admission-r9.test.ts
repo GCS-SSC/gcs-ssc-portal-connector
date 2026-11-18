@@ -106,7 +106,7 @@ describe('captured Portal namespace at local admission', () => {
       ADD COLUMN _deleted boolean DEFAULT false`.execute(db)
     await sql`ALTER TABLE "Funding_Case_Agreement_Budget_Line_Item"
       ADD COLUMN egcs_fc_originalbudgetlineitem bigint, ADD COLUMN egcs_fc_fundingagreementbudgetfiscalyear bigint,
-      ADD COLUMN egcs_fc_organizationcostcategory bigint, ADD COLUMN egcs_fc_costsubsection text DEFAULT '',
+      ADD COLUMN egcs_fc_organizationcostcategory bigint, ADD COLUMN egcs_fc_costsubsection text DEFAULT '', ADD COLUMN egcs_fc_costsubsection_fr text DEFAULT '',
       ADD COLUMN egcs_fc_programfunding numeric DEFAULT 10000, ADD COLUMN egcs_fc_currency text DEFAULT 'CAD',
       ADD COLUMN _deleted boolean DEFAULT false`.execute(db)
     await sql`CREATE TABLE "Agency_Fiscal_Year"(id bigint PRIMARY KEY,egcs_ay_fiscalyear integer,_deleted boolean DEFAULT false)`.execute(db)

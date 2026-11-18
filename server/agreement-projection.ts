@@ -76,7 +76,8 @@ export const projectAgreement = async (
       COALESCE(year.egcs_fc_originalbudgetfiscalyear, year.id)::text AS fiscal_year_id,
       item.egcs_ay_name_en AS name_en, item.egcs_ay_name_fr AS name_fr,
       category.egcs_ay_name_en AS category_en,
-      line.egcs_fc_costsubsection AS subsection,
+      CASE WHEN btrim(line.egcs_fc_costsubsection) <> ''
+        THEN line.egcs_fc_costsubsection ELSE line.egcs_fc_costsubsection_fr END AS subsection,
       line.egcs_fc_programfunding::text AS program_funding,
       line.egcs_fc_currency::text AS currency
     FROM "Funding_Case_Agreement_Budget_Line_Item" line

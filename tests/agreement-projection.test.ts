@@ -20,7 +20,7 @@ describe('current portal Agreement budget projection', () => {
       CREATE TABLE "Agency_Cost_Category" (id bigint PRIMARY KEY, egcs_ay_name_en text, egcs_ay_active boolean DEFAULT true, _deleted boolean DEFAULT false);
       CREATE TABLE "Agency_Cost_Category_Line_Item" (id bigint PRIMARY KEY, egcs_ay_organizationcostcategory bigint, egcs_ay_name_en text, egcs_ay_name_fr text, egcs_ay_active boolean DEFAULT true, _deleted boolean DEFAULT false);
       CREATE TABLE "Transfer_Payment_Stream_Cost_Category_Line_Item" (id bigint PRIMARY KEY, egcs_tp_organizationcostcategory bigint, egcs_tp_active boolean DEFAULT true, _deleted boolean DEFAULT false);
-      CREATE TABLE "Funding_Case_Agreement_Budget_Line_Item" (id bigint PRIMARY KEY, egcs_fc_originalbudgetlineitem bigint, egcs_fc_fundingagreementbudgetfiscalyear bigint, egcs_fc_organizationcostcategory bigint, egcs_fc_costsubsection text, egcs_fc_programfunding numeric, egcs_fc_currency text, _deleted boolean DEFAULT false);
+      CREATE TABLE "Funding_Case_Agreement_Budget_Line_Item" (id bigint PRIMARY KEY, egcs_fc_originalbudgetlineitem bigint, egcs_fc_fundingagreementbudgetfiscalyear bigint, egcs_fc_organizationcostcategory bigint, egcs_fc_costsubsection text, egcs_fc_programfunding numeric, egcs_fc_currency text, _deleted boolean DEFAULT false, egcs_fc_costsubsection_fr text NOT NULL DEFAULT '');
     `)
   })
   beforeEach(async () => {
@@ -49,6 +49,13 @@ describe('current portal Agreement budget projection', () => {
     expect(result.fiscalYears).toEqual([{ id: '40', start_year: 2026 }])
     expect(result.lines).toEqual([{ id: '50', fiscal_year_id: '40', name_en: 'Eligible costs', name_fr: 'Coûts admissibles',
       category_en: 'Operations', subsection: 'Delivery', program_funding: { amount: '900719925474099301', currency: 'CAD' }, currency: 'CAD' }])
+  })
+  it('keeps the English subsection when present and otherwise projects French', async () => {
+    await engine.exec(`UPDATE "Funding_Case_Agreement_Budget_Line_Item" SET egcs_fc_costsubsection_fr = 'Livraison'`)
+    expect((await projectAgreement(db, '1', '31', '71')).lines[0]?.subsection).toBe('Delivery')
+
+    await engine.exec(`UPDATE "Funding_Case_Agreement_Budget_Line_Item" SET egcs_fc_costsubsection = '  '`)
+    expect((await projectAgreement(db, '1', '31', '71')).lines[0]?.subsection).toBe('Livraison')
   })
   it.each([['2', '31', '71'], ['1', '32', '71'], ['1', '31', '72']])('rejects unavailable Agency/Agreement/recipient %s/%s/%s', async (agency, agreement, proponent) => {
     await expect(projectAgreement(db, agency, agreement, proponent)).rejects.toThrow('not linked to that recipient in this Agency')
