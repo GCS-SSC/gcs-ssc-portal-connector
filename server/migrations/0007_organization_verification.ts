@@ -82,6 +82,7 @@ export default defineGcsExtensionMigration({
         IF TG_TABLE_NAME = 'Funding_Case_Agreement_Profile' THEN
           agreement_id := NEW.id;
         ELSIF TG_TABLE_NAME = 'Funding_Case_Agreement_Budget_Line_Item' THEN
+          IF NEW.egcs_fc_pendingfunding THEN RETURN NEW; END IF;
           SELECT year.egcs_fc_fundingagreement INTO agreement_id
           FROM "Funding_Case_Agreement_Budget_Fiscal_Year" year
           WHERE year.id = NEW.egcs_fc_fundingagreementbudgetfiscalyear;

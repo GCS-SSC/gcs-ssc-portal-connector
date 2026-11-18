@@ -110,5 +110,19 @@ describe('organization verification upgrade', () => {
     await sql`UPDATE "Funding_Case_Agreement_Profile" SET egcs_fc_transferpaymentstream=401 WHERE id=201`.execute(db)
     expect((await sql<{ agency_id: string }>`SELECT agency_id::text FROM extensions.gcs_ssc_portal_connector_outbox`.execute(db)).rows)
       .toEqual([{ agency_id: '11' }])
+
+    await sql`CREATE TABLE "Funding_Case_Agreement_Budget_Fiscal_Year"
+      (id bigint PRIMARY KEY, egcs_fc_fundingagreement bigint)`.execute(db)
+    await sql`CREATE TABLE "Funding_Case_Agreement_Budget_Line_Item"
+      (id bigint PRIMARY KEY, egcs_fc_fundingagreementbudgetfiscalyear bigint, egcs_fc_pendingfunding boolean)`.execute(db)
+    await sql`CREATE TRIGGER test_budget_change AFTER INSERT OR UPDATE ON "Funding_Case_Agreement_Budget_Line_Item"
+      FOR EACH ROW EXECUTE FUNCTION extensions.enqueue_portal_agreement_change()`.execute(db)
+    await sql`INSERT INTO "Funding_Case_Agreement_Budget_Fiscal_Year" VALUES (1,201)`.execute(db)
+    await sql`INSERT INTO "Funding_Case_Agreement_Budget_Line_Item" VALUES (2,1,true)`.execute(db)
+    const queued = async () => (await sql<{ agency_id: string }>`SELECT agency_id::text
+      FROM extensions.gcs_ssc_portal_connector_outbox ORDER BY id`.execute(db)).rows
+    expect(await queued()).toEqual([{ agency_id: '11' }])
+    await sql`UPDATE "Funding_Case_Agreement_Budget_Line_Item" SET egcs_fc_pendingfunding=false WHERE id=2`.execute(db)
+    expect(await queued()).toEqual([{ agency_id: '11' }, { agency_id: '11' }])
   })
 })

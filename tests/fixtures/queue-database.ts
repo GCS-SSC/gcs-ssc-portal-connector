@@ -10,7 +10,7 @@ export const migrateQueueFixture = async (db: ConnectorDb) => {
     CREATE TABLE "Applicant_Recipient_Profile" (id bigint PRIMARY KEY);
     CREATE TABLE "Funding_Case_Agreement_Profile" (id bigint PRIMARY KEY);
     CREATE TABLE "Funding_Case_Agreement_Budget_Fiscal_Year" (id bigint PRIMARY KEY);
-    CREATE TABLE "Funding_Case_Agreement_Budget_Line_Item" (id bigint PRIMARY KEY);
+    CREATE TABLE "Funding_Case_Agreement_Budget_Line_Item" (id bigint PRIMARY KEY, egcs_fc_pendingfunding boolean NOT NULL DEFAULT false);
     CREATE TABLE "Funding_Case_Agreement_Budget_Version" (id bigint PRIMARY KEY);
     CREATE TABLE "Funding_Case_Agreement_Applicant_Recipient" (id bigint PRIMARY KEY);
     CREATE TABLE "Funding_Case_Agreement_Claim" (id bigint PRIMARY KEY, egcs_fc_status bigint);

@@ -146,9 +146,14 @@ const importForecast = async (
         budgetLineItemId: line.egcs_fc_fundingagreementbudgetlineitem,
         month: line.egcs_fc_month,
         amount: line.egcs_fc_amount,
+        ...(line.egcs_fc_totalamount ? { totalAmount: line.egcs_fc_totalamount } : {}),
         currency: line.egcs_fc_currency
       }))
     })
+    if (result.status === 'total_cost_hidden')
+      throw new Error(`Forecast line ${result.lineNumber}: remove Total Cost for this Program Funding only stream.`)
+    if (result.status === 'total_cost_mismatch')
+      throw new Error(`Forecast line ${result.lineNumber}: Total Cost does not match the Stream funding rules.`)
     if (result.status !== 'created') throw new Error(`Forecast cannot be imported: ${result.status}.`)
     await transaction.insertInto('extensions.gcs_ssc_portal_connector_receipt').values({
       agency_id: agencyId,

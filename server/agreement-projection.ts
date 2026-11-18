@@ -89,7 +89,8 @@ export const projectAgreement = async (
     JOIN "Agency_Cost_Category_Line_Item" item ON item.id = stream_item.egcs_tp_organizationcostcategory
     JOIN "Agency_Cost_Category" category ON category.id = item.egcs_ay_organizationcostcategory
     WHERE year.egcs_fc_fundingagreement = ${agreementId}::bigint
-      AND line._deleted = false AND year._deleted = false AND version._deleted = false
+      AND line._deleted = false AND NOT line.egcs_fc_pendingfunding
+      AND year._deleted = false AND version._deleted = false
       AND version.egcs_fc_iscurrent = true AND stream_item._deleted = false
       AND item._deleted = false AND category._deleted = false
       AND stream_item.egcs_tp_active = true AND item.egcs_ay_active = true

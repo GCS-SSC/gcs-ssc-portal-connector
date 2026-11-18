@@ -56,6 +56,7 @@ export const forecastItemSchema = z.object({
       egcs_fc_fundingagreementbudgetlineitem: externalId,
       egcs_fc_month: z.number().int().min(0).max(11),
       egcs_fc_amount: money,
+      egcs_fc_totalamount: money.optional(),
       egcs_fc_currency: z.string().min(1)
     }).refine(line => line.egcs_fc_amount.currency === line.egcs_fc_currency.toUpperCase(), { path: ['egcs_fc_amount'], message: 'Currency mismatch' })).min(1).max(2400)
   })

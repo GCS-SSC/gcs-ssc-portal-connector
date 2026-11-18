@@ -20,7 +20,7 @@ describe('current portal Agreement budget projection', () => {
       CREATE TABLE "Agency_Cost_Category" (id bigint PRIMARY KEY, egcs_ay_name_en text, egcs_ay_active boolean DEFAULT true, _deleted boolean DEFAULT false);
       CREATE TABLE "Agency_Cost_Category_Line_Item" (id bigint PRIMARY KEY, egcs_ay_organizationcostcategory bigint, egcs_ay_name_en text, egcs_ay_name_fr text, egcs_ay_active boolean DEFAULT true, _deleted boolean DEFAULT false);
       CREATE TABLE "Transfer_Payment_Stream_Cost_Category_Line_Item" (id bigint PRIMARY KEY, egcs_tp_organizationcostcategory bigint, egcs_tp_active boolean DEFAULT true, _deleted boolean DEFAULT false);
-      CREATE TABLE "Funding_Case_Agreement_Budget_Line_Item" (id bigint PRIMARY KEY, egcs_fc_originalbudgetlineitem bigint, egcs_fc_fundingagreementbudgetfiscalyear bigint, egcs_fc_organizationcostcategory bigint, egcs_fc_costsubsection text, egcs_fc_programfunding numeric, egcs_fc_currency text, _deleted boolean DEFAULT false, egcs_fc_costsubsection_fr text NOT NULL DEFAULT '');
+      CREATE TABLE "Funding_Case_Agreement_Budget_Line_Item" (id bigint PRIMARY KEY, egcs_fc_originalbudgetlineitem bigint, egcs_fc_fundingagreementbudgetfiscalyear bigint, egcs_fc_organizationcostcategory bigint, egcs_fc_costsubsection text, egcs_fc_programfunding numeric, egcs_fc_currency text, _deleted boolean DEFAULT false, egcs_fc_costsubsection_fr text NOT NULL DEFAULT '', egcs_fc_pendingfunding boolean NOT NULL DEFAULT false);
     `)
   })
   beforeEach(async () => {
@@ -74,6 +74,12 @@ describe('current portal Agreement budget projection', () => {
     expect((await projectAgreement(db, '1', '31', '71')).lines.map(line => line.id)).toEqual(['50'])
     await engine.exec(`UPDATE "Agency_Cost_Category_Line_Item" SET egcs_ay_active=false`)
     await expect(projectAgreement(db, '1', '31', '71')).rejects.toThrow('Publish a current Agreement budget')
+  })
+  it('publishes a budget line only after pending funding is resolved', async () => {
+    await engine.exec(`UPDATE "Funding_Case_Agreement_Budget_Line_Item" SET egcs_fc_pendingfunding=true`)
+    await expect(projectAgreement(db, '1', '31', '71')).rejects.toThrow('Publish a current Agreement budget')
+    await engine.exec(`UPDATE "Funding_Case_Agreement_Budget_Line_Item" SET egcs_fc_pendingfunding=false`)
+    expect((await projectAgreement(db, '1', '31', '71')).lines.map(line => line.id)).toEqual(['50'])
   })
   it('accepts twenty fiscal years and rejects the twenty-first', async () => {
     await engine.exec(`INSERT INTO "Agency_Fiscal_Year" SELECT n+5000,2027+n-1000,false FROM generate_series(1000,1018) n;
